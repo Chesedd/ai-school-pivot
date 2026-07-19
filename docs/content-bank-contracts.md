@@ -1,4 +1,4 @@
-# Content Bank MVP — контракты фазы 2.1
+# Content Bank MVP — контракты фазы 2.2
 
 > Статус: проектный контракт v0.1. Этот документ фиксирует границы и
 > интерфейсы до создания схемы БД, HTTP-обработчиков и клиентских компонентов.
@@ -22,6 +22,29 @@ Content Bank хранит и предоставляет учебные зада�
 методические блоки принадлежат версии. Поля классификации (`subject_id`,
 `grade_id`, `topic_id`, `subtopic_id`) принадлежат карточке. Изменение
 классификации не создаёт версию содержания в v0.1, но отражается в аудите.
+
+## 2.2 Согласованная минимальная ERD и enum
+
+Все первичные ключи Content Bank и соответствующие внешние ключи имеют PostgreSQL тип `UUID`; UUID создаётся сервером. `created_by` и `approved_by` также UUID, но без FK на пользователя до этапа авторизации.
+
+| Таблица | Поля |
+| --- | --- |
+| `tasks` | `id`, `subject_id`, `grade_id`, `topic_id`, `subtopic_id NULL`, `created_by`, `created_at`, `archived_at NULL` |
+| `task_versions` | `id`, `task_id`, `version_no`, `title NULL`, `statement TEXT NOT NULL`, `task_type NOT NULL`, `answer_format NOT NULL`, `difficulty NOT NULL`, `source TEXT NULL`, `status NOT NULL DEFAULT draft`, `created_by`, `created_at`, `approved_by NULL`, `approved_at NULL` |
+| `task_skill_links` | `id`, `task_version_id`, `skill_id`, `weight NUMERIC(5,4) NOT NULL`, `is_primary NOT NULL` |
+
+`title`, `statement`, `task_type`, `answer_format` и `difficulty` принадлежат только версии. `statement` может быть пустой строкой в незавершённом draft, но перед review/approved application-валидатор требует непустой текст после trim.
+
+| PostgreSQL enum | Точные значения | Колонка |
+| --- | --- | --- |
+| `task_version_status` | `draft`, `review`, `approved`, `archived` | `task_versions.status`; NOT NULL, server default `draft` |
+| `task_type` | `test`, `calculation`, `problem`, `open_question`, `essay` | `task_versions.task_type`; NOT NULL, без default |
+| `answer_format` | `single_choice`, `multiple_choice`, `short_text`, `number`, `expression`, `long_text` | `task_versions.answer_format`; NOT NULL, без default |
+| `difficulty_level` | `basic`, `standard`, `advanced` | `task_versions.difficulty`; NOT NULL, без default |
+
+Матрица `task_type`/`answer_format` проверяется application-слоем, без сложного DB CHECK: `test` — `single_choice`, `multiple_choice`; `calculation` — `short_text`, `number`, `expression`; `problem` — `number`, `expression`, `long_text`; `open_question` — `short_text`, `long_text`; `essay` — `long_text`.
+
+`weight` лежит в `(0, 1]`; application-инвариант требует сумму весов навыков версии ровно `1.0000` и ровно один primary skill. `approved_at` и `approved_by` либо оба NULL, либо оба не NULL; зависимость этих полей от status DB не проверяет.
 
 ## 2. Термины и семантика версий
 
@@ -150,13 +173,13 @@ offset-пагинацию: `offset` (>=0, default 0), `limit` (1..100, default 2
 | GET `/catalog/{catalog_name}` | `catalog_name`: subjects, grades, topics, subtopics, skills; optional parent filters | 200 CatalogDTO | 404, 422 |
 | POST `/imports/preview` | `{ "format": "json", "rows": [...] }` | 200 ImportPreview | 422 |
 | POST `/imports/commit` | `{ "import_token": "uuid", "row_numbers": [1] }` | 201 ImportResult | 409, 422 |
-| POST `/duplicates/check` | `{ "prompt": "...", "subject_id": "uuid", "grade_id": "uuid", "topic_id": "uuid", "exclude_task_id": null }` | 200 DuplicateCandidates | 422 |
+| POST `/duplicates/check` | `{ "statement": "...", "subject_id": "uuid", "grade_id": "uuid", "topic_id": "uuid", "exclude_task_id": null }` | 200 DuplicateCandidates | 422 |
 
 `sort` принимает только `created_at`, `updated_at`, `title`, `latest_version_no`
 с префиксом `-` для убывания; default `-updated_at`. `status` фильтрует
 `latest_version.status`. `q` — простой нечувствительный к регистру поиск по
-`title` и `latest_version.prompt`; он не является обещанием полнотекстового
-поиска. `title` — необязательное, nullable поле карточки; `prompt` обязателен
+`title` и `latest_version.statement`; он не является обещанием полнотекстового
+поиска. `title` — необязательное, nullable поле карточки; `statement` обязателен
 для review и approval, но может быть пустым только в черновике.
 
 ## 7. JSON создания задания
@@ -166,19 +189,21 @@ offset-пагинацию: `offset` (>=0, default 0), `limit` (1..100, default 2
 
 ```json
 {
-  "title": "Линейное уравнение с дробями",
   "subject_id": "3d4f0c51-0bb2-4bbb-98e3-b92fb0af6177",
   "grade_id": "2f1a37af-03e2-4f7c-a7b8-fdd4a41a94b8",
   "topic_id": "c5e84748-755e-459d-aec1-e3bfa293f43d",
   "subtopic_id": null,
   "version": {
-    "prompt": "Решите уравнение (x - 1) / 2 = 3.",
-    "answer_format": "short_text",
-    "solution_language": "ru"
+    "title": "Линейное уравнение с дробями",
+    "statement": "Решите уравнение (x - 1) / 2 = 3.",
+    "task_type": "calculation",
+    "answer_format": "number",
+    "difficulty": "basic",
+    "source": null
   },
   "skill_links": [
-    { "skill_id": "a0dda428-f222-4b1a-9a7e-17e324947943", "is_primary": true },
-    { "skill_id": "2aa91564-7081-4a4c-8094-a95b6e09ec31", "is_primary": false }
+    { "skill_id": "a0dda428-f222-4b1a-9a7e-17e324947943", "weight": 0.7000, "is_primary": true },
+    { "skill_id": "2aa91564-7081-4a4c-8094-a95b6e09ec31", "weight": 0.3000, "is_primary": false }
   ]
 }
 ```
@@ -193,7 +218,6 @@ offset-пагинацию: `offset` (>=0, default 0), `limit` (1..100, default 2
 ```json
 {
   "id": "78d46611-94d0-4a4c-b6ef-c3302d0667e4",
-  "title": "Линейное уравнение с дробями",
   "subject": { "id": "3d4f0c51-0bb2-4bbb-98e3-b92fb0af6177", "name": "Математика" },
   "grade": { "id": "2f1a37af-03e2-4f7c-a7b8-fdd4a41a94b8", "name": "7 класс" },
   "topic": { "id": "c5e84748-755e-459d-aec1-e3bfa293f43d", "name": "Уравнения" },
@@ -203,9 +227,12 @@ offset-пагинацию: `offset` (>=0, default 0), `limit` (1..100, default 2
     "id": "16f2cfd4-167c-4f76-a5a0-768f8787d8f5",
     "version_no": 2,
     "status": "draft",
-    "prompt": "Решите уравнение (x - 1) / 2 = 3 и запишите ответ.",
-    "answer_format": "short_text",
-    "solution_language": "ru",
+    "title": "Линейное уравнение с дробями",
+    "statement": "Решите уравнение (x - 1) / 2 = 3 и запишите ответ.",
+    "task_type": "calculation",
+    "answer_format": "number",
+    "difficulty": "basic",
+    "source": null,
     "created_at": "2026-07-19T10:15:00Z",
     "created_by": { "id": "4a86fe9d-6c1f-4a68-b81e-f1838e44b01c", "display_name": "Автор" },
     "approved_at": null,
@@ -217,7 +244,7 @@ offset-пагинацию: `offset` (>=0, default 0), `limit` (1..100, default 2
     { "id": "16f2cfd4-167c-4f76-a5a0-768f8787d8f5", "version_no": 2, "status": "draft", "created_at": "2026-07-19T10:15:00Z", "approved_at": null }
   ],
   "skills": [
-    { "id": "a0dda428-f222-4b1a-9a7e-17e324947943", "name": "Решение линейных уравнений", "is_primary": true }
+    { "id": "a0dda428-f222-4b1a-9a7e-17e324947943", "name": "Решение линейных уравнений", "weight": 1.0000, "is_primary": true }
   ],
   "methodology": {
     "expected_solution": { "text": "x - 1 = 6; x = 7.", "max_points": 2 },
@@ -282,7 +309,7 @@ approved-версию в `archived`; audit/approved timestamp сохраняют
 ## 11. Требования для утверждения
 
 Мягкая проверка перед `review`: существуют subject/grade/topic и skills,
-ровно один primary skill, `prompt` непустой после trim, нет повторяющихся
+ровно один primary skill, `statement` непустой после trim, нет повторяющихся
 skills, а числовые поля не отрицательны. Она позволяет ещё не иметь полной
 методики.
 
@@ -307,15 +334,15 @@ skills, а числовые поля не отрицательны. Она по�
 
 ## 13. Инварианты
 
-1. `version_no` уникален в пределах одного `task` и начинается с 1.
+1. `version_no` уникален в пределах одного `task`, начинается с 1 и положителен.
 2. Approved-версия не изменяется напрямую; её содержание всегда snapshot.
-3. У версии ровно один primary skill; связи навыков не дублируются.
+3. У версии ровно один primary skill; связи навыков не дублируются; `weight` в `(0, 1]`, а их сумма для версии равна `1.0000`.
 4. `rubric.max_score` и `rubric_item.max_points` положительны; `order_index`
    однозначен внутри одной рубрики.
 5. Task, первая draft-версия и skill links создаются атомарно.
 6. Запрещённые статусные переходы возвращают 409 conflict с кодом
    `invalid_status_transition`.
-7. Клиент не управляет audit-полями, including created/approved actor и time.
+7. `approved_at` и `approved_by` либо оба NULL, либо оба не NULL; клиент не управляет audit-полями, including created/approved actor и time.
 8. Архивная карточка не принимает новые версии и не появляется в default list.
 
 ## 14. Порядок реализации
