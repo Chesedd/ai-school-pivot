@@ -19,6 +19,12 @@ services:
   backend:
     build:
       context: ./backend
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_ECHO: ${DATABASE_ECHO:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "${BACKEND_PORT}:8000"
     healthcheck:
