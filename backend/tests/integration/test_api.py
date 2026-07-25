@@ -21,10 +21,19 @@ from sqlalchemy import text
 os.environ["DATABASE_URL"] = database_url
 os.environ.setdefault("CONTENT_BANK_DEV_ACTOR_ID", "00000000-0000-4000-8000-000000000001")
 
-from app.db.session import async_session_factory  # noqa: E402
+from app.db.session import async_session_factory, engine  # noqa: E402
 from app.main import app  # noqa: E402
 
-pytestmark = pytest.mark.asyncio
+pytestmark = pytest.mark.asyncio(loop_scope="session")
+
+
+@pytest_asyncio.fixture(scope="session", autouse=True, loop_scope="session")
+async def dispose_application_engine():
+    """Dispose the shared application pool before its session loop closes."""
+    try:
+        yield
+    finally:
+        await engine.dispose()
 
 
 async def _assert_test_database(session) -> None:
@@ -48,7 +57,7 @@ async def _cleanup_catalog() -> None:
             )
 
 
-@pytest_asyncio.fixture(autouse=True)
+@pytest_asyncio.fixture(autouse=True, loop_scope="session")
 async def catalog():
     ids = {name: uuid4() for name in ("subject", "grade", "topic", "subtopic", "skill", "other_topic", "other_subtopic", "other_skill")}
     async with async_session_factory() as session:
