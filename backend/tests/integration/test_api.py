@@ -7,6 +7,7 @@ import os
 from uuid import uuid4
 
 import pytest
+import pytest_asyncio
 
 database_url = os.environ.get("TEST_DATABASE_URL", "")
 if not database_url:
@@ -26,18 +27,43 @@ from app.main import app  # noqa: E402
 pytestmark = pytest.mark.asyncio
 
 
-@pytest.fixture(autouse=True)
+async def _assert_test_database(session) -> None:
+    """Refuse destructive operations unless PostgreSQL confirms a test DB."""
+    current_database = await session.scalar(text("SELECT current_database()"))
+    if not current_database or not current_database.endswith("_test"):
+        raise RuntimeError(
+            "Integration cleanup is allowed only for a database ending in _test"
+        )
+
+
+async def _cleanup_catalog() -> None:
+    async with async_session_factory() as session:
+        async with session.begin():
+            await _assert_test_database(session)
+            await session.execute(
+                text(
+                    "TRUNCATE task_skill_links, task_versions, tasks, skills, "
+                    "subtopics, topics, grades, subjects CASCADE"
+                )
+            )
+
+
+@pytest_asyncio.fixture(autouse=True)
 async def catalog():
     ids = {name: uuid4() for name in ("subject", "grade", "topic", "subtopic", "skill", "other_topic", "other_subtopic", "other_skill")}
     async with async_session_factory() as session:
         async with session.begin():
+            await _assert_test_database(session)
             await session.execute(text("TRUNCATE task_skill_links, task_versions, tasks, skills, subtopics, topics, grades, subjects CASCADE"))
             await session.execute(text("INSERT INTO subjects(id,code,name) VALUES (:id,'s','Subject')"), {"id": ids["subject"]})
             await session.execute(text("INSERT INTO grades(id,number,name) VALUES (:id,7,'Grade')"), {"id": ids["grade"]})
             await session.execute(text("INSERT INTO topics(id,subject_id,grade_id,code,name) VALUES (:id,:s,:g,'t','Topic'),(:other,:s,:g,'o','Other')"), {"id": ids["topic"], "other": ids["other_topic"], "s": ids["subject"], "g": ids["grade"]})
             await session.execute(text("INSERT INTO subtopics(id,topic_id,code,name) VALUES (:id,:t,'st','Subtopic'),(:other,:ot,'ost','Other')"), {"id": ids["subtopic"], "t": ids["topic"], "other": ids["other_subtopic"], "ot": ids["other_topic"]})
             await session.execute(text("INSERT INTO skills(id,subtopic_id,code,name) VALUES (:id,:st,'sk','Skill'),(:other,:ost,'osk','Other')"), {"id": ids["skill"], "st": ids["subtopic"], "other": ids["other_skill"], "ost": ids["other_subtopic"]})
-    yield ids
+    try:
+        yield ids
+    finally:
+        await _cleanup_catalog()
 
 
 def payload(ids):
@@ -75,4 +101,6 @@ async def test_catalog_mismatch_leaves_no_task(catalog, mismatch):
 
 async def test_catalog_returns_seed_data(catalog):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client: response = await client.get("/api/content-bank/catalog/subjects")
-    assert response.status_code == 200 and response.json()["items"][0]["name"] == "Subject"
+    assert response.status_code == 200
+    subjects = {item["id"]: item for item in response.json()["items"]}
+    assert subjects[str(catalog["subject"])]["name"] == "Subject"
