@@ -1,8 +1,6 @@
-:root {
-  font-family: Arial, sans-serif;
-}
-
-body {
-  margin: 0;
-  padding: 2rem;
-}
+:root { font-family: Inter, system-ui, sans-serif; color: #172033; background: #f4f7fb; }
+body { margin: 0; } main { max-width: 880px; margin: 40px auto; padding: 32px; background: white; border-radius: 16px; box-shadow: 0 8px 30px #18233b14; }
+h1 { margin-bottom: 4px; } form { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 28px; }
+label { display: grid; gap: 7px; font-weight: 650; } input, select, textarea { padding: 11px; border: 1px solid #aeb8ca; border-radius: 8px; background: white; font: inherit; } textarea { min-height: 110px; resize: vertical; } .wide, button { grid-column: 1 / -1; } button { padding: 13px; border: 0; border-radius: 8px; color: white; background: #2859c5; font-weight: 700; cursor: pointer; } button:disabled { opacity: .6; }
+.alert { margin: 20px 0; padding: 14px; border-radius: 8px; overflow-wrap: anywhere; } .error { background: #feecec; color: #8b1a1a; } .success { background: #e9f8ee; color: #176331; } .success div { margin-top: 5px; font-family: monospace; }
+@media (max-width: 650px) { main { margin: 0; border-radius: 0; padding: 22px; } form { grid-template-columns: 1fr; } }

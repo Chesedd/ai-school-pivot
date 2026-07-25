@@ -1,9 +1,7 @@
 # AI School Pivot
 
-Technical skeleton for the Content Bank MVP: a FastAPI backend, React/Vite
-frontend, and PostgreSQL 17. The phase 2.2 backend supplies only database
-infrastructure, explicit Alembic migrations, and a demo/dev catalog seed; it
-has no Content Bank HTTP API or ORM entity models.
+Content Bank MVP phase 2.3: a FastAPI/SQLAlchemy create-task vertical slice,
+React/Vite creation form, and PostgreSQL 17. Alembic remains the schema owner.
 
 ## Local launch
 
@@ -34,3 +32,7 @@ docker compose exec backend alembic current
 # Seed the idempotent demo/dev catalog (grades 1–11 and one Informatics chain).
 docker compose exec backend python -m app.db.seed
 ```
+
+The creation form is at `/content-bank`; it loads the five read-only catalogs
+from `/api/content-bank/catalog/{catalog_name}` and submits to
+`/api/content-bank/tasks`.
