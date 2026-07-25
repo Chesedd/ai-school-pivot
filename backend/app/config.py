@@ -1,6 +1,7 @@
 """Centralized typed backend configuration."""
 
 from functools import lru_cache
+from uuid import UUID
 
 from pydantic import PostgresDsn
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -13,6 +14,8 @@ class Settings(BaseSettings):
 
     database_url: PostgresDsn
     database_echo: bool = False
+    content_bank_dev_actor_id: UUID
+    cors_origins: str = "http://localhost:5173"
 
 
 @lru_cache

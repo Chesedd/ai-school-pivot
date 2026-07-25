@@ -193,20 +193,26 @@ offset-пагинацию: `offset` (>=0, default 0), `limit` (1..100, default 2
   "grade_id": "2f1a37af-03e2-4f7c-a7b8-fdd4a41a94b8",
   "topic_id": "c5e84748-755e-459d-aec1-e3bfa293f43d",
   "subtopic_id": null,
-  "version": {
+  "initial_version": {
     "title": "Линейное уравнение с дробями",
     "statement": "Решите уравнение (x - 1) / 2 = 3.",
     "task_type": "calculation",
     "answer_format": "number",
     "difficulty": "basic",
-    "source": null
-  },
-  "skill_links": [
+    "source": null,
+    "skills": [
     { "skill_id": "a0dda428-f222-4b1a-9a7e-17e324947943", "weight": 0.7000, "is_primary": true },
     { "skill_id": "2aa91564-7081-4a4c-8094-a95b6e09ec31", "weight": 0.3000, "is_primary": false }
-  ]
+    ]
+  }
 }
 ```
+
+Для вертикального среза 2.3 конкретизирован ответ справочника: каждый
+`GET /catalog/{catalog_name}` возвращает `{ "catalog": "subjects", "items":
+[...] }`. Элемент всегда содержит `id`, `name` и nullable родительские ключи
+`subject_id`, `grade_id`, `topic_id`, `subtopic_id`; frontend фильтрует
+зависимые списки по этим ключам.
 
 ## 8. JSON полной карточки задания
 

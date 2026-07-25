@@ -4,3 +4,6 @@ SQLAlchemy==2.0.41
 asyncpg==0.30.0
 alembic==1.16.4
 pydantic-settings==2.10.1
+pytest==8.4.1
+pytest-asyncio==1.1.0
+httpx==0.28.1

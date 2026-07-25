@@ -1,0 +1,1 @@
+"""Content Bank persistence adapters."""

@@ -22,6 +22,8 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL}
       DATABASE_ECHO: ${DATABASE_ECHO:-false}
+      CONTENT_BANK_DEV_ACTOR_ID: ${CONTENT_BANK_DEV_ACTOR_ID}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
     depends_on:
       postgres:
         condition: service_healthy
@@ -37,6 +39,8 @@ services:
   frontend:
     build:
       context: ./frontend
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
     ports:
       - "${FRONTEND_PORT}:5173"
 
