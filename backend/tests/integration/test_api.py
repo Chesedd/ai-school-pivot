@@ -113,3 +113,62 @@ async def test_catalog_returns_seed_data(catalog):
     assert response.status_code == 200
     subjects = {item["id"]: item for item in response.json()["items"]}
     assert subjects[str(catalog["subject"])]["name"] == "Subject"
+
+
+async def _insert_archived_task(catalog) -> str:
+    task_id, version_id = uuid4(), uuid4()
+    async with async_session_factory() as session:
+        async with session.begin():
+            await _assert_test_database(session)
+            await session.execute(
+                text(
+                    "INSERT INTO tasks(id,subject_id,grade_id,topic_id,subtopic_id,created_by,archived_at) "
+                    "VALUES (:id,:subject,:grade,:topic,:subtopic,:actor,CURRENT_TIMESTAMP)"
+                ),
+                {"id": task_id, "subject": catalog["subject"], "grade": catalog["grade"], "topic": catalog["topic"], "subtopic": catalog["subtopic"], "actor": uuid4()},
+            )
+            await session.execute(
+                text(
+                    "INSERT INTO task_versions(id,task_id,version_no,title,statement,task_type,answer_format,difficulty,status,created_by) "
+                    "VALUES (:id,:task,1,'Archived','Archived statement','calculation','number','basic','archived',:actor)"
+                ),
+                {"id": version_id, "task": task_id, "actor": uuid4()},
+            )
+            await session.execute(
+                text(
+                    "INSERT INTO task_skill_links(task_version_id,skill_id,weight,is_primary) "
+                    "VALUES (:version,:primary,0.6000,true),(:version,:secondary,0.4000,false)"
+                ),
+                {"version": version_id, "primary": catalog["skill"], "secondary": catalog["other_skill"]},
+            )
+    return str(task_id)
+
+
+async def test_archived_task_is_hidden_without_status(catalog):
+    archived_id = await _insert_archived_task(catalog)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/api/content-bank/tasks")
+    assert response.status_code == 200
+    assert response.json() == {"items": [], "total": 0, "offset": 0, "limit": 20}
+    assert archived_id not in {item["task_id"] for item in response.json()["items"]}
+
+
+async def test_archived_status_returns_one_unduplicated_card(catalog):
+    archived_id = await _insert_archived_task(catalog)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/api/content-bank/tasks", params={"status": "archived", "limit": 1})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert len(body["items"]) == 1
+    assert [item["task_id"] for item in body["items"]] == [archived_id]
+    assert len({item["task_id"] for item in body["items"]}) == len(body["items"])
+
+
+async def test_draft_status_does_not_return_archived_card(catalog):
+    archived_id = await _insert_archived_task(catalog)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/api/content-bank/tasks", params={"status": "draft"})
+    assert response.status_code == 200
+    assert response.json()["total"] == 0
+    assert archived_id not in {item["task_id"] for item in response.json()["items"]}

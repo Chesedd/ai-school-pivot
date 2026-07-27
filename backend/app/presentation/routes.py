@@ -1,14 +1,35 @@
 """Thin Content Bank HTTP routes."""
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Response
+from typing import Annotated, Literal
+from uuid import UUID
 
-from app.application.content_bank import ActorContext, CreateTaskCommand, CreateTaskService, SkillLinkInput, VersionContentInput
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+
+from app.application.content_bank import ActorContext, CreateTaskCommand, CreateTaskService, ListTasksService, SkillLinkInput, TaskListQuery, VersionContentInput
 from app.config import Settings, get_settings
 from app.db.session import async_session_factory
 from app.infrastructure.repository import SQLAlchemyContentBankRepository, SQLAlchemyUnitOfWork
-from app.presentation.schemas import CatalogResponse, TaskCreateRequest, TaskResponse
+from app.presentation.schemas import CatalogResponse, TaskCreateRequest, TaskListPageResponse, TaskResponse
 
 router = APIRouter(prefix="/api/content-bank")
+
+
+@router.get("/tasks", response_model=TaskListPageResponse)
+async def list_tasks(
+    subject_id: UUID | None = None, grade_id: UUID | None = None,
+    topic_id: UUID | None = None, subtopic_id: UUID | None = None,
+    skill_id: UUID | None = None,
+    task_type: Literal["test", "calculation", "problem", "open_question", "essay"] | None = None,
+    difficulty: Literal["basic", "standard", "advanced"] | None = None,
+    status: Literal["draft", "review", "approved", "archived"] | None = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    sort_by: Literal["created_at", "title", "difficulty", "status", "version_no"] = "created_at",
+    sort_order: Literal["asc", "desc"] = "desc",
+) -> object:
+    query = TaskListQuery(subject_id, grade_id, topic_id, subtopic_id, skill_id, task_type, difficulty, status, offset, limit, sort_by, sort_order)
+    async with async_session_factory() as session:
+        return await ListTasksService(SQLAlchemyContentBankRepository(session)).list_tasks(query)
 
 
 @router.post("/tasks", response_model=TaskResponse, status_code=201)

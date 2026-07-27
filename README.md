@@ -1,7 +1,8 @@
 # AI School Pivot
 
-Content Bank MVP phase 2.3: a FastAPI/SQLAlchemy create-task vertical slice,
-React/Vite creation form, and PostgreSQL 17. Alembic remains the schema owner.
+Content Bank MVP phase 2.4: FastAPI/SQLAlchemy create and paginated list slices,
+a filterable React/Vite task table and creation form, and PostgreSQL 17.
+Alembic remains the schema owner.
 
 ## Local launch
 
@@ -33,6 +34,7 @@ docker compose exec backend alembic current
 docker compose exec backend python -m app.db.seed
 ```
 
-The creation form is at `/content-bank`; it loads the five read-only catalogs
-from `/api/content-bank/catalog/{catalog_name}` and submits to
-`/api/content-bank/tasks`.
+The task list and creation form are at `/content-bank`. They load the five
+read-only catalogs from `/api/content-bank/catalog/{catalog_name}`; the list
+uses `GET /api/content-bank/tasks` and the form submits to the same path with
+`POST`.

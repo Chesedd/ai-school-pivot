@@ -5,11 +5,11 @@ from __future__ import annotations
 from types import TracebackType
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
-from app.application.content_bank import ActorContext, CatalogRecord, CreateTaskCommand, SkillLinkDTO, TaskDTO, TaskVersionDTO
+from app.application.content_bank import ActorContext, CatalogRecord, CreateTaskCommand, SkillLinkDTO, TaskDTO, TaskListItem, TaskListPage, TaskListQuery, TaskVersionDTO
 from app.infrastructure.models import Grade, Skill, Subject, Subtopic, Task, TaskSkillLink, TaskVersion, Topic
 
 
@@ -54,6 +54,44 @@ class SQLAlchemyContentBankRepository:
         await self.session.refresh(task)
         await self.session.refresh(version)
         return TaskDTO(task.id, task.subject_id, task.grade_id, task.topic_id, task.subtopic_id, task.created_by, task.created_at, TaskVersionDTO(version.id, 1, version.title, version.statement, version.task_type, version.answer_format, version.difficulty, version.source, version.status, version.created_by, version.created_at, tuple(SkillLinkDTO(link.id, link.skill_id, skill_rows[link.skill_id].name, link.weight, link.is_primary) for link in links)))
+
+    async def list_tasks(self, query: TaskListQuery) -> TaskListPage:
+        latest_numbers = select(TaskVersion.task_id, func.max(TaskVersion.version_no).label("version_no")).group_by(TaskVersion.task_id).subquery()
+        latest = TaskVersion.__table__.alias("latest_version")
+        primary_link = TaskSkillLink.__table__.alias("primary_link")
+        primary_skill = Skill.__table__.alias("primary_skill")
+        columns = (
+            Task.id, Task.subject_id, Subject.name, Task.grade_id, Grade.name,
+            Task.topic_id, Topic.name, Task.subtopic_id, Subtopic.name,
+            latest.c.id, latest.c.version_no, latest.c.title, latest.c.statement,
+            latest.c.task_type, latest.c.answer_format, latest.c.difficulty,
+            latest.c.status, primary_skill.c.id, primary_skill.c.name,
+            Task.created_at, Task.archived_at,
+        )
+        base = (select(*columns).join(Subject, Subject.id == Task.subject_id)
+            .join(Grade, Grade.id == Task.grade_id).join(Topic, Topic.id == Task.topic_id)
+            .outerjoin(Subtopic, Subtopic.id == Task.subtopic_id)
+            .join(latest_numbers, latest_numbers.c.task_id == Task.id)
+            .join(latest, and_(latest.c.task_id == Task.id, latest.c.version_no == latest_numbers.c.version_no))
+            .outerjoin(primary_link, and_(primary_link.c.task_version_id == latest.c.id, primary_link.c.is_primary.is_(True)))
+            .outerjoin(primary_skill, primary_skill.c.id == primary_link.c.skill_id))
+        if query.status == "archived":
+            base = base.where(Task.archived_at.is_not(None))
+        else:
+            base = base.where(Task.archived_at.is_(None))
+        filters = ((Task.subject_id, query.subject_id), (Task.grade_id, query.grade_id), (Task.topic_id, query.topic_id), (Task.subtopic_id, query.subtopic_id), (latest.c.task_type, query.task_type), (latest.c.difficulty, query.difficulty), (latest.c.status, query.status))
+        for column, value in filters:
+            if value is not None:
+                base = base.where(column == value)
+        if query.skill_id is not None:
+            skill_match = select(TaskSkillLink.id).where(TaskSkillLink.task_version_id == latest.c.id, TaskSkillLink.skill_id == query.skill_id).exists()
+            base = base.where(skill_match)
+        total = int((await self.session.scalar(select(func.count()).select_from(base.order_by(None).subquery()))) or 0)
+        sort_columns = {"created_at": Task.created_at, "title": latest.c.title, "difficulty": latest.c.difficulty, "status": latest.c.status, "version_no": latest.c.version_no}
+        sort_column = sort_columns[query.sort_by]
+        ordered = sort_column.asc().nulls_last() if query.sort_order == "asc" else sort_column.desc().nulls_last()
+        rows = (await self.session.execute(base.order_by(ordered, Task.id.asc()).offset(query.offset).limit(query.limit))).all()
+        return TaskListPage(tuple(TaskListItem(*row) for row in rows), total, query.offset, query.limit)
 
     async def catalog(self, name: str) -> list[CatalogRecord]:
         if name == "subjects":

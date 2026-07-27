@@ -70,6 +70,37 @@ class TaskResponse(BaseModel):
     initial_version: TaskVersionResponse
 
 
+class TaskListItemResponse(BaseModel):
+    task_id: UUID
+    subject_id: UUID
+    subject_name: str
+    grade_id: UUID
+    grade_name: str
+    topic_id: UUID
+    topic_name: str
+    subtopic_id: UUID | None
+    subtopic_name: str | None
+    latest_version_id: UUID
+    version_no: int
+    title: str | None
+    statement: str
+    task_type: str
+    answer_format: str
+    difficulty: str
+    status: str
+    primary_skill_id: UUID | None
+    primary_skill_name: str | None
+    created_at: datetime
+    archived_at: datetime | None
+
+
+class TaskListPageResponse(BaseModel):
+    items: list[TaskListItemResponse]
+    total: int
+    offset: int
+    limit: int
+
+
 class CatalogItemResponse(BaseModel):
     id: UUID
     name: str
