@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from types import TracebackType
 from uuid import UUID
 
@@ -9,7 +10,7 @@ from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
-from app.application.content_bank import AcceptedAnswerDTO, ActorContext, CatalogRecord, CatalogRef, ConflictError, CreateTaskCommand, EMPTY_METHODOLOGY, ExpectedSolutionDTO, HintDTO, LockedVersion, MethodologyDTO, RubricDTO, RubricItemDTO, SaveMethodologyCommand, SkillLinkDTO, TaskCard, TaskCardVersion, TaskDTO, TaskListItem, TaskListPage, TaskListQuery, TaskVersionDTO, TaskVersionSummary, TypicalErrorDTO
+from app.application.content_bank import AcceptedAnswerDTO, ActorContext, ArchiveResult, CatalogRecord, CatalogRef, ConflictError, CreateTaskCommand, EMPTY_METHODOLOGY, ExpectedSolutionDTO, HintDTO, LockedVersion, MethodologyDTO, RubricDTO, RubricItemDTO, SaveMethodologyCommand, SkillLinkDTO, TaskCard, TaskCardVersion, TaskDTO, TaskListItem, TaskListPage, TaskListQuery, TaskVersionDTO, TaskVersionSummary, TypicalErrorDTO, VersionState
 from app.infrastructure.models import AcceptedAnswer, ExpectedSolution, Grade, Hint, Rubric, RubricItem, Skill, Subject, Subtopic, Task, TaskErrorLink, TaskSkillLink, TaskVersion, Topic, TypicalError
 
 
@@ -142,6 +143,88 @@ class SQLAlchemyContentBankRepository:
         latest_no = await self.session.scalar(select(func.max(TaskVersion.version_no)).where(TaskVersion.task_id == version.task_id))
         skill_ids = frozenset((await self.session.scalars(select(TaskSkillLink.skill_id).where(TaskSkillLink.task_version_id == version.id))).all())
         return LockedVersion(version.id, version.answer_format, version.status, version.version_no == latest_no, skill_ids)
+
+    async def lock_task_version(self, task_id: UUID, version_no: int) -> VersionState | None:
+        task = await self.session.scalar(select(Task).where(Task.id == task_id).with_for_update())
+        if task is None:
+            return None
+        version = await self.session.scalar(select(TaskVersion).where(TaskVersion.task_id == task_id, TaskVersion.version_no == version_no).with_for_update())
+        if version is None:
+            return None
+        latest_no = await self.session.scalar(select(func.max(TaskVersion.version_no)).where(TaskVersion.task_id == task_id))
+        links = (await self.session.execute(select(TaskSkillLink, Skill).join(Skill).where(TaskSkillLink.task_version_id == version.id).order_by(TaskSkillLink.id))).all()
+        topic = await self.session.get(Topic, task.topic_id)
+        subtopic = await self.session.get(Subtopic, task.subtopic_id) if task.subtopic_id else None
+        skill_subtopics = {row.id: row for row in (await self.session.scalars(
+            select(Subtopic).where(Subtopic.id.in_({skill.subtopic_id for _, skill in links}))
+        )).all()} if links else {}
+        classification_valid = bool(topic and topic.subject_id == task.subject_id and topic.grade_id == task.grade_id)
+        classification_valid = classification_valid and (task.subtopic_id is None or bool(subtopic and subtopic.topic_id == task.topic_id))
+        classification_valid = classification_valid and all(
+            skill.subtopic_id in skill_subtopics
+            and skill_subtopics[skill.subtopic_id].topic_id == task.topic_id
+            and (task.subtopic_id is None or skill.subtopic_id == task.subtopic_id)
+            for _, skill in links
+        )
+        return VersionState(task.id, version.id, version.version_no, version.status, version.statement, version.task_type,
+            version.answer_format, version.created_at, version.created_by, version.approved_at, version.approved_by,
+            task.archived_at, version.version_no == latest_no,
+            tuple(SkillLinkDTO(link.id, skill.id, skill.name, link.weight, link.is_primary) for link, skill in links),
+            await self._get_methodology(version.id), classification_valid)
+
+    async def set_version_status(self, task_version_id: UUID, status: str, approved_at: datetime | None = None, approved_by: UUID | None = None) -> None:
+        version = await self.session.get(TaskVersion, task_version_id)
+        assert version is not None
+        version.status = status
+        if approved_at is not None:
+            version.approved_at, version.approved_by = approved_at, approved_by
+        await self.session.flush()
+
+    async def archive_other_approved(self, task_id: UUID, except_version_id: UUID) -> None:
+        rows = (await self.session.scalars(select(TaskVersion).where(TaskVersion.task_id == task_id, TaskVersion.status == "approved", TaskVersion.id != except_version_id).with_for_update())).all()
+        for row in rows:
+            row.status = "archived"
+        await self.session.flush()
+
+    async def clone_version(self, task_id: UUID, source_version_no: int, actor: ActorContext) -> VersionState:
+        source = await self.session.scalar(select(TaskVersion).where(TaskVersion.task_id == task_id, TaskVersion.version_no == source_version_no))
+        assert source is not None
+        unfinished = await self.session.scalar(select(TaskVersion.id).where(TaskVersion.task_id == task_id, TaskVersion.version_no > source_version_no, TaskVersion.status.in_(("draft", "review"))))
+        if unfinished is not None:
+            raise ConflictError("У карточки уже есть незавершённая версия.")
+        next_no = int((await self.session.scalar(select(func.max(TaskVersion.version_no)).where(TaskVersion.task_id == task_id))) or 0) + 1
+        target = TaskVersion(task_id=task_id, version_no=next_no, title=source.title, statement=source.statement, task_type=source.task_type, answer_format=source.answer_format, difficulty=source.difficulty, source=source.source, status="draft", created_by=actor.actor_id)
+        self.session.add(target); await self.session.flush()
+        links = (await self.session.scalars(select(TaskSkillLink).where(TaskSkillLink.task_version_id == source.id))).all()
+        self.session.add_all([TaskSkillLink(task_version_id=target.id, skill_id=x.skill_id, weight=x.weight, is_primary=x.is_primary) for x in links])
+        solution = await self.session.scalar(select(ExpectedSolution).where(ExpectedSolution.task_version_id == source.id))
+        if solution: self.session.add(ExpectedSolution(task_version_id=target.id, solution_text=solution.solution_text, final_answer=solution.final_answer, solution_steps_json=list(solution.solution_steps_json)))
+        rubric = await self.session.scalar(select(Rubric).options(selectinload(Rubric.items)).where(Rubric.task_version_id == source.id))
+        if rubric:
+            copied = Rubric(task_version_id=target.id, max_score=rubric.max_score, grading_mode=rubric.grading_mode, notes=rubric.notes)
+            self.session.add(copied); await self.session.flush()
+            self.session.add_all([RubricItem(rubric_id=copied.id, criterion=x.criterion, max_points=x.max_points, required=x.required, common_failure=x.common_failure, order_index=x.order_index) for x in rubric.items])
+        answers = (await self.session.scalars(select(AcceptedAnswer).where(AcceptedAnswer.task_version_id == source.id))).all()
+        self.session.add_all([AcceptedAnswer(task_version_id=target.id, answer_value=x.answer_value, tolerance=x.tolerance, unit=x.unit, normalization_rule=x.normalization_rule) for x in answers])
+        errors = (await self.session.scalars(select(TaskErrorLink).where(TaskErrorLink.task_version_id == source.id))).all()
+        self.session.add_all([TaskErrorLink(task_version_id=target.id, typical_error_id=x.typical_error_id, detection_hint=x.detection_hint) for x in errors])
+        hints = (await self.session.scalars(select(Hint).where(Hint.task_version_id == source.id))).all()
+        self.session.add_all([Hint(task_version_id=target.id, level=x.level, hint_text=x.hint_text) for x in hints])
+        await self.session.flush(); await self.session.refresh(target)
+        result = await self.lock_task_version(task_id, next_no)
+        assert result is not None
+        return result
+
+    async def archive_task_versions(self, task_id: UUID, archived_at: datetime) -> ArchiveResult | None:
+        task = await self.session.scalar(select(Task).where(Task.id == task_id).with_for_update())
+        if task is None: return None
+        versions = (await self.session.scalars(select(TaskVersion).where(TaskVersion.task_id == task_id).order_by(TaskVersion.version_no.desc()).with_for_update())).all()
+        if task.archived_at is None:
+            task.archived_at = archived_at
+            for version in versions:
+                if version.status in {"draft", "review", "approved"}: version.status = "archived"
+            await self.session.flush()
+        return ArchiveResult(task.id, task.archived_at, versions[0].status)
 
     async def replace_methodology(self, command: SaveMethodologyCommand) -> MethodologyDTO:
         version_id = command.task_version_id

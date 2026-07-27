@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from types import TracebackType
 from typing import Protocol, Self
@@ -335,6 +335,67 @@ class ConflictError(Exception):
         self.code = code
 
 
+class IssuesError(Exception):
+    """A command validation failure that carries every discovered issue."""
+
+    def __init__(self, code: str, message: str, issues: list[ValidationDetail]) -> None:
+        super().__init__(message)
+        self.code, self.issues = code, issues
+
+
+@dataclass(frozen=True)
+class ValidationReport:
+    valid_for_approval: bool
+    issues: tuple[ValidationDetail, ...]
+
+
+@dataclass(frozen=True)
+class VersionState:
+    task_id: UUID
+    task_version_id: UUID
+    version_no: int
+    status: str
+    statement: str
+    task_type: str
+    answer_format: str
+    created_at: datetime
+    created_by: UUID
+    approved_at: datetime | None
+    approved_by: UUID | None
+    archived_at: datetime | None
+    is_latest: bool
+    skills: tuple[SkillLinkDTO, ...]
+    methodology: MethodologyDTO
+    classification_valid: bool = True
+
+
+@dataclass(frozen=True)
+class StatusCommandResult:
+    task_id: UUID
+    task_version_id: UUID
+    version_no: int
+    previous_status: str
+    status: str
+    created_at: datetime
+    created_by: UUID
+    approved_at: datetime | None
+    approved_by: UUID | None
+    validation: ValidationReport | None = None
+
+
+@dataclass(frozen=True)
+class CreateVersionCommand:
+    task_id: UUID
+    source_version_no: int
+
+
+@dataclass(frozen=True)
+class ArchiveResult:
+    task_id: UUID
+    archived_at: datetime
+    latest_status: str
+
+
 class ContentBankRepository(Protocol):
     async def get_subject(self, value: UUID) -> CatalogRecord | None: ...
     async def get_grade(self, value: UUID) -> CatalogRecord | None: ...
@@ -346,6 +407,11 @@ class ContentBankRepository(Protocol):
     async def get_task_card(self, task_id: UUID) -> TaskCard | None: ...
     async def lock_version(self, task_version_id: UUID) -> LockedVersion | None: ...
     async def replace_methodology(self, command: SaveMethodologyCommand) -> MethodologyDTO: ...
+    async def lock_task_version(self, task_id: UUID, version_no: int) -> VersionState | None: ...
+    async def set_version_status(self, task_version_id: UUID, status: str, approved_at: datetime | None = None, approved_by: UUID | None = None) -> None: ...
+    async def archive_other_approved(self, task_id: UUID, except_version_id: UUID) -> None: ...
+    async def clone_version(self, task_id: UUID, source_version_no: int, actor: ActorContext) -> VersionState: ...
+    async def archive_task_versions(self, task_id: UUID, archived_at: datetime) -> ArchiveResult | None: ...
 
 
 class UnitOfWork(Protocol):
@@ -516,3 +582,127 @@ class SaveMethodologyService:
             keys.append((error.skill_id, error.code.strip().casefold()))
         if len(keys) != len(set(keys)): details.append(ValidationDetail("typical_errors", "duplicate", "Пары skill_id и code не должны повторяться."))
         return details
+
+
+def _structural_issues(version: VersionState) -> list[ValidationDetail]:
+    issues: list[ValidationDetail] = []
+    if not version.statement.strip():
+        issues.append(ValidationDetail("statement", "missing_statement", "Добавьте условие задания."))
+    if not version.skills:
+        issues.append(ValidationDetail("skills", "missing_skill", "Добавьте хотя бы один навык."))
+    if sum(skill.is_primary for skill in version.skills) != 1:
+        issues.append(ValidationDetail("skills", "missing_primary_skill", "Укажите ровно один основной навык."))
+    ids = [skill.skill_id for skill in version.skills]
+    if len(ids) != len(set(ids)):
+        issues.append(ValidationDetail("skills", "duplicate_skill", "Навыки не должны повторяться."))
+    if any(skill.weight <= 0 or skill.weight > 1 for skill in version.skills) or sum(
+        (skill.weight for skill in version.skills), Decimal("0")
+    ) != Decimal("1.0000"):
+        issues.append(ValidationDetail("skills", "invalid_skill_weights", "Веса должны быть в диапазоне (0, 1] и давать сумму 1.0000."))
+    if version.answer_format not in COMPATIBLE_FORMATS.get(version.task_type, set()):
+        issues.append(ValidationDetail("answer_format", "incompatible_answer_format", "Формат ответа несовместим с типом задания."))
+    if not version.classification_valid:
+        issues.append(ValidationDetail("classification", "invalid_classification", "Классификация карточки и навыков несогласована."))
+    return issues
+
+
+def _methodology_issues(version: VersionState) -> list[ValidationDetail]:
+    methodology = version.methodology
+    issues: list[ValidationDetail] = []
+    if methodology.expected_solution is None or not methodology.expected_solution.solution_text.strip():
+        issues.append(ValidationDetail("methodology.expected_solution", "missing_expected_solution", "Добавьте эталонное решение."))
+    if methodology.rubric is None:
+        issues.append(ValidationDetail("methodology.rubric", "missing_rubric", "Добавьте рубрику оценивания."))
+    elif not methodology.rubric.items:
+        issues.append(ValidationDetail("methodology.rubric.items", "missing_rubric_items", "Добавьте хотя бы один критерий оценивания."))
+    return issues
+
+
+class StatusCycleService:
+    def __init__(self, uow: UnitOfWork) -> None:
+        self.uow = uow
+
+    async def submit_review(self, task_id: UUID, version_no: int, actor: ActorContext) -> StatusCommandResult:
+        async with self.uow:
+            version = await self._lock_active_latest(task_id, version_no, "draft")
+            structural = _structural_issues(version)
+            if structural:
+                raise IssuesError("validation_error", "Версия структурно некорректна.", structural)
+            warnings = _methodology_issues(version)
+            await self.uow.repository.set_version_status(version.task_version_id, "review")
+            await self.uow.commit()
+            return self._result(version, "review", ValidationReport(not warnings, tuple(warnings)))
+
+    async def return_draft(self, task_id: UUID, version_no: int, reason: str, actor: ActorContext) -> StatusCommandResult:
+        async with self.uow:
+            version = await self._lock_active_latest(task_id, version_no, "review")
+            await self.uow.repository.set_version_status(version.task_version_id, "draft")
+            await self.uow.commit()
+            return self._result(version, "draft")
+
+    async def approve(self, task_id: UUID, version_no: int, actor: ActorContext) -> StatusCommandResult:
+        async with self.uow:
+            version = await self._lock_active_latest(task_id, version_no, "review")
+            issues = _structural_issues(version) + _methodology_issues(version)
+            rubric = version.methodology.rubric
+            if rubric is not None:
+                if rubric.max_score <= 0:
+                    issues.append(ValidationDetail("methodology.rubric.max_score", "invalid_rubric_max_score", "Максимальный балл должен быть больше нуля."))
+                if any(item.max_points <= 0 for item in rubric.items):
+                    issues.append(ValidationDetail("methodology.rubric.items", "invalid_rubric_item_points", "Баллы каждого критерия должны быть больше нуля."))
+                if sum((item.max_points for item in rubric.items), Decimal("0")) != rubric.max_score:
+                    issues.append(ValidationDetail("methodology.rubric.max_score", "rubric_score_mismatch", "Максимальный балл должен совпадать с суммой баллов критериев."))
+            if issues:
+                raise IssuesError("approval_requirements_not_met", "Версия не соответствует требованиям утверждения.", issues)
+            now = datetime.now(timezone.utc)
+            await self.uow.repository.archive_other_approved(task_id, version.task_version_id)
+            await self.uow.repository.set_version_status(version.task_version_id, "approved", now, actor.actor_id)
+            await self.uow.commit()
+            result = self._result(version, "approved", ValidationReport(True, ()))
+            return StatusCommandResult(**{**result.__dict__, "approved_at": now, "approved_by": actor.actor_id})
+
+    async def _lock_active_latest(self, task_id: UUID, version_no: int, required: str) -> VersionState:
+        version = await self.uow.repository.lock_task_version(task_id, version_no)
+        if version is None:
+            raise NotFoundError("Версия задания не найдена.")
+        if version.archived_at is not None:
+            raise ConflictError("Архивная карточка недоступна для изменений.")
+        if not version.is_latest or version.status != required:
+            raise ConflictError("Недопустимый переход статуса.", "invalid_status_transition")
+        return version
+
+    @staticmethod
+    def _result(version: VersionState, status: str, validation: ValidationReport | None = None) -> StatusCommandResult:
+        return StatusCommandResult(version.task_id, version.task_version_id, version.version_no, version.status, status,
+            version.created_at, version.created_by, version.approved_at, version.approved_by, validation)
+
+
+class CreateVersionService:
+    def __init__(self, uow: UnitOfWork) -> None:
+        self.uow = uow
+
+    async def create(self, command: CreateVersionCommand, actor: ActorContext) -> VersionState:
+        async with self.uow:
+            source = await self.uow.repository.lock_task_version(command.task_id, command.source_version_no)
+            if source is None:
+                raise NotFoundError("Исходная версия задания не найдена.")
+            if source.archived_at is not None:
+                raise ConflictError("Архивная карточка недоступна для изменений.")
+            if source.status != "approved" or not source.is_latest:
+                raise ConflictError("Исходная версия не является последней утверждённой.", "invalid_source_version")
+            result = await self.uow.repository.clone_version(command.task_id, command.source_version_no, actor)
+            await self.uow.commit()
+            return result
+
+
+class ArchiveTaskService:
+    def __init__(self, uow: UnitOfWork) -> None:
+        self.uow = uow
+
+    async def archive(self, task_id: UUID, actor: ActorContext) -> ArchiveResult:
+        async with self.uow:
+            result = await self.uow.repository.archive_task_versions(task_id, datetime.now(timezone.utc))
+            if result is None:
+                raise NotFoundError("Задание не найдено.")
+            await self.uow.commit()
+            return result
