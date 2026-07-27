@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from decimal import Decimal
 from types import TracebackType
@@ -12,7 +12,7 @@ from uuid import UUID
 TASK_TYPES = frozenset({"test", "calculation", "problem", "open_question", "essay"})
 DIFFICULTIES = frozenset({"basic", "standard", "advanced"})
 STATUSES = frozenset({"draft", "review", "approved", "archived"})
-SORT_FIELDS = frozenset({"created_at", "title", "difficulty", "status", "version_no"})
+SORT_FIELDS = frozenset({"created_at", "updated_at", "title", "difficulty", "status", "version_no", "relevance"})
 SORT_ORDERS = frozenset({"asc", "desc"})
 
 
@@ -108,8 +108,9 @@ class TaskListQuery:
     status: str | None = None
     offset: int = 0
     limit: int = 20
-    sort_by: str = "created_at"
+    sort_by: str | None = None
     sort_order: str = "desc"
+    q: str | None = None
 
 
 @dataclass(frozen=True)
@@ -135,6 +136,7 @@ class TaskListItem:
     primary_skill_name: str | None
     created_at: datetime
     archived_at: datetime | None
+    updated_at: datetime
 
 
 @dataclass(frozen=True)
@@ -177,6 +179,7 @@ class TaskCardVersion:
     approved_by: UUID | None
     approved_at: datetime | None
     methodology: MethodologyDTO
+    updated_at: datetime
 
 
 @dataclass(frozen=True)
@@ -310,6 +313,7 @@ class TaskCard:
     latest_version: TaskCardVersion
     approved_version: TaskVersionSummary | None
     versions: tuple[TaskVersionSummary, ...]
+    updated_at: datetime
 
 
 @dataclass(frozen=True)
@@ -504,13 +508,20 @@ class ListTasksService:
         for field, value, allowed in (("task_type", query.task_type, TASK_TYPES), ("difficulty", query.difficulty, DIFFICULTIES), ("status", query.status, STATUSES)):
             if value is not None and value not in allowed:
                 details.append(ValidationDetail(field, "enum", "Недопустимое значение."))
-        if query.sort_by not in SORT_FIELDS:
+        normalized_q = query.q.strip() if query.q else None
+        normalized_q = normalized_q or None
+        if normalized_q is not None and len(normalized_q) > 200:
+            details.append(ValidationDetail("q", "max_length", "Поисковый запрос должен быть не длиннее 200 символов."))
+        effective_sort = query.sort_by or ("relevance" if normalized_q else "created_at")
+        if effective_sort not in SORT_FIELDS:
             details.append(ValidationDetail("sort_by", "enum", "Недопустимое поле сортировки."))
+        if effective_sort == "relevance" and normalized_q is None:
+            details.append(ValidationDetail("sort_by", "requires_q", "Сортировка по релевантности требует непустой q."))
         if query.sort_order not in SORT_ORDERS:
             details.append(ValidationDetail("sort_order", "enum", "Недопустимое направление сортировки."))
         if details:
             raise ApplicationError(details)
-        return await self.repository.list_tasks(query)
+        return await self.repository.list_tasks(replace(query, q=normalized_q, sort_by=effective_sort))
 
 
 class GetTaskCardService:

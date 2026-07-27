@@ -38,10 +38,11 @@ async def list_tasks(
     status: Literal["draft", "review", "approved", "archived"] | None = None,
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
-    sort_by: Literal["created_at", "title", "difficulty", "status", "version_no"] = "created_at",
+    sort_by: Literal["created_at", "updated_at", "title", "difficulty", "status", "version_no", "relevance"] | None = None,
     sort_order: Literal["asc", "desc"] = "desc",
+    q: str | None = None,
 ) -> object:
-    query = TaskListQuery(subject_id, grade_id, topic_id, subtopic_id, skill_id, task_type, difficulty, status, offset, limit, sort_by, sort_order)
+    query = TaskListQuery(subject_id, grade_id, topic_id, subtopic_id, skill_id, task_type, difficulty, status, offset, limit, sort_by, sort_order, q)
     async with async_session_factory() as session:
         return await ListTasksService(SQLAlchemyContentBankRepository(session)).list_tasks(query)
 
