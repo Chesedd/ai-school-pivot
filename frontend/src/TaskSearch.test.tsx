@@ -1,0 +1,40 @@
+import {afterEach,describe,expect,it,vi} from "vitest";
+import {cleanup,render,screen,waitFor} from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import {TaskCard,TaskList,type Catalogs} from "./main";
+import * as apiClient from "./api";
+
+afterEach(()=>{cleanup();vi.restoreAllMocks()});
+
+const catalogs:Catalogs={
+ subjects:[{id:"subject",name:"Математика"}],grades:[{id:"grade",name:"7 класс"}],
+ topics:[{id:"topic",name:"Движение",subject_id:"subject",grade_id:"grade"}],
+ subtopics:[{id:"subtopic",name:"Скорость",topic_id:"topic"}],
+ skills:[{id:"skill",name:"Решает задачи",subtopic_id:"subtopic"}],
+};
+const item={task_id:"task",title:"Задача о движении",statement:"Найдите скорость",subject_name:"Математика",grade_name:"7 класс",topic_name:"Движение",primary_skill_name:"Решает задачи",task_type:"calculation",difficulty:"basic",status:"draft",version_no:1,created_at:"2026-07-27T10:00:00Z",updated_at:"2026-07-27T12:34:00Z"};
+const response=(items:any[]=[item],total=items.length)=>new Response(JSON.stringify({items,total,offset:0,limit:20}),{status:200,headers:{"Content-Type":"application/json"}});
+const requests=()=>vi.mocked(fetch).mock.calls.map(([url])=>new URL(String(url)));
+const setup=(mock:ReturnType<typeof vi.spyOn>=vi.spyOn(globalThis,"fetch").mockResolvedValue(response()))=>{render(<TaskList catalogs={catalogs} refresh={0} navigate={()=>{}}/>);return mock};
+async function loaded(){await screen.findAllByText("Задача о движении")}
+async function submit(value:string,enter=false){const input=screen.getByRole("textbox",{name:"Поиск по заданиям"});await userEvent.clear(input);await userEvent.type(input,value);if(enter)await userEvent.type(input,"{enter}");else await userEvent.click(screen.getByRole("button",{name:"Найти"}));}
+
+describe("Content Bank search",()=>{
+ it("does not offer relevance without q",async()=>{setup();await loaded();expect(screen.queryByRole("option",{name:"По релевантности"})).toBeNull()});
+ it("does not request while text is only being entered",async()=>{const fetch=setup();await loaded();await userEvent.type(screen.getByRole("textbox",{name:"Поиск по заданиям"}),"движение");expect(fetch).toHaveBeenCalledTimes(1)});
+ it("submits q with the search button",async()=>{setup();await loaded();await submit("движение");await waitFor(()=>expect(requests().at(-1)!.searchParams.get("q")).toBe("движение"))});
+ it("submits q with Enter",async()=>{setup();await loaded();await submit("скорость",true);await waitFor(()=>expect(requests().at(-1)!.searchParams.get("q")).toBe("скорость"))});
+ it("trims surrounding whitespace",async()=>{setup();await loaded();await submit("  движение  ");await waitFor(()=>expect(requests().at(-1)!.searchParams.get("q")).toBe("движение"))});
+ it("treats whitespace-only submit as clearing search",async()=>{setup();await loaded();await submit("движение");await waitFor(()=>expect(requests().at(-1)!.searchParams.has("q")).toBe(true));await submit("   ");await waitFor(()=>expect(requests().at(-1)!.searchParams.has("q")).toBe(false))});
+ it("resets offset for a new query",async()=>{setup(vi.spyOn(globalThis,"fetch").mockResolvedValue(response(Array(25).fill(item),25)));await loaded();await userEvent.click(screen.getByRole("button",{name:"Далее"}));await waitFor(()=>expect(requests().at(-1)!.searchParams.get("offset")).toBe("20"));await submit("новый");await waitFor(()=>expect(requests().at(-1)!.searchParams.get("offset")).toBe("0"))});
+ it("preserves q on the next page",async()=>{setup(vi.spyOn(globalThis,"fetch").mockResolvedValue(response(Array(25).fill(item),25)));await loaded();await submit("движение");await waitFor(()=>expect(requests().at(-1)!.searchParams.get("q")).toBe("движение"));await userEvent.click(screen.getByRole("button",{name:"Далее"}));await waitFor(()=>{const p=requests().at(-1)!.searchParams;expect(p.get("q")).toBe("движение");expect(p.get("offset")).toBe("20")})});
+ it("combines q with active filters",async()=>{setup();await loaded();await userEvent.selectOptions(screen.getByLabelText("Предмет"),"subject");await submit("движение");await waitFor(()=>{const p=requests().at(-1)!.searchParams;expect(p.get("q")).toBe("движение");expect(p.get("subject_id")).toBe("subject")})});
+ it("Clear removes q and resets offset",async()=>{setup(vi.spyOn(globalThis,"fetch").mockResolvedValue(response(Array(25).fill(item),25)));await loaded();await submit("движение");await userEvent.click(screen.getByRole("button",{name:"Далее"}));await userEvent.click(screen.getByRole("button",{name:"Очистить"}));await waitFor(()=>{const p=requests().at(-1)!.searchParams;expect(p.has("q")).toBe(false);expect(p.get("offset")).toBe("0")})});
+ it("offers relevance and makes it the search default",async()=>{setup();await loaded();await submit("движение");await waitFor(()=>{expect(screen.getByRole("option",{name:"По релевантности"})).toBeTruthy();expect((screen.getByLabelText("Сортировка") as HTMLSelectElement).value).toBe("relevance");expect(requests().at(-1)!.searchParams.get("sort_by")).toBe("relevance")})});
+ it("sends explicit updated_at sort with q",async()=>{setup();await loaded();await submit("движение");await waitFor(()=>expect(screen.getByRole("option",{name:"По релевантности"})).toBeTruthy());await userEvent.selectOptions(screen.getByLabelText("Сортировка"),"updated_at");await waitFor(()=>{const p=requests().at(-1)!.searchParams;expect(p.get("q")).toBe("движение");expect(p.get("sort_by")).toBe("updated_at")})});
+ it("shows the search loading state",async()=>{let resolve!: (r:Response)=>void;setup(vi.spyOn(globalThis,"fetch").mockResolvedValueOnce(response()).mockImplementationOnce(()=>new Promise(r=>{resolve=r})));await loaded();await submit("движение");expect(screen.getByText("Поиск заданий…")).toBeTruthy();resolve(response());await loaded()});
+ it("shows an empty state containing the actual query",async()=>{setup(vi.spyOn(globalThis,"fetch").mockResolvedValueOnce(response()).mockResolvedValueOnce(response([],0)));await loaded();await submit("редкий запрос");expect(await screen.findByText("По запросу „редкий запрос“ задания не найдены")).toBeTruthy()});
+ it("shows an accessible API error",async()=>{setup(vi.spyOn(globalThis,"fetch").mockResolvedValueOnce(response()).mockResolvedValueOnce(new Response(JSON.stringify({error:{message:"Поиск недоступен"}}),{status:500,headers:{"Content-Type":"application/json"}})));await loaded();await submit("ошибка");expect((await screen.findByText("Поиск недоступен")).className).toBe("alert error")});
+ it("renders updated_at in the list row",async()=>{setup();await loaded();expect(screen.getByText(new Date(item.updated_at).toLocaleString("ru-RU"))).toBeTruthy()});
+ it("renders task updated_at in the card",async()=>{vi.spyOn(apiClient,"getTaskCard").mockResolvedValue({id:"task",subject:{id:"s",name:"Математика"},grade:{id:"g",name:"7 класс"},topic:{id:"t",name:"Движение"},subtopic:null,created_by:"actor",created_at:"2026-07-27T10:00:00Z",updated_at:item.updated_at,archived_at:null,latest_version:{id:"v",version_no:1,title:"Карточка",statement:"Условие",task_type:"calculation",answer_format:"number",difficulty:"basic",source:null,status:"draft",skills:[],created_by:"actor",created_at:"2026-07-27T10:00:00Z",updated_at:item.updated_at,approved_by:null,approved_at:null,methodology:{expected_solution:null,rubric:null,accepted_answers:[],typical_errors:[],hints:[]}},approved_version:null,versions:[]});render(<TaskCard taskId="task" navigate={()=>{}} onDirtyChange={()=>{}}/>);expect(await screen.findByText(new Date(item.updated_at).toLocaleString("ru-RU"))).toBeTruthy()});
+});

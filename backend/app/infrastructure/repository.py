@@ -6,7 +6,7 @@ from datetime import datetime
 from types import TracebackType
 from uuid import UUID
 
-from sqlalchemy import and_, delete, func, select
+from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
@@ -67,7 +67,7 @@ class SQLAlchemyContentBankRepository:
             latest.c.id, latest.c.version_no, latest.c.title, latest.c.statement,
             latest.c.task_type, latest.c.answer_format, latest.c.difficulty,
             latest.c.status, primary_skill.c.id, primary_skill.c.name,
-            Task.created_at, Task.archived_at,
+            Task.created_at, Task.archived_at, Task.updated_at,
         )
         base = (select(*columns).join(Subject, Subject.id == Task.subject_id)
             .join(Grade, Grade.id == Task.grade_id).join(Topic, Topic.id == Task.topic_id)
@@ -87,11 +87,21 @@ class SQLAlchemyContentBankRepository:
         if query.skill_id is not None:
             skill_match = select(TaskSkillLink.id).where(TaskSkillLink.task_version_id == latest.c.id, TaskSkillLink.skill_id == query.skill_id).exists()
             base = base.where(skill_match)
+        rank = None
+        if query.q is not None:
+            # SQLAlchemy binds q; no user text is interpolated into SQL.
+            tsquery = func.websearch_to_tsquery("russian", query.q)
+            base = base.where(latest.c.search_vector.op("@@")(tsquery))
+            rank = func.ts_rank_cd(latest.c.search_vector, tsquery)
         total = int((await self.session.scalar(select(func.count()).select_from(base.order_by(None).subquery()))) or 0)
-        sort_columns = {"created_at": Task.created_at, "title": latest.c.title, "difficulty": latest.c.difficulty, "status": latest.c.status, "version_no": latest.c.version_no}
+        sort_columns = {"created_at": Task.created_at, "updated_at": Task.updated_at, "title": latest.c.title, "difficulty": latest.c.difficulty, "status": latest.c.status, "version_no": latest.c.version_no, "relevance": rank}
         sort_column = sort_columns[query.sort_by]
         ordered = sort_column.asc().nulls_last() if query.sort_order == "asc" else sort_column.desc().nulls_last()
-        rows = (await self.session.execute(base.order_by(ordered, Task.id.asc()).offset(query.offset).limit(query.limit))).all()
+        ordering = [ordered]
+        if query.sort_by == "relevance":
+            ordering.append(Task.updated_at.desc())
+        ordering.append(Task.id.asc())
+        rows = (await self.session.execute(base.order_by(*ordering).offset(query.offset).limit(query.limit))).all()
         return TaskListPage(tuple(TaskListItem(*row) for row in rows), total, query.offset, query.limit)
 
     async def get_task_card(self, task_id: UUID) -> TaskCard | None:
@@ -132,8 +142,8 @@ class SQLAlchemyContentBankRepository:
             task.created_by, task.created_at, task.archived_at,
             TaskCardVersion(latest.id, latest.version_no, latest.title, latest.statement, latest.task_type,
                 latest.answer_format, latest.difficulty, latest.source, latest.status, tuple(skills),
-                latest.created_by, latest.created_at, latest.approved_by, latest.approved_at, methodology),
-            approved, summaries,
+                latest.created_by, latest.created_at, latest.approved_by, latest.approved_at, methodology, latest.updated_at),
+            approved, summaries, task.updated_at,
         )
 
     async def lock_version(self, task_version_id: UUID) -> LockedVersion | None:
@@ -176,6 +186,8 @@ class SQLAlchemyContentBankRepository:
         version = await self.session.get(TaskVersion, task_version_id)
         assert version is not None
         version.status = status
+        version.updated_at = func.now()
+        await self.session.execute(update(Task).where(Task.id == version.task_id).values(updated_at=func.now()))
         if approved_at is not None:
             version.approved_at, version.approved_by = approved_at, approved_by
         await self.session.flush()
@@ -184,6 +196,7 @@ class SQLAlchemyContentBankRepository:
         rows = (await self.session.scalars(select(TaskVersion).where(TaskVersion.task_id == task_id, TaskVersion.status == "approved", TaskVersion.id != except_version_id).with_for_update())).all()
         for row in rows:
             row.status = "archived"
+            row.updated_at = func.now()
         await self.session.flush()
 
     async def clone_version(self, task_id: UUID, source_version_no: int, actor: ActorContext) -> VersionState:
@@ -195,6 +208,7 @@ class SQLAlchemyContentBankRepository:
         next_no = int((await self.session.scalar(select(func.max(TaskVersion.version_no)).where(TaskVersion.task_id == task_id))) or 0) + 1
         target = TaskVersion(task_id=task_id, version_no=next_no, title=source.title, statement=source.statement, task_type=source.task_type, answer_format=source.answer_format, difficulty=source.difficulty, source=source.source, status="draft", created_by=actor.actor_id)
         self.session.add(target); await self.session.flush()
+        await self.session.execute(update(Task).where(Task.id == task_id).values(updated_at=func.now()))
         links = (await self.session.scalars(select(TaskSkillLink).where(TaskSkillLink.task_version_id == source.id))).all()
         self.session.add_all([TaskSkillLink(task_version_id=target.id, skill_id=x.skill_id, weight=x.weight, is_primary=x.is_primary) for x in links])
         solution = await self.session.scalar(select(ExpectedSolution).where(ExpectedSolution.task_version_id == source.id))
@@ -221,13 +235,18 @@ class SQLAlchemyContentBankRepository:
         versions = (await self.session.scalars(select(TaskVersion).where(TaskVersion.task_id == task_id).order_by(TaskVersion.version_no.desc()).with_for_update())).all()
         if task.archived_at is None:
             task.archived_at = archived_at
+            task.updated_at = func.now()
             for version in versions:
-                if version.status in {"draft", "review", "approved"}: version.status = "archived"
+                if version.status in {"draft", "review", "approved"}:
+                    version.status = "archived"
+                    version.updated_at = func.now()
             await self.session.flush()
         return ArchiveResult(task.id, task.archived_at, versions[0].status)
 
     async def replace_methodology(self, command: SaveMethodologyCommand) -> MethodologyDTO:
         version_id = command.task_version_id
+        await self.session.execute(update(TaskVersion).where(TaskVersion.id == version_id).values(updated_at=func.now()))
+        await self.session.execute(update(Task).where(Task.id == select(TaskVersion.task_id).where(TaskVersion.id == version_id).scalar_subquery()).values(updated_at=func.now()))
         rubric_ids = select(Rubric.id).where(Rubric.task_version_id == version_id)
         await self.session.execute(delete(RubricItem).where(RubricItem.rubric_id.in_(rubric_ids)))
         for model in (ExpectedSolution, Rubric, AcceptedAnswer, TaskErrorLink, Hint):

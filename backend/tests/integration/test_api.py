@@ -4,6 +4,7 @@ Run against a migrated database whose name ends in ``_test``.  The guard is
 deliberately evaluated before any destructive cleanup.
 """
 import os
+from datetime import datetime
 from uuid import uuid4
 
 import pytest
@@ -360,3 +361,196 @@ async def test_status_command_not_found_and_invalid_uuid_envelopes(catalog):
         missing_body = await client.post(f"/api/content-bank/tasks/{uuid4()}/versions", json={})
     assert missing.status_code == missing_source.status_code == 404 and missing.json()["error"]["code"] == "not_found"
     assert invalid.status_code == missing_body.status_code == 422
+
+
+async def _create_search_task(client, catalog, *, title=None, statement="Нейтральное условие", source=None):
+    data = payload(catalog)
+    data["initial_version"].update(title=title, statement=statement, source=source)
+    response = await client.post("/api/content-bank/tasks", json=data)
+    assert response.status_code == 201
+    return response.json()
+
+
+@pytest.mark.parametrize(("field", "value", "query"), [
+    ("title", "Кинематическое движение", "кинематическое"),
+    ("statement", "Рассчитайте скорость движения", "скорость"),
+    ("source", "Сборник олимпиадных задач", "олимпиадный"),
+])
+async def test_searches_each_weighted_latest_version_field(catalog, field, value, query):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        kwargs = {field: value}
+        created = await _create_search_task(client, catalog, **kwargs)
+        response = await client.get("/api/content-bank/tasks", params={"q": query})
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    assert response.json()["items"][0]["task_id"] == created["id"]
+
+
+async def test_russian_morphology_matches_different_word_forms(catalog):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await _create_search_task(client, catalog, statement="Исследование движений нескольких тел")
+        response = await client.get("/api/content-bank/tasks", params={"q": "движение"})
+    assert [item["task_id"] for item in response.json()["items"]] == [created["id"]]
+
+
+async def test_title_weight_ranks_above_statement_and_source(catalog):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        title = await _create_search_task(client, catalog, title="Импульс")
+        statement = await _create_search_task(client, catalog, statement="Найдите импульс")
+        source = await _create_search_task(client, catalog, source="Импульс")
+        response = await client.get("/api/content-bank/tasks", params={"q": "импульс"})
+    ids = [item["task_id"] for item in response.json()["items"]]
+    assert ids.index(title["id"]) < ids.index(statement["id"])
+    assert ids.index(statement["id"]) < ids.index(source["id"])
+
+
+async def test_search_is_limited_to_latest_version(catalog):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await _create_search_task(client, catalog, statement="Исторический квантор")
+        task_id = created["id"]
+        async with async_session_factory() as session:
+            await session.execute(text("UPDATE task_versions SET status='approved', approved_at=now(), approved_by=created_by WHERE task_id=:id"), {"id": task_id})
+            await session.commit()
+        cloned = await client.post(f"/api/content-bank/tasks/{task_id}/versions", json={"source_version_no": 1})
+        assert cloned.status_code == 201
+        async with async_session_factory() as session:
+            await session.execute(text("UPDATE task_versions SET statement='Только актуальный интеграл' WHERE task_id=:id AND version_no=2"), {"id": task_id})
+            await session.commit()
+        historical = await client.get("/api/content-bank/tasks", params={"q": "квантор"})
+        latest = await client.get("/api/content-bank/tasks", params={"q": "интеграл"})
+    assert historical.json()["total"] == 0
+    assert [item["task_id"] for item in latest.json()["items"]] == [task_id]
+
+
+async def test_search_combines_with_subject_and_skill_without_duplicates(catalog):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        first = await _create_search_task(client, catalog, statement="Общий поисковый маркер")
+        await _create_search_task(client, catalog, statement="Общий поисковый маркер")
+        response = await client.get("/api/content-bank/tasks", params={"q":"маркер", "subject_id":catalog["subject"], "skill_id":catalog["skill"]})
+        wrong_subject = await client.get("/api/content-bank/tasks", params={"q":"маркер", "subject_id":uuid4()})
+    ids = [item["task_id"] for item in response.json()["items"]]
+    assert first["id"] in ids and response.json()["total"] == 2
+    assert len(ids) == len(set(ids))
+    assert wrong_subject.json()["total"] == 0
+
+
+async def test_search_status_and_archived_semantics(catalog):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        active = await _create_search_task(client, catalog, statement="Статусный маркер")
+        archived = await _create_search_task(client, catalog, statement="Статусный маркер")
+        await client.post(f"/api/content-bank/tasks/{archived['id']}/archive")
+        draft = await client.get("/api/content-bank/tasks", params={"q":"маркер", "status":"draft"})
+        ordinary = await client.get("/api/content-bank/tasks", params={"q":"маркер"})
+        archived_response = await client.get("/api/content-bank/tasks", params={"q":"маркер", "status":"archived"})
+    assert [item["task_id"] for item in draft.json()["items"]] == [active["id"]]
+    assert [item["task_id"] for item in ordinary.json()["items"]] == [active["id"]]
+    assert [item["task_id"] for item in archived_response.json()["items"]] == [archived["id"]]
+
+
+async def test_search_total_precedes_pagination(catalog):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        for _ in range(3): await _create_search_task(client, catalog, statement="Пагинационный маркер")
+        response = await client.get("/api/content-bank/tasks", params={"q":"маркер", "offset":1, "limit":1})
+    assert response.json()["total"] == 3
+    assert len(response.json()["items"]) == 1
+
+
+async def test_search_stable_tie_breaker_and_explicit_updated_at_sort(catalog):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        first = await _create_search_task(client, catalog, statement="Равный ранг")
+        second = await _create_search_task(client, catalog, statement="Равный ранг")
+        async with async_session_factory() as session:
+            await session.execute(text("UPDATE tasks SET updated_at='2020-01-01T00:00:00Z' WHERE id IN (:a,:b)"), {"a":first["id"], "b":second["id"]})
+            await session.commit()
+        tied = await client.get("/api/content-bank/tasks", params={"q":"равный"})
+        async with async_session_factory() as session:
+            await session.execute(text("UPDATE tasks SET updated_at=CASE WHEN id=:a THEN '2021-01-01T00:00:00Z'::timestamptz ELSE '2022-01-01T00:00:00Z'::timestamptz END WHERE id IN (:a,:b)"), {"a":first["id"], "b":second["id"]})
+            await session.commit()
+        explicit = await client.get("/api/content-bank/tasks", params={"q":"равный", "sort_by":"updated_at", "sort_order":"desc"})
+    assert [x["task_id"] for x in tied.json()["items"]] == sorted([first["id"], second["id"]])
+    assert [x["task_id"] for x in explicit.json()["items"]] == [second["id"], first["id"]]
+
+
+async def test_empty_and_hostile_search_inputs_are_safe(catalog):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await _create_search_task(client, catalog)
+        whitespace = await client.get("/api/content-bank/tasks", params={"q":"   "})
+        hostile = await client.get("/api/content-bank/tasks", params={"q":'" ( - OR & !'})
+        too_long = await client.get("/api/content-bank/tasks", params={"q":"я" * 201})
+        relevance = await client.get("/api/content-bank/tasks", params={"sort_by":"relevance"})
+    assert [x["task_id"] for x in whitespace.json()["items"]] == [created["id"]]
+    assert hostile.status_code == 200
+    assert too_long.status_code == 422 and too_long.json()["error"]["code"] == "validation_error"
+    assert relevance.status_code == 422 and relevance.json()["error"]["code"] == "validation_error"
+
+
+async def test_search_schema_has_generated_vector_and_gin_index(catalog):
+    async with async_session_factory() as session:
+        generated = await session.scalar(text("SELECT is_generated FROM information_schema.columns WHERE table_schema='public' AND table_name='task_versions' AND column_name='search_vector'"))
+        indexdef = await session.scalar(text("SELECT indexdef FROM pg_indexes WHERE schemaname='public' AND tablename='task_versions' AND indexname='ix_task_versions_search_vector_gin'"))
+    assert generated == "ALWAYS"
+    assert indexdef is not None and "USING gin" in indexdef
+
+async def _force_display_timestamps_into_past(task_id, version_id):
+    async with async_session_factory() as session:
+        await session.execute(text("UPDATE tasks SET updated_at='2000-01-01T00:00:00Z' WHERE id=:task_id"), {"task_id":task_id})
+        await session.execute(text("UPDATE task_versions SET updated_at='2000-01-01T00:00:00Z' WHERE id=:version_id"), {"version_id":version_id})
+        await session.commit()
+
+
+async def test_updated_at_lifecycle_and_read_model_consistency(catalog):
+    past = "2000-01-01T00:00:00+00:00"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post("/api/content-bank/tasks", json=payload(catalog))
+        task_id = created.json()["id"]
+        version_id = created.json()["initial_version"]["id"]
+        initial_card = (await client.get(f"/api/content-bank/tasks/{task_id}")).json()
+        assert initial_card["updated_at"]
+        assert initial_card["latest_version"]["updated_at"]
+
+        await _force_display_timestamps_into_past(task_id, version_id)
+        assert (await client.put(f"/api/content-bank/task-versions/{version_id}/methodology", json=methodology(catalog))).status_code == 200
+        after_methodology = (await client.get(f"/api/content-bank/tasks/{task_id}")).json()
+        assert after_methodology["updated_at"] != past
+        assert after_methodology["latest_version"]["updated_at"] != past
+
+        await _force_display_timestamps_into_past(task_id, version_id)
+        assert (await client.post(f"/api/content-bank/tasks/{task_id}/versions/1/submit-review", json={})).status_code == 200
+        after_submit = (await client.get(f"/api/content-bank/tasks/{task_id}")).json()
+        assert after_submit["updated_at"] != past
+        assert after_submit["latest_version"]["updated_at"] != past
+
+        await _force_display_timestamps_into_past(task_id, version_id)
+        assert (await client.post(f"/api/content-bank/tasks/{task_id}/versions/1/return-to-draft", json={"reason":"Проверка timestamp"})).status_code == 200
+        after_return = (await client.get(f"/api/content-bank/tasks/{task_id}")).json()
+        assert after_return["updated_at"] != past
+        assert after_return["latest_version"]["updated_at"] != past
+
+        await client.post(f"/api/content-bank/tasks/{task_id}/versions/1/submit-review", json={})
+        await _force_display_timestamps_into_past(task_id, version_id)
+        assert (await client.post(f"/api/content-bank/tasks/{task_id}/versions/1/approve", json={})).status_code == 200
+        after_approve = (await client.get(f"/api/content-bank/tasks/{task_id}")).json()
+        assert after_approve["updated_at"] != past
+        assert after_approve["latest_version"]["updated_at"] != past
+
+        previous_version_updated_at = after_approve["latest_version"]["updated_at"]
+        async with async_session_factory() as session:
+            await session.execute(text("UPDATE tasks SET updated_at='2000-01-01T00:00:00Z' WHERE id=:id"), {"id":task_id})
+            await session.commit()
+        assert (await client.post(f"/api/content-bank/tasks/{task_id}/versions", json={"source_version_no":1})).status_code == 201
+        after_clone = (await client.get(f"/api/content-bank/tasks/{task_id}")).json()
+        assert after_clone["updated_at"] != past
+        assert after_clone["latest_version"]["updated_at"]
+        async with async_session_factory() as session:
+            unchanged_previous = await session.scalar(text("SELECT updated_at FROM task_versions WHERE id=:id"), {"id":version_id})
+        assert unchanged_previous == datetime.fromisoformat(previous_version_updated_at.replace("Z", "+00:00"))
+
+        latest_id = after_clone["latest_version"]["id"]
+        await _force_display_timestamps_into_past(task_id, latest_id)
+        assert (await client.post(f"/api/content-bank/tasks/{task_id}/archive")).status_code == 200
+        after_archive = (await client.get(f"/api/content-bank/tasks/{task_id}")).json()
+        assert after_archive["updated_at"] != past
+        assert after_archive["latest_version"]["updated_at"] != past
+
+        listed = (await client.get("/api/content-bank/tasks", params={"status":"archived"})).json()["items"][0]
+        assert listed["updated_at"] == after_archive["updated_at"]
