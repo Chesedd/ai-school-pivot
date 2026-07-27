@@ -5,11 +5,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
-from app.application.content_bank import AcceptedAnswerInput, ActorContext, CreateTaskCommand, CreateTaskService, ExpectedSolutionInput, GetTaskCardService, HintInput, ListTasksService, RubricInput, RubricItemInput, SaveMethodologyCommand, SaveMethodologyService, SkillLinkInput, TaskListQuery, TypicalErrorInput, VersionContentInput
+from app.application.content_bank import AcceptedAnswerInput, ActorContext, ApplicationError, ArchiveTaskService, CreateTaskCommand, CreateTaskService, CreateVersionCommand, CreateVersionService, ExpectedSolutionInput, GetTaskCardService, HintInput, ListTasksService, RubricInput, RubricItemInput, SaveMethodologyCommand, SaveMethodologyService, SkillLinkInput, StatusCycleService, TaskListQuery, TypicalErrorInput, ValidationDetail, VersionContentInput
 from app.config import Settings, get_settings
 from app.db.session import async_session_factory
 from app.infrastructure.repository import SQLAlchemyContentBankRepository, SQLAlchemyUnitOfWork
-from app.presentation.schemas import CatalogResponse, MethodologyPutRequest, MethodologyResponse, TaskCardResponse, TaskCreateRequest, TaskListPageResponse, TaskResponse
+from app.presentation.schemas import ArchiveRequest, ArchiveResponse, CatalogResponse, CreatedVersionResponse, CreateVersionRequest, EmptyRequest, MethodologyPutRequest, MethodologyResponse, ReturnToDraftRequest, StatusCommandResponse, TaskCardResponse, TaskCreateRequest, TaskListPageResponse, TaskResponse
 
 router = APIRouter(prefix="/api/content-bank")
 
@@ -60,6 +60,35 @@ async def create_task(payload: TaskCreateRequest, response: Response, settings: 
     result = await CreateTaskService(SQLAlchemyUnitOfWork(async_session_factory)).create_task(command, ActorContext(settings.content_bank_dev_actor_id))
     response.headers["Location"] = f"/api/content-bank/tasks/{result.id}"
     return result
+
+
+@router.post("/tasks/{task_id}/versions/{version_no}/submit-review", response_model=StatusCommandResponse)
+async def submit_review(task_id: UUID, version_no: int, payload: EmptyRequest, settings: Settings = Depends(get_settings)) -> object:
+    return await StatusCycleService(SQLAlchemyUnitOfWork(async_session_factory)).submit_review(task_id, version_no, ActorContext(settings.content_bank_dev_actor_id))
+
+
+@router.post("/tasks/{task_id}/versions/{version_no}/return-to-draft", response_model=StatusCommandResponse)
+async def return_to_draft(task_id: UUID, version_no: int, payload: ReturnToDraftRequest, settings: Settings = Depends(get_settings)) -> object:
+    if not payload.reason.strip():
+        raise ApplicationError([ValidationDetail("reason", "blank", "Причина не может быть пустой.")])
+    return await StatusCycleService(SQLAlchemyUnitOfWork(async_session_factory)).return_draft(task_id, version_no, payload.reason.strip(), ActorContext(settings.content_bank_dev_actor_id))
+
+
+@router.post("/tasks/{task_id}/versions/{version_no}/approve", response_model=StatusCommandResponse)
+async def approve(task_id: UUID, version_no: int, payload: EmptyRequest, settings: Settings = Depends(get_settings)) -> object:
+    return await StatusCycleService(SQLAlchemyUnitOfWork(async_session_factory)).approve(task_id, version_no, ActorContext(settings.content_bank_dev_actor_id))
+
+
+@router.post("/tasks/{task_id}/versions", response_model=CreatedVersionResponse, status_code=201)
+async def create_version(task_id: UUID, payload: CreateVersionRequest, response: Response, settings: Settings = Depends(get_settings)) -> object:
+    result = await CreateVersionService(SQLAlchemyUnitOfWork(async_session_factory)).create(CreateVersionCommand(task_id, payload.source_version_no), ActorContext(settings.content_bank_dev_actor_id))
+    response.headers["Location"] = f"/api/content-bank/tasks/{task_id}"
+    return result
+
+
+@router.post("/tasks/{task_id}/archive", response_model=ArchiveResponse)
+async def archive_task(task_id: UUID, payload: ArchiveRequest | None = None, settings: Settings = Depends(get_settings)) -> object:
+    return await ArchiveTaskService(SQLAlchemyUnitOfWork(async_session_factory)).archive(task_id, ActorContext(settings.content_bank_dev_actor_id))
 
 
 @router.get("/catalog/{catalog_name}", response_model=CatalogResponse)

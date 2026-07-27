@@ -418,3 +418,51 @@ summary. Ошибки используют envelope раздела 9: неизв
 not_found`; не latest/draft — `409 conflict`; несовпадающее глобальное
 определение `(skill_id, code)` — `409 typical_error_definition_conflict`;
 невалидный UUID, JSON или доменные данные — `422 validation_error`.
+
+## 16. Фаза 2.7A — статусные команды и создание версии
+
+Структурная проверка перед review блокирует команду (`422 validation_error`) и возвращает все нарушения в `error.details.issues`: непустой `statement`, наличие skill link, ровно один primary skill, отсутствие повторов, числовые веса в `(0, 1]` с суммой `1.0000`, совместимость `task_type`/`answer_format` и согласованность классификации. Методическая неполнота не блокирует review: `missing_expected_solution`, `missing_rubric`, `missing_rubric_items` (и `missing_accepted_answer`, если требование будет введено для формата ответа) возвращаются в `validation.issues`. `valid_for_approval` равен `false`, если есть предупреждения.
+
+Публичные команды (альтернативных путей через `task_version_id` нет):
+
+* `POST /api/content-bank/tasks/{task_id}/versions/{version_no}/submit-review`, request `{}`;
+* `POST /api/content-bank/tasks/{task_id}/versions/{version_no}/return-to-draft`, request `{ "reason": "Требуется дополнить критерии оценивания." }`; reason после trim обязателен, максимум 1000 символов. До фазы 2.9 он передаётся application-команде, но постоянно не хранится; хранение начинается вместе с Audit Log;
+* `POST /api/content-bank/tasks/{task_id}/versions/{version_no}/approve`, request `{}`;
+* `POST /api/content-bank/tasks/{task_id}/versions`, request `{ "source_version_no": 1 }`;
+* `POST /api/content-bank/tasks/{task_id}/archive`, optional request `{ "reason": "..." }` или без body.
+
+Status response (`submit-review`, `return-to-draft`, `approve`) имеет форму:
+
+```json
+{
+  "task_id": "uuid", "task_version_id": "uuid", "version_no": 1,
+  "previous_status": "draft", "status": "review",
+  "created_at": "2026-07-27T12:00:00Z", "created_by": "uuid",
+  "approved_at": null, "approved_by": null,
+  "validation": {"valid_for_approval": false, "issues": [
+    {"field": "methodology.expected_solution", "code": "missing_expected_solution", "message": "Добавьте эталонное решение."}
+  ]}
+}
+```
+
+`validation` равно `null`, когда отчёт неприменим; успешный approve возвращает пустой report с `valid_for_approval: true`. Строгая проверка включает структурные и методические требования раздела 11 и при любой ошибке возвращает `422 approval_requirements_not_met` с полным массивом `error.details.issues`. Неверный переход и действие над не-latest версией возвращают `409 invalid_status_transition`; архивная карточка — `409 conflict`; неизвестная пара task/version — `404 not_found`.
+
+Create-version response (`201`, `Location: /api/content-bank/tasks/{task_id}`):
+
+```json
+{
+  "task_id": "uuid", "task_version_id": "new-uuid", "version_no": 2,
+  "status": "draft", "created_at": "2026-07-27T12:00:00Z",
+  "created_by": "server-actor-uuid", "approved_at": null, "approved_by": null
+}
+```
+
+Источник должен принадлежать карточке и быть одновременно latest и текущей approved version. Неизвестный номер — `404 not_found`; существующий, но не latest approved источник — `409 invalid_source_version`. Клонируются version content, skill links, expected solution, rubric/items, accepted answers, task-error links с переиспользованием global typical errors и hints. Все version-owned UUID и server-owned metadata создаются заново.
+
+Archive response:
+
+```json
+{"task_id":"uuid", "archived_at":"2026-07-27T12:00:00Z", "latest_status":"archived"}
+```
+
+Архивирование идемпотентно, сохраняет первоначальный `archived_at` и approval metadata, переводит незавершённые и текущую approved версии в `archived`. Историческая approved version продолжает определяться по `approved_at`.
