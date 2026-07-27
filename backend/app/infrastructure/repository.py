@@ -74,8 +74,11 @@ class SQLAlchemyContentBankRepository:
             .join(latest_numbers, latest_numbers.c.task_id == Task.id)
             .join(latest, and_(latest.c.task_id == Task.id, latest.c.version_no == latest_numbers.c.version_no))
             .outerjoin(primary_link, and_(primary_link.c.task_version_id == latest.c.id, primary_link.c.is_primary.is_(True)))
-            .outerjoin(primary_skill, primary_skill.c.id == primary_link.c.skill_id)
-            .where(Task.archived_at.is_(None)))
+            .outerjoin(primary_skill, primary_skill.c.id == primary_link.c.skill_id))
+        if query.status == "archived":
+            base = base.where(Task.archived_at.is_not(None))
+        else:
+            base = base.where(Task.archived_at.is_(None))
         filters = ((Task.subject_id, query.subject_id), (Task.grade_id, query.grade_id), (Task.topic_id, query.topic_id), (Task.subtopic_id, query.subtopic_id), (latest.c.task_type, query.task_type), (latest.c.difficulty, query.difficulty), (latest.c.status, query.status))
         for column, value in filters:
             if value is not None:
