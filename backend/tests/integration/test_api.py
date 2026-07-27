@@ -172,3 +172,61 @@ async def test_draft_status_does_not_return_archived_card(catalog):
     assert response.status_code == 200
     assert response.json()["total"] == 0
     assert archived_id not in {item["task_id"] for item in response.json()["items"]}
+
+async def test_post_get_roundtrip_and_location(catalog):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post("/api/content-bank/tasks", json=payload(catalog))
+        response = await client.get(created.headers["Location"])
+    assert created.status_code == 201 and response.status_code == 200
+    body = response.json()
+    assert created.headers["Location"] == f'/api/content-bank/tasks/{created.json()["id"]}'
+    assert body["id"] == created.json()["id"]
+    assert body["subject"] == {"id": str(catalog["subject"]), "name": "Subject"}
+    assert body["grade"]["name"] == "Grade" and body["topic"]["name"] == "Topic"
+    assert body["subtopic"]["name"] == "Subtopic"
+    assert body["latest_version"]["created_by"] == "00000000-0000-4000-8000-000000000001"
+    assert body["latest_version"]["skills"][0]["is_primary"] is True
+    assert body["approved_version"] is None
+    assert [item["version_no"] for item in body["versions"]] == [1]
+
+
+async def test_card_not_found_and_invalid_uuid(catalog):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        missing = await client.get(f"/api/content-bank/tasks/{uuid4()}")
+        invalid = await client.get("/api/content-bank/tasks/not-a-uuid")
+    assert missing.status_code == 404 and missing.json()["error"]["code"] == "not_found"
+    assert invalid.status_code == 422 and invalid.json()["error"]["code"] == "validation_error"
+
+
+async def test_archived_card_remains_available_by_id(catalog):
+    task_id = await _insert_archived_task(catalog)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(f"/api/content-bank/tasks/{task_id}")
+    assert response.status_code == 200
+    assert response.json()["archived_at"] is not None
+
+
+async def test_latest_and_historical_approved_versions(catalog):
+    task_id, v1, v2, actor = uuid4(), uuid4(), uuid4(), uuid4()
+    async with async_session_factory() as session:
+        async with session.begin():
+            await _assert_test_database(session)
+            await session.execute(text("INSERT INTO tasks(id,subject_id,grade_id,topic_id,subtopic_id,created_by) VALUES (:id,:s,:g,:t,:st,:a)"), {"id":task_id,"s":catalog["subject"],"g":catalog["grade"],"t":catalog["topic"],"st":catalog["subtopic"],"a":actor})
+            await session.execute(text("INSERT INTO task_versions(id,task_id,version_no,title,statement,task_type,answer_format,difficulty,status,created_by,approved_by,approved_at) VALUES (:v1,:task,1,'Old','Approved','calculation','number','basic','archived',:a,:a,CURRENT_TIMESTAMP - interval '1 day'),(:v2,:task,2,'New','Draft','calculation','number','advanced','draft',:a,NULL,NULL)"), {"v1":v1,"v2":v2,"task":task_id,"a":actor})
+            await session.execute(text("INSERT INTO task_skill_links(task_version_id,skill_id,weight,is_primary) VALUES (:v2,:skill,1.0000,true)"), {"v2":v2,"skill":catalog["skill"]})
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(f"/api/content-bank/tasks/{task_id}")
+    body=response.json()
+    assert response.status_code == 200
+    assert body["latest_version"]["id"] == str(v2) and body["latest_version"]["version_no"] == 2
+    assert body["approved_version"]["id"] == str(v1) and body["approved_version"]["status"] == "archived"
+    assert [x["version_no"] for x in body["versions"]] == [2, 1]
+    assert len(body["latest_version"]["skills"]) == len({x["skill_id"] for x in body["latest_version"]["skills"]})
+
+
+async def test_existing_list_and_post_still_work_with_card_route(catalog):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post("/api/content-bank/tasks", json=payload(catalog))
+        listed = await client.get("/api/content-bank/tasks")
+    assert created.status_code == 201 and listed.status_code == 200
+    assert listed.json()["items"][0]["task_id"] == created.json()["id"]

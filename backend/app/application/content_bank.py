@@ -146,6 +146,54 @@ class TaskListPage:
 
 
 @dataclass(frozen=True)
+class CatalogRef:
+    id: UUID
+    name: str
+
+
+@dataclass(frozen=True)
+class TaskVersionSummary:
+    id: UUID
+    version_no: int
+    status: str
+    created_at: datetime
+    approved_at: datetime | None
+
+
+@dataclass(frozen=True)
+class TaskCardVersion:
+    id: UUID
+    version_no: int
+    title: str | None
+    statement: str
+    task_type: str
+    answer_format: str
+    difficulty: str
+    source: str | None
+    status: str
+    skills: tuple[SkillLinkDTO, ...]
+    created_by: UUID
+    created_at: datetime
+    approved_by: UUID | None
+    approved_at: datetime | None
+
+
+@dataclass(frozen=True)
+class TaskCard:
+    id: UUID
+    subject: CatalogRef
+    grade: CatalogRef
+    topic: CatalogRef
+    subtopic: CatalogRef | None
+    created_by: UUID
+    created_at: datetime
+    archived_at: datetime | None
+    latest_version: TaskCardVersion
+    approved_version: TaskVersionSummary | None
+    versions: tuple[TaskVersionSummary, ...]
+
+
+@dataclass(frozen=True)
 class ValidationDetail:
     field: str
     code: str
@@ -159,6 +207,10 @@ class ApplicationError(Exception):
         self.details = details
 
 
+class NotFoundError(Exception):
+    """An application-level missing aggregate error."""
+
+
 class ContentBankRepository(Protocol):
     async def get_subject(self, value: UUID) -> CatalogRecord | None: ...
     async def get_grade(self, value: UUID) -> CatalogRecord | None: ...
@@ -167,6 +219,7 @@ class ContentBankRepository(Protocol):
     async def get_skills(self, values: set[UUID]) -> dict[UUID, CatalogRecord]: ...
     async def create_task_with_initial_version(self, command: CreateTaskCommand, actor: ActorContext) -> TaskDTO: ...
     async def list_tasks(self, query: TaskListQuery) -> TaskListPage: ...
+    async def get_task_card(self, task_id: UUID) -> TaskCard | None: ...
 
 
 class UnitOfWork(Protocol):
@@ -266,3 +319,14 @@ class ListTasksService:
         if details:
             raise ApplicationError(details)
         return await self.repository.list_tasks(query)
+
+
+class GetTaskCardService:
+    def __init__(self, repository: ContentBankRepository) -> None:
+        self.repository = repository
+
+    async def get_task_card(self, task_id: UUID) -> TaskCard:
+        card = await self.repository.get_task_card(task_id)
+        if card is None:
+            raise NotFoundError("Задание не найдено.")
+        return card
