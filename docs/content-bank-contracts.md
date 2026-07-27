@@ -466,3 +466,71 @@ Archive response:
 ```
 
 Архивирование идемпотентно, сохраняет первоначальный `archived_at` и approval metadata, переводит незавершённые и текущую approved версии в `archived`. Историческая approved version продолжает определяться по `approved_at`.
+
+## 17. Фаза 2.8 — поиск актуальной версии и `updated_at`
+
+`GET /api/content-bank/tasks` принимает необязательный `q`. Значение обрезается с
+обоих краёв; отсутствующая или пустая после обрезки строка отключает поиск. Длина
+непустого значения ограничена 200 символами (`422 validation_error`). Поиск всегда
+применяется **только к `latest_version`** (версии с максимальным `version_no`): текст
+исторической версии сам по себе никогда не возвращает карточку. Он сочетается с
+фильтрами subject, grade, topic, subtopic, skill (`EXISTS`), task_type, difficulty,
+status и прежней archived-семантикой. Offset/limit не меняются, а `total` считается
+после поиска и фильтров, до пагинации.
+
+PostgreSQL хранит generated column `task_versions.search_vector` типа `tsvector`:
+
+```sql
+GENERATED ALWAYS AS (
+  setweight(to_tsvector('russian'::regconfig, COALESCE(title, '')), 'A') ||
+  setweight(to_tsvector('russian'::regconfig, COALESCE(statement, '')), 'B') ||
+  setweight(to_tsvector('russian'::regconfig, COALESCE(source, '')), 'C')
+) STORED
+```
+
+Таким образом, индексируются только title (A), statement (B), source (C). Методика,
+классификация, навыки и audit metadata не входят в вектор. Индекс создаётся точным
+SQL-эквивалентом `CREATE INDEX ix_task_versions_search_vector_gin ON task_versions
+USING gin (search_vector)`. Запрос строится параметризованным
+`websearch_to_tsquery('russian', :q)`, совпадение — `search_vector @@ tsquery`, rank —
+`ts_rank_cd(search_vector, tsquery)`. Внутренние `tsvector` и relevance в API не
+возвращаются.
+
+Допустим `sort_by=relevance`. Без q он даёт 422. При q и отсутствующем `sort_by`
+порядок: relevance DESC, `tasks.updated_at` DESC, `task_id` ASC. Явный sort сохраняет
+выбранное поле/направление; `created_at`, `updated_at`, `title`, `difficulty`,
+`status`, `version_no` продолжают работать, NULLS LAST применяется как прежде, и
+каждый порядок завершается стабильным `task_id ASC`. Без q effective default остаётся
+`created_at DESC`.
+
+В `tasks` и `task_versions` имеются `updated_at TIMESTAMPTZ NOT NULL DEFAULT
+CURRENT_TIMESTAMP`; миграция сначала заполняет существующие значения из
+`created_at`. `task_versions.updated_at` меняется при status/methodology/content
+changes, а `tasks.updated_at` — при изменениях, влияющих на отображаемую карточку:
+latest methodology/status, создании версии и архивировании. Клиент эти поля не
+передаёт. List item возвращает `task.updated_at`; карточка — `updated_at` карточки и
+`latest_version.updated_at`.
+
+Пример:
+
+```http
+GET /api/content-bank/tasks?q=%D0%B4%D0%B2%D0%B8%D0%B6%D0%B5%D0%BD%D0%B8%D0%B5&subject_id=2f8b...&offset=0&limit=20
+```
+
+```json
+{
+  "items": [{
+    "task_id": "c91d...", "title": "Равномерное движение",
+    "statement": "Найдите скорость...", "status": "draft",
+    "created_at": "2026-07-27T12:00:00Z",
+    "updated_at": "2026-07-27T12:05:00Z"
+  }],
+  "total": 1, "offset": 0, "limit": 20
+}
+```
+
+Карточка дополнительно содержит:
+
+```json
+{"updated_at":"2026-07-27T12:05:00Z","latest_version":{"updated_at":"2026-07-27T12:05:00Z"}}
+```
