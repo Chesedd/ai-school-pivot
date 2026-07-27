@@ -9,6 +9,12 @@ from types import TracebackType
 from typing import Protocol, Self
 from uuid import UUID
 
+TASK_TYPES = frozenset({"test", "calculation", "problem", "open_question", "essay"})
+DIFFICULTIES = frozenset({"basic", "standard", "advanced"})
+STATUSES = frozenset({"draft", "review", "approved", "archived"})
+SORT_FIELDS = frozenset({"created_at", "title", "difficulty", "status", "version_no"})
+SORT_ORDERS = frozenset({"asc", "desc"})
+
 
 @dataclass(frozen=True)
 class ActorContext:
@@ -91,6 +97,55 @@ class TaskDTO:
 
 
 @dataclass(frozen=True)
+class TaskListQuery:
+    subject_id: UUID | None = None
+    grade_id: UUID | None = None
+    topic_id: UUID | None = None
+    subtopic_id: UUID | None = None
+    skill_id: UUID | None = None
+    task_type: str | None = None
+    difficulty: str | None = None
+    status: str | None = None
+    offset: int = 0
+    limit: int = 20
+    sort_by: str = "created_at"
+    sort_order: str = "desc"
+
+
+@dataclass(frozen=True)
+class TaskListItem:
+    task_id: UUID
+    subject_id: UUID
+    subject_name: str
+    grade_id: UUID
+    grade_name: str
+    topic_id: UUID
+    topic_name: str
+    subtopic_id: UUID | None
+    subtopic_name: str | None
+    latest_version_id: UUID
+    version_no: int
+    title: str | None
+    statement: str
+    task_type: str
+    answer_format: str
+    difficulty: str
+    status: str
+    primary_skill_id: UUID | None
+    primary_skill_name: str | None
+    created_at: datetime
+    archived_at: datetime | None
+
+
+@dataclass(frozen=True)
+class TaskListPage:
+    items: tuple[TaskListItem, ...]
+    total: int
+    offset: int
+    limit: int
+
+
+@dataclass(frozen=True)
 class ValidationDetail:
     field: str
     code: str
@@ -111,6 +166,7 @@ class ContentBankRepository(Protocol):
     async def get_subtopic(self, value: UUID) -> CatalogRecord | None: ...
     async def get_skills(self, values: set[UUID]) -> dict[UUID, CatalogRecord]: ...
     async def create_task_with_initial_version(self, command: CreateTaskCommand, actor: ActorContext) -> TaskDTO: ...
+    async def list_tasks(self, query: TaskListQuery) -> TaskListPage: ...
 
 
 class UnitOfWork(Protocol):
@@ -188,3 +244,25 @@ class CreateTaskService:
         if command.initial_version.answer_format not in allowed:
             details.append(ValidationDetail("initial_version.answer_format", "incompatible", "Формат ответа несовместим с типом задания."))
         return details
+
+
+class ListTasksService:
+    def __init__(self, repository: ContentBankRepository) -> None:
+        self.repository = repository
+
+    async def list_tasks(self, query: TaskListQuery) -> TaskListPage:
+        details: list[ValidationDetail] = []
+        if query.offset < 0:
+            details.append(ValidationDetail("offset", "range", "Offset должен быть не меньше 0."))
+        if query.limit < 1 or query.limit > 100:
+            details.append(ValidationDetail("limit", "range", "Limit должен быть от 1 до 100."))
+        for field, value, allowed in (("task_type", query.task_type, TASK_TYPES), ("difficulty", query.difficulty, DIFFICULTIES), ("status", query.status, STATUSES)):
+            if value is not None and value not in allowed:
+                details.append(ValidationDetail(field, "enum", "Недопустимое значение."))
+        if query.sort_by not in SORT_FIELDS:
+            details.append(ValidationDetail("sort_by", "enum", "Недопустимое поле сортировки."))
+        if query.sort_order not in SORT_ORDERS:
+            details.append(ValidationDetail("sort_order", "enum", "Недопустимое направление сортировки."))
+        if details:
+            raise ApplicationError(details)
+        return await self.repository.list_tasks(query)
