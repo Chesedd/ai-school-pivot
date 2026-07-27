@@ -278,3 +278,85 @@ async def test_methodology_rejects_foreign_skill_and_non_number_tolerance(catalo
         response=await client.put(f"/api/content-bank/task-versions/{version_id}/methodology",json=method)
     assert response.status_code == 422 and response.json()["error"]["code"] == "validation_error"
     async with async_session_factory() as session: assert await session.scalar(text("SELECT count(*) FROM expected_solutions")) == 0
+
+async def test_status_cycle_warnings_reason_and_strict_rollback(catalog):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post("/api/content-bank/tasks", json=payload(catalog)); task_id = created.json()["id"]
+        review = await client.post(f"/api/content-bank/tasks/{task_id}/versions/1/submit-review", json={})
+        failed = await client.post(f"/api/content-bank/tasks/{task_id}/versions/1/approve", json={})
+        missing_reason = await client.post(f"/api/content-bank/tasks/{task_id}/versions/1/return-to-draft", json={})
+        blank_reason = await client.post(f"/api/content-bank/tasks/{task_id}/versions/1/return-to-draft", json={"reason":"   "})
+        returned = await client.post(f"/api/content-bank/tasks/{task_id}/versions/1/return-to-draft", json={"reason":"Add rubric"})
+    assert review.status_code == 200 and review.json()["status"] == "review"
+    assert review.json()["validation"]["valid_for_approval"] is False
+    assert {x["code"] for x in review.json()["validation"]["issues"]} == {"missing_expected_solution", "missing_rubric"}
+    assert failed.status_code == 422 and failed.json()["error"]["code"] == "approval_requirements_not_met"
+    assert {x["code"] for x in failed.json()["error"]["details"]["issues"]} == {"missing_expected_solution", "missing_rubric"}
+    assert missing_reason.status_code == blank_reason.status_code == 422
+    assert returned.status_code == 200 and returned.json()["status"] == "draft"
+
+
+async def test_approve_clone_archive_and_server_metadata(catalog):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post("/api/content-bank/tasks", json=payload(catalog)); task_id = created.json()["id"]; v1 = created.json()["initial_version"]["id"]
+        assert (await client.put(f"/api/content-bank/task-versions/{v1}/methodology", json=methodology(catalog))).status_code == 200
+        assert (await client.post(f"/api/content-bank/tasks/{task_id}/versions/1/submit-review", json={})).status_code == 200
+        approved = await client.post(f"/api/content-bank/tasks/{task_id}/versions/1/approve", json={})
+        created_v2 = await client.post(f"/api/content-bank/tasks/{task_id}/versions", json={"source_version_no":1})
+        duplicate = await client.post(f"/api/content-bank/tasks/{task_id}/versions", json={"source_version_no":1})
+        assert (await client.post(f"/api/content-bank/tasks/{task_id}/versions/2/submit-review", json={})).status_code == 200
+        approved_v2 = await client.post(f"/api/content-bank/tasks/{task_id}/versions/2/approve", json={})
+        card = await client.get(f"/api/content-bank/tasks/{task_id}")
+    assert approved.status_code == 200 and approved.json()["approved_by"] == "00000000-0000-4000-8000-000000000001"
+    assert approved.json()["approved_at"] is not None
+    assert created_v2.status_code == 201 and created_v2.json()["status"] == "draft" and created_v2.json()["approved_at"] is None
+    assert created_v2.headers["Location"] == f"/api/content-bank/tasks/{task_id}"
+    assert duplicate.status_code == 409 and duplicate.json()["error"]["code"] == "invalid_source_version"
+    assert approved_v2.status_code == 200
+    latest = card.json()["latest_version"]
+    assert latest["id"] != v1 and latest["version_no"] == 2
+    assert latest["status"] == "approved" and card.json()["approved_version"]["id"] == latest["id"]
+    assert card.json()["versions"][1]["status"] == "archived" and card.json()["versions"][1]["approved_at"] is not None
+    assert latest["methodology"]["expected_solution"]["id"] != methodology(catalog).get("id")
+    assert len(latest["methodology"]["typical_errors"]) == len(methodology(catalog)["typical_errors"])
+    async with async_session_factory() as session:
+        assert await session.scalar(text("SELECT count(*) FROM task_skill_links")) == 2
+        assert await session.scalar(text("SELECT count(*) FROM expected_solutions")) == 2
+        assert await session.scalar(text("SELECT count(*) FROM rubrics")) == 2
+        assert await session.scalar(text("SELECT count(*) FROM rubric_items")) == 4
+        assert await session.scalar(text("SELECT count(*) FROM accepted_answers")) == 2
+        assert await session.scalar(text("SELECT count(*) FROM task_error_links")) == 2
+        assert await session.scalar(text("SELECT count(*) FROM typical_errors")) == 1
+        assert await session.scalar(text("SELECT count(*) FROM hints")) == 4
+
+
+@pytest.mark.parametrize("initial_status", ["draft", "review", "approved"])
+async def test_archive_is_idempotent_visible_and_blocks_actions(catalog, initial_status):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post("/api/content-bank/tasks", json=payload(catalog)); task_id=created.json()["id"]
+        if initial_status in {"review", "approved"}:
+            if initial_status == "approved":
+                version_id = created.json()["initial_version"]["id"]
+                await client.put(f"/api/content-bank/task-versions/{version_id}/methodology", json=methodology(catalog))
+            await client.post(f"/api/content-bank/tasks/{task_id}/versions/1/submit-review", json={})
+        if initial_status == "approved":
+            await client.post(f"/api/content-bank/tasks/{task_id}/versions/1/approve", json={})
+        first = await client.post(f"/api/content-bank/tasks/{task_id}/archive")
+        second = await client.post(f"/api/content-bank/tasks/{task_id}/archive")
+        card = await client.get(f"/api/content-bank/tasks/{task_id}")
+        listed = await client.get("/api/content-bank/tasks", params={"status":"archived"})
+        blocked = await client.post(f"/api/content-bank/tasks/{task_id}/versions/1/submit-review", json={})
+    assert first.status_code == second.status_code == 200 and first.json()["archived_at"] == second.json()["archived_at"]
+    assert card.status_code == 200 and card.json()["latest_version"]["status"] == "archived"
+    assert listed.json()["total"] == 1 and len(listed.json()["items"]) == 1
+    assert blocked.status_code == 409
+
+
+async def test_status_command_not_found_and_invalid_uuid_envelopes(catalog):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        missing = await client.post(f"/api/content-bank/tasks/{uuid4()}/versions/1/submit-review", json={})
+        invalid = await client.post("/api/content-bank/tasks/nope/versions/1/submit-review", json={})
+        missing_source = await client.post(f"/api/content-bank/tasks/{uuid4()}/versions", json={"source_version_no":1})
+        missing_body = await client.post(f"/api/content-bank/tasks/{uuid4()}/versions", json={})
+    assert missing.status_code == missing_source.status_code == 404 and missing.json()["error"]["code"] == "not_found"
+    assert invalid.status_code == missing_body.status_code == 422

@@ -251,3 +251,60 @@ class CatalogItemResponse(BaseModel):
 class CatalogResponse(BaseModel):
     catalog: str
     items: list[CatalogItemResponse]
+
+
+class EmptyRequest(StrictRequest):
+    pass
+
+
+class ReturnToDraftRequest(StrictRequest):
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class CreateVersionRequest(StrictRequest):
+    source_version_no: int = Field(gt=0)
+
+
+class ArchiveRequest(StrictRequest):
+    reason: str | None = Field(default=None, max_length=1000)
+
+
+class ValidationIssueResponse(BaseModel):
+    field: str
+    code: str
+    message: str
+
+
+class ValidationReportResponse(BaseModel):
+    valid_for_approval: bool
+    issues: list[ValidationIssueResponse]
+
+
+class StatusCommandResponse(BaseModel):
+    task_id: UUID
+    task_version_id: UUID
+    version_no: int
+    previous_status: str
+    status: str
+    created_at: datetime
+    created_by: UUID
+    approved_at: datetime | None
+    approved_by: UUID | None
+    validation: ValidationReportResponse | None = None
+
+
+class CreatedVersionResponse(BaseModel):
+    task_id: UUID
+    task_version_id: UUID
+    version_no: int
+    status: str
+    created_at: datetime
+    created_by: UUID
+    approved_at: datetime | None
+    approved_by: UUID | None
+
+
+class ArchiveResponse(BaseModel):
+    task_id: UUID
+    archived_at: datetime
+    latest_status: str
