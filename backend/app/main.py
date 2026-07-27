@@ -5,14 +5,14 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.application.content_bank import ApplicationError, NotFoundError
+from app.application.content_bank import ApplicationError, ConflictError, NotFoundError
 from app.config import get_settings
 from app.presentation.routes import router
 
 
 app = FastAPI()
 settings = get_settings()
-app.add_middleware(CORSMiddleware, allow_origins=[x.strip() for x in settings.cors_origins.split(",") if x.strip()], allow_credentials=False, allow_methods=["GET", "POST"], allow_headers=["Content-Type"])
+app.add_middleware(CORSMiddleware, allow_origins=[x.strip() for x in settings.cors_origins.split(",") if x.strip()], allow_credentials=False, allow_methods=["GET", "POST", "PUT"], allow_headers=["Content-Type"])
 app.include_router(router)
 
 
@@ -28,6 +28,10 @@ async def application_error(_: Request, exc: ApplicationError) -> JSONResponse:
 @app.exception_handler(NotFoundError)
 async def not_found_error(_: Request, exc: NotFoundError) -> JSONResponse:
     return error_response("not_found", str(exc), [], 404)
+
+@app.exception_handler(ConflictError)
+async def conflict_error(_: Request, exc: ConflictError) -> JSONResponse:
+    return error_response(exc.code, str(exc), [], 409)
 
 
 @app.exception_handler(RequestValidationError)

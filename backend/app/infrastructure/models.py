@@ -7,7 +7,7 @@ from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, SmallInteger, String, Text, UniqueConstraint, text
-from sqlalchemy.dialects.postgresql import ENUM, UUID as PGUUID
+from sqlalchemy.dialects.postgresql import ENUM, JSONB, UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -20,6 +20,8 @@ status_enum = ENUM("draft", "review", "approved", "archived", name="task_version
 task_type_enum = ENUM("test", "calculation", "problem", "open_question", "essay", name="task_type", create_type=False)
 answer_format_enum = ENUM("single_choice", "multiple_choice", "short_text", "number", "expression", "long_text", name="answer_format", create_type=False)
 difficulty_enum = ENUM("basic", "standard", "advanced", name="difficulty_level", create_type=False)
+grading_mode_enum = ENUM("points", name="grading_mode", create_type=False)
+severity_enum = ENUM("low", "medium", "high", name="typical_error_severity", create_type=False)
 
 
 class IdMixin:
@@ -81,6 +83,7 @@ class Skill(IdMixin, Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
     subtopic: Mapped[Subtopic] = relationship(back_populates="skills")
     task_links: Mapped[list[TaskSkillLink]] = relationship(back_populates="skill")
+    typical_errors: Mapped[list[TypicalError]] = relationship(back_populates="skill")
 
 
 class Task(IdMixin, Base):
@@ -118,6 +121,11 @@ class TaskVersion(IdMixin, Base):
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     task: Mapped[Task] = relationship(back_populates="versions")
     skill_links: Mapped[list[TaskSkillLink]] = relationship(back_populates="task_version", cascade="all, delete-orphan")
+    expected_solution: Mapped[ExpectedSolution | None] = relationship(back_populates="task_version", cascade="all, delete-orphan", uselist=False)
+    rubric: Mapped[Rubric | None] = relationship(back_populates="task_version", cascade="all, delete-orphan", uselist=False)
+    accepted_answers: Mapped[list[AcceptedAnswer]] = relationship(back_populates="task_version", cascade="all, delete-orphan")
+    error_links: Mapped[list[TaskErrorLink]] = relationship(back_populates="task_version", cascade="all, delete-orphan")
+    hints: Mapped[list[Hint]] = relationship(back_populates="task_version", cascade="all, delete-orphan")
 
 
 class TaskSkillLink(IdMixin, Base):
@@ -129,3 +137,79 @@ class TaskSkillLink(IdMixin, Base):
     is_primary: Mapped[bool] = mapped_column(Boolean)
     task_version: Mapped[TaskVersion] = relationship(back_populates="skill_links")
     skill: Mapped[Skill] = relationship(back_populates="task_links")
+
+
+class ExpectedSolution(IdMixin, Base):
+    __tablename__ = "expected_solutions"
+    __table_args__ = (UniqueConstraint("task_version_id", name="uq_expected_solutions_task_version"),)
+    task_version_id: Mapped[UUID] = mapped_column(ForeignKey("task_versions.id", ondelete="CASCADE", name="fk_expected_solutions_task_version"))
+    solution_text: Mapped[str] = mapped_column(Text)
+    final_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    solution_steps_json: Mapped[list[str]] = mapped_column(JSONB)
+    task_version: Mapped[TaskVersion] = relationship(back_populates="expected_solution")
+
+
+class Rubric(IdMixin, Base):
+    __tablename__ = "rubrics"
+    __table_args__ = (UniqueConstraint("task_version_id", name="uq_rubrics_task_version"), CheckConstraint("max_score >= 0", name="ck_rubrics_max_score_nonnegative"))
+    task_version_id: Mapped[UUID] = mapped_column(ForeignKey("task_versions.id", ondelete="CASCADE", name="fk_rubrics_task_version"))
+    max_score: Mapped[Decimal] = mapped_column(Numeric)
+    grading_mode: Mapped[str] = mapped_column(grading_mode_enum)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    task_version: Mapped[TaskVersion] = relationship(back_populates="rubric")
+    items: Mapped[list[RubricItem]] = relationship(back_populates="rubric", cascade="all, delete-orphan", order_by="RubricItem.order_index")
+
+
+class RubricItem(IdMixin, Base):
+    __tablename__ = "rubric_items"
+    __table_args__ = (UniqueConstraint("rubric_id", "order_index", name="uq_rubric_items_rubric_order"), CheckConstraint("max_points > 0", name="ck_rubric_items_max_points_positive"), CheckConstraint("order_index >= 0", name="ck_rubric_items_order_nonnegative"), Index("ix_rubric_items_rubric_id", "rubric_id"))
+    rubric_id: Mapped[UUID] = mapped_column(ForeignKey("rubrics.id", ondelete="CASCADE", name="fk_rubric_items_rubric"))
+    criterion: Mapped[str] = mapped_column(Text)
+    max_points: Mapped[Decimal] = mapped_column(Numeric)
+    required: Mapped[bool] = mapped_column(Boolean)
+    common_failure: Mapped[str | None] = mapped_column(Text, nullable=True)
+    order_index: Mapped[int] = mapped_column(Integer)
+    rubric: Mapped[Rubric] = relationship(back_populates="items")
+
+
+class AcceptedAnswer(IdMixin, Base):
+    __tablename__ = "accepted_answers"
+    __table_args__ = (CheckConstraint("tolerance IS NULL OR tolerance >= 0", name="ck_accepted_answers_tolerance_nonnegative"), Index("ix_accepted_answers_task_version_id", "task_version_id"))
+    task_version_id: Mapped[UUID] = mapped_column(ForeignKey("task_versions.id", ondelete="CASCADE", name="fk_accepted_answers_task_version"))
+    answer_value: Mapped[str] = mapped_column(Text)
+    tolerance: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    unit: Mapped[str | None] = mapped_column(Text, nullable=True)
+    normalization_rule: Mapped[str | None] = mapped_column(Text, nullable=True)
+    task_version: Mapped[TaskVersion] = relationship(back_populates="accepted_answers")
+
+
+class TypicalError(IdMixin, Base):
+    __tablename__ = "typical_errors"
+    __table_args__ = (UniqueConstraint("skill_id", "code", name="uq_typical_errors_skill_code"), Index("ix_typical_errors_skill_id", "skill_id"))
+    skill_id: Mapped[UUID] = mapped_column(ForeignKey("skills.id", ondelete="RESTRICT", name="fk_typical_errors_skill"))
+    code: Mapped[str] = mapped_column(Text)
+    title: Mapped[str] = mapped_column(Text)
+    description: Mapped[str] = mapped_column(Text)
+    severity: Mapped[str] = mapped_column(severity_enum)
+    remediation_hint: Mapped[str | None] = mapped_column(Text, nullable=True)
+    skill: Mapped[Skill] = relationship(back_populates="typical_errors")
+    task_links: Mapped[list[TaskErrorLink]] = relationship(back_populates="typical_error")
+
+
+class TaskErrorLink(IdMixin, Base):
+    __tablename__ = "task_error_links"
+    __table_args__ = (UniqueConstraint("task_version_id", "typical_error_id", name="uq_task_error_links_version_error"), Index("ix_task_error_links_task_version_id", "task_version_id"), Index("ix_task_error_links_typical_error_id", "typical_error_id"))
+    task_version_id: Mapped[UUID] = mapped_column(ForeignKey("task_versions.id", ondelete="CASCADE", name="fk_task_error_links_task_version"))
+    typical_error_id: Mapped[UUID] = mapped_column(ForeignKey("typical_errors.id", ondelete="CASCADE", name="fk_task_error_links_typical_error"))
+    detection_hint: Mapped[str | None] = mapped_column(Text, nullable=True)
+    task_version: Mapped[TaskVersion] = relationship(back_populates="error_links")
+    typical_error: Mapped[TypicalError] = relationship(back_populates="task_links")
+
+
+class Hint(IdMixin, Base):
+    __tablename__ = "hints"
+    __table_args__ = (UniqueConstraint("task_version_id", "level", name="uq_hints_version_level"), CheckConstraint("level > 0", name="ck_hints_level_positive"), Index("ix_hints_task_version_id", "task_version_id"))
+    task_version_id: Mapped[UUID] = mapped_column(ForeignKey("task_versions.id", ondelete="CASCADE", name="fk_hints_task_version"))
+    level: Mapped[int] = mapped_column(Integer)
+    hint_text: Mapped[str] = mapped_column(Text)
+    task_version: Mapped[TaskVersion] = relationship(back_populates="hints")
