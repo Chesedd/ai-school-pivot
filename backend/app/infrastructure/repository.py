@@ -9,7 +9,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
-from app.application.content_bank import ActorContext, CatalogRecord, CreateTaskCommand, SkillLinkDTO, TaskDTO, TaskListItem, TaskListPage, TaskListQuery, TaskVersionDTO
+from app.application.content_bank import ActorContext, CatalogRecord, CatalogRef, CreateTaskCommand, SkillLinkDTO, TaskCard, TaskCardVersion, TaskDTO, TaskListItem, TaskListPage, TaskListQuery, TaskVersionDTO, TaskVersionSummary
 from app.infrastructure.models import Grade, Skill, Subject, Subtopic, Task, TaskSkillLink, TaskVersion, Topic
 
 
@@ -92,6 +92,47 @@ class SQLAlchemyContentBankRepository:
         ordered = sort_column.asc().nulls_last() if query.sort_order == "asc" else sort_column.desc().nulls_last()
         rows = (await self.session.execute(base.order_by(ordered, Task.id.asc()).offset(query.offset).limit(query.limit))).all()
         return TaskListPage(tuple(TaskListItem(*row) for row in rows), total, query.offset, query.limit)
+
+    async def get_task_card(self, task_id: UUID) -> TaskCard | None:
+        """Load a card in two bounded queries, including archived tasks."""
+        rows = (await self.session.execute(
+            select(Task, Subject, Grade, Topic, Subtopic, TaskVersion)
+            .join(Subject, Subject.id == Task.subject_id)
+            .join(Grade, Grade.id == Task.grade_id)
+            .join(Topic, and_(Topic.id == Task.topic_id, Topic.subject_id == Task.subject_id, Topic.grade_id == Task.grade_id))
+            .outerjoin(Subtopic, and_(Subtopic.id == Task.subtopic_id, Subtopic.topic_id == Task.topic_id))
+            .join(TaskVersion, TaskVersion.task_id == Task.id)
+            .where(Task.id == task_id)
+            .order_by(TaskVersion.version_no.desc(), TaskVersion.id.asc())
+        )).all()
+        if not rows:
+            return None
+        task, subject, grade, topic, subtopic, latest = rows[0]
+        links = (await self.session.execute(
+            select(TaskSkillLink, Skill)
+            .join(Skill, Skill.id == TaskSkillLink.skill_id)
+            .where(TaskSkillLink.task_version_id == latest.id)
+            .order_by(TaskSkillLink.is_primary.desc(), Skill.name.asc(), Skill.id.asc())
+        )).all()
+        # The DB uniqueness constraint prevents duplicates; the guard also makes
+        # the adapter robust when reading legacy/inconsistent data.
+        seen: set[UUID] = set()
+        skills = []
+        for link, skill in links:
+            if skill.id not in seen:
+                seen.add(skill.id)
+                skills.append(SkillLinkDTO(link.id, skill.id, skill.name, link.weight, link.is_primary))
+        summaries = tuple(TaskVersionSummary(version.id, version.version_no, version.status, version.created_at, version.approved_at) for *_, version in rows)
+        approved = next((summary for summary in summaries if summary.approved_at is not None), None)
+        return TaskCard(
+            task.id, CatalogRef(subject.id, subject.name), CatalogRef(grade.id, grade.name),
+            CatalogRef(topic.id, topic.name), CatalogRef(subtopic.id, subtopic.name) if subtopic else None,
+            task.created_by, task.created_at, task.archived_at,
+            TaskCardVersion(latest.id, latest.version_no, latest.title, latest.statement, latest.task_type,
+                latest.answer_format, latest.difficulty, latest.source, latest.status, tuple(skills),
+                latest.created_by, latest.created_at, latest.approved_by, latest.approved_at),
+            approved, summaries,
+        )
 
     async def catalog(self, name: str) -> list[CatalogRecord]:
         if name == "subjects":

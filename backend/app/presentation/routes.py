@@ -5,11 +5,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
-from app.application.content_bank import ActorContext, CreateTaskCommand, CreateTaskService, ListTasksService, SkillLinkInput, TaskListQuery, VersionContentInput
+from app.application.content_bank import ActorContext, CreateTaskCommand, CreateTaskService, GetTaskCardService, ListTasksService, SkillLinkInput, TaskListQuery, VersionContentInput
 from app.config import Settings, get_settings
 from app.db.session import async_session_factory
 from app.infrastructure.repository import SQLAlchemyContentBankRepository, SQLAlchemyUnitOfWork
-from app.presentation.schemas import CatalogResponse, TaskCreateRequest, TaskListPageResponse, TaskResponse
+from app.presentation.schemas import CatalogResponse, TaskCardResponse, TaskCreateRequest, TaskListPageResponse, TaskResponse
 
 router = APIRouter(prefix="/api/content-bank")
 
@@ -30,6 +30,12 @@ async def list_tasks(
     query = TaskListQuery(subject_id, grade_id, topic_id, subtopic_id, skill_id, task_type, difficulty, status, offset, limit, sort_by, sort_order)
     async with async_session_factory() as session:
         return await ListTasksService(SQLAlchemyContentBankRepository(session)).list_tasks(query)
+
+
+@router.get("/tasks/{task_id}", response_model=TaskCardResponse)
+async def get_task_card(task_id: UUID) -> object:
+    async with async_session_factory() as session:
+        return await GetTaskCardService(SQLAlchemyContentBankRepository(session)).get_task_card(task_id)
 
 
 @router.post("/tasks", response_model=TaskResponse, status_code=201)

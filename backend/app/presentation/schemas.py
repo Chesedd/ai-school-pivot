@@ -101,6 +101,50 @@ class TaskListPageResponse(BaseModel):
     limit: int
 
 
+class CatalogRefResponse(BaseModel):
+    id: UUID
+    name: str
+
+
+class TaskVersionSummaryResponse(BaseModel):
+    id: UUID
+    version_no: int
+    status: str
+    created_at: datetime
+    approved_at: datetime | None
+
+
+class TaskCardVersionResponse(BaseModel):
+    id: UUID
+    version_no: int
+    title: str | None
+    statement: str
+    task_type: str
+    answer_format: str
+    difficulty: str
+    source: str | None
+    status: str
+    skills: list[SkillLinkResponse]
+    created_by: UUID
+    created_at: datetime
+    approved_by: UUID | None
+    approved_at: datetime | None
+
+
+class TaskCardResponse(BaseModel):
+    id: UUID
+    subject: CatalogRefResponse
+    grade: CatalogRefResponse
+    topic: CatalogRefResponse
+    subtopic: CatalogRefResponse | None
+    created_by: UUID
+    created_at: datetime
+    archived_at: datetime | None
+    latest_version: TaskCardVersionResponse
+    approved_version: TaskVersionSummaryResponse | None
+    versions: list[TaskVersionSummaryResponse]
+
+
 class CatalogItemResponse(BaseModel):
     id: UUID
     name: str
