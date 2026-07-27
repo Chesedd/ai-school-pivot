@@ -5,12 +5,12 @@ from __future__ import annotations
 from types import TracebackType
 from uuid import UUID
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
-from app.application.content_bank import ActorContext, CatalogRecord, CatalogRef, CreateTaskCommand, SkillLinkDTO, TaskCard, TaskCardVersion, TaskDTO, TaskListItem, TaskListPage, TaskListQuery, TaskVersionDTO, TaskVersionSummary
-from app.infrastructure.models import Grade, Skill, Subject, Subtopic, Task, TaskSkillLink, TaskVersion, Topic
+from app.application.content_bank import AcceptedAnswerDTO, ActorContext, CatalogRecord, CatalogRef, ConflictError, CreateTaskCommand, EMPTY_METHODOLOGY, ExpectedSolutionDTO, HintDTO, LockedVersion, MethodologyDTO, RubricDTO, RubricItemDTO, SaveMethodologyCommand, SkillLinkDTO, TaskCard, TaskCardVersion, TaskDTO, TaskListItem, TaskListPage, TaskListQuery, TaskVersionDTO, TaskVersionSummary, TypicalErrorDTO
+from app.infrastructure.models import AcceptedAnswer, ExpectedSolution, Grade, Hint, Rubric, RubricItem, Skill, Subject, Subtopic, Task, TaskErrorLink, TaskSkillLink, TaskVersion, Topic, TypicalError
 
 
 class SQLAlchemyContentBankRepository:
@@ -94,7 +94,7 @@ class SQLAlchemyContentBankRepository:
         return TaskListPage(tuple(TaskListItem(*row) for row in rows), total, query.offset, query.limit)
 
     async def get_task_card(self, task_id: UUID) -> TaskCard | None:
-        """Load a card in two bounded queries, including archived tasks."""
+        """Load a card in a bounded number of queries, including archived tasks."""
         rows = (await self.session.execute(
             select(Task, Subject, Grade, Topic, Subtopic, TaskVersion)
             .join(Subject, Subject.id == Task.subject_id)
@@ -124,14 +124,69 @@ class SQLAlchemyContentBankRepository:
                 skills.append(SkillLinkDTO(link.id, skill.id, skill.name, link.weight, link.is_primary))
         summaries = tuple(TaskVersionSummary(version.id, version.version_no, version.status, version.created_at, version.approved_at) for *_, version in rows)
         approved = next((summary for summary in summaries if summary.approved_at is not None), None)
+        methodology = await self._get_methodology(latest.id)
         return TaskCard(
             task.id, CatalogRef(subject.id, subject.name), CatalogRef(grade.id, grade.name),
             CatalogRef(topic.id, topic.name), CatalogRef(subtopic.id, subtopic.name) if subtopic else None,
             task.created_by, task.created_at, task.archived_at,
             TaskCardVersion(latest.id, latest.version_no, latest.title, latest.statement, latest.task_type,
                 latest.answer_format, latest.difficulty, latest.source, latest.status, tuple(skills),
-                latest.created_by, latest.created_at, latest.approved_by, latest.approved_at),
+                latest.created_by, latest.created_at, latest.approved_by, latest.approved_at, methodology),
             approved, summaries,
+        )
+
+    async def lock_version(self, task_version_id: UUID) -> LockedVersion | None:
+        version = await self.session.scalar(select(TaskVersion).where(TaskVersion.id == task_version_id).with_for_update())
+        if version is None:
+            return None
+        latest_no = await self.session.scalar(select(func.max(TaskVersion.version_no)).where(TaskVersion.task_id == version.task_id))
+        skill_ids = frozenset((await self.session.scalars(select(TaskSkillLink.skill_id).where(TaskSkillLink.task_version_id == version.id))).all())
+        return LockedVersion(version.id, version.answer_format, version.status, version.version_no == latest_no, skill_ids)
+
+    async def replace_methodology(self, command: SaveMethodologyCommand) -> MethodologyDTO:
+        version_id = command.task_version_id
+        rubric_ids = select(Rubric.id).where(Rubric.task_version_id == version_id)
+        await self.session.execute(delete(RubricItem).where(RubricItem.rubric_id.in_(rubric_ids)))
+        for model in (ExpectedSolution, Rubric, AcceptedAnswer, TaskErrorLink, Hint):
+            await self.session.execute(delete(model).where(model.task_version_id == version_id))
+        if command.expected_solution:
+            value = command.expected_solution
+            self.session.add(ExpectedSolution(task_version_id=version_id, solution_text=value.solution_text.strip(), final_answer=value.final_answer, solution_steps_json=[x.strip() for x in value.solution_steps]))
+        if command.rubric:
+            value = command.rubric
+            rubric = Rubric(task_version_id=version_id, max_score=sum((x.max_points for x in value.items), start=0), grading_mode=value.grading_mode, notes=value.notes)
+            self.session.add(rubric); await self.session.flush()
+            self.session.add_all([RubricItem(rubric_id=rubric.id, criterion=x.criterion.strip(), max_points=x.max_points, required=x.required, common_failure=x.common_failure, order_index=i) for i, x in enumerate(value.items)])
+        self.session.add_all([AcceptedAnswer(task_version_id=version_id, answer_value=x.answer_value.strip(), tolerance=x.tolerance, unit=x.unit, normalization_rule=x.normalization_rule) for x in command.accepted_answers])
+        for value in command.typical_errors:
+            existing = await self.session.scalar(select(TypicalError).where(TypicalError.skill_id == value.skill_id, TypicalError.code == value.code.strip()))
+            definition = (value.title.strip(), value.description.strip(), value.severity, value.remediation_hint)
+            if existing:
+                if (existing.title, existing.description, existing.severity, existing.remediation_hint) != definition:
+                    raise ConflictError("Определение типичной ошибки с таким кодом отличается.", "typical_error_definition_conflict")
+                typical = existing
+            else:
+                typical = TypicalError(skill_id=value.skill_id, code=value.code.strip(), title=definition[0], description=definition[1], severity=definition[2], remediation_hint=definition[3])
+                self.session.add(typical); await self.session.flush()
+            self.session.add(TaskErrorLink(task_version_id=version_id, typical_error_id=typical.id, detection_hint=value.detection_hint))
+        self.session.add_all([Hint(task_version_id=version_id, level=x.level, hint_text=x.hint_text.strip()) for x in command.hints])
+        await self.session.flush()
+        return await self._get_methodology(version_id)
+
+    async def _get_methodology(self, version_id: UUID) -> MethodologyDTO:
+        solution = await self.session.scalar(select(ExpectedSolution).where(ExpectedSolution.task_version_id == version_id))
+        rubric = await self.session.scalar(select(Rubric).options(selectinload(Rubric.items)).where(Rubric.task_version_id == version_id))
+        answers = (await self.session.scalars(select(AcceptedAnswer).where(AcceptedAnswer.task_version_id == version_id).order_by(AcceptedAnswer.id))).all()
+        errors = (await self.session.execute(select(TaskErrorLink, TypicalError).join(TypicalError).where(TaskErrorLink.task_version_id == version_id).order_by(TaskErrorLink.id))).all()
+        hints = (await self.session.scalars(select(Hint).where(Hint.task_version_id == version_id).order_by(Hint.level))).all()
+        if not any((solution, rubric, answers, errors, hints)):
+            return EMPTY_METHODOLOGY
+        return MethodologyDTO(
+            ExpectedSolutionDTO(solution.id, solution.solution_text, solution.final_answer, tuple(solution.solution_steps_json)) if solution else None,
+            RubricDTO(rubric.id, rubric.grading_mode, rubric.max_score, rubric.notes, tuple(RubricItemDTO(x.id, x.criterion, x.max_points, x.required, x.common_failure, x.order_index) for x in sorted(rubric.items, key=lambda x: x.order_index))) if rubric else None,
+            tuple(AcceptedAnswerDTO(x.id, x.answer_value, x.tolerance, x.unit, x.normalization_rule) for x in answers),
+            tuple(TypicalErrorDTO(x.id, x.skill_id, x.code, x.title, x.description, x.severity, x.remediation_hint, link.detection_hint) for link, x in errors),
+            tuple(HintDTO(x.id, x.level, x.hint_text) for x in hints),
         )
 
     async def catalog(self, name: str) -> list[CatalogRecord]:

@@ -1,6 +1,6 @@
 # AI School Pivot
 
-Content Bank MVP phase 2.4: FastAPI/SQLAlchemy create and paginated list slices,
+Content Bank MVP phase 2.6A: FastAPI/SQLAlchemy task slices and version-scoped methodology,
 a filterable React/Vite task table and creation form, and PostgreSQL 17.
 Alembic remains the schema owner.
 
@@ -38,3 +38,9 @@ The task list and creation form are at `/content-bank`. They load the five
 read-only catalogs from `/api/content-bank/catalog/{catalog_name}`; the list
 uses `GET /api/content-bank/tasks` and the form submits to the same path with
 `POST`.
+
+Phase 2.6A adds atomic full replacement at `PUT
+/api/content-bank/task-versions/{task_version_id}/methodology`; the task card
+returns the saved read model at `latest_version.methodology`. Apply migrations
+with `docker compose exec backend alembic upgrade head`. The frontend editor is
+intentionally deferred to phase 2.6B.

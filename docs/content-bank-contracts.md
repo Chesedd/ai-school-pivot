@@ -1,4 +1,4 @@
-# Content Bank MVP — контракты фазы 2.2
+# Content Bank MVP — контракты фаз 2.2–2.6A
 
 > Статус: проектный контракт v0.1. Этот документ фиксирует границы и
 > интерфейсы до создания схемы БД, HTTP-обработчиков и клиентских компонентов.
@@ -363,3 +363,58 @@ skills, а числовые поля не отрицательны. Она по�
 
 Этот порядок — план последующих фаз, а не разрешение реализовывать их в фазе
 2.1.
+
+## 15. Методическая структура (фаза 2.6A)
+
+Методические данные принадлежат конкретной `task_version`. Их изменение не
+создаёт новую версию автоматически. В 2.6A PUT разрешён исключительно для
+`latest_version` со статусом `draft`; `review`, `approved`, `archived` и не
+последняя версия доступны только для чтения. Все пять блоков сохраняются
+атомарно с семантикой полной замены. `expected_solution` и `rubric` могут быть
+`null`, остальные блоки — пустыми массивами. Это допустимо для draft;
+обязательность решения и критериев перед approve относится к строгому
+валидатору фазы 2.7.
+
+`grading_mode` v0.1 имеет единственное значение `points`; `severity` имеет
+ровно `low`, `medium`, `high`. Сервер вычисляет `rubric.max_score` как сумму
+`max_points`, а `rubric_items.order_index` как нулевой индекс элемента в
+request.
+
+### PUT `/api/content-bank/task-versions/{task_version_id}/methodology`
+
+Все пять верхнеуровневых полей обязательны. Request:
+
+```json
+{
+  "expected_solution": {"solution_text":"Полное эталонное решение","final_answer":"3","solution_steps":["Перенести 2 в правую часть","Вычислить значение x"]},
+  "rubric": {"grading_mode":"points","notes":null,"items":[
+    {"criterion":"Правильно выполнен перенос","max_points":"1.0000","required":true,"common_failure":"Не изменён знак"},
+    {"criterion":"Получен правильный ответ","max_points":"1.0000","required":true,"common_failure":null}
+  ]},
+  "accepted_answers":[{"answer_value":"3","tolerance":null,"unit":null,"normalization_rule":null}],
+  "typical_errors":[{"skill_id":"a0dda428-f222-4b1a-9a7e-17e324947943","code":"sign_not_changed","title":"Не изменён знак","description":"При переносе слагаемого ученик не меняет знак","severity":"medium","remediation_hint":"Повторить правило переноса","detection_hint":"В промежуточной строке осталось +2"}],
+  "hints":[{"level":1,"hint_text":"Перенесите известное слагаемое вправо"},{"level":2,"hint_text":"При переносе поменяйте знак"}]
+}
+```
+
+Response `200` возвращает сохранённый aggregate и сгенерированные UUID:
+
+```json
+{
+  "expected_solution":{"id":"11111111-1111-4111-8111-111111111111","solution_text":"Полное эталонное решение","final_answer":"3","solution_steps":["Перенести 2 в правую часть","Вычислить значение x"]},
+  "rubric":{"id":"22222222-2222-4222-8222-222222222222","grading_mode":"points","max_score":"2.0000","notes":null,"items":[
+    {"id":"33333333-3333-4333-8333-333333333333","criterion":"Правильно выполнен перенос","max_points":"1.0000","required":true,"common_failure":"Не изменён знак","order_index":0},
+    {"id":"44444444-4444-4444-8444-444444444444","criterion":"Получен правильный ответ","max_points":"1.0000","required":true,"common_failure":null,"order_index":1}
+  ]},
+  "accepted_answers":[{"id":"55555555-5555-4555-8555-555555555555","answer_value":"3","tolerance":null,"unit":null,"normalization_rule":null}],
+  "typical_errors":[{"id":"66666666-6666-4666-8666-666666666666","skill_id":"a0dda428-f222-4b1a-9a7e-17e324947943","code":"sign_not_changed","title":"Не изменён знак","description":"При переносе слагаемого ученик не меняет знак","severity":"medium","remediation_hint":"Повторить правило переноса","detection_hint":"В промежуточной строке осталось +2"}],
+  "hints":[{"id":"77777777-7777-4777-8777-777777777777","level":1,"hint_text":"Перенесите известное слагаемое вправо"},{"id":"88888888-8888-4888-8888-888888888888","level":2,"hint_text":"При переносе поменяйте знак"}]
+}
+```
+
+`GET /tasks/{task_id}` помещает эту же структуру в
+`latest_version.methodology`; `approved_version` и `versions` остаются
+summary. Ошибки используют envelope раздела 9: неизвестная версия — `404
+not_found`; не latest/draft — `409 conflict`; несовпадающее глобальное
+определение `(skill_id, code)` — `409 typical_error_definition_conflict`;
+невалидный UUID, JSON или доменные данные — `422 validation_error`.

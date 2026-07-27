@@ -230,3 +230,51 @@ async def test_existing_list_and_post_still_work_with_card_route(catalog):
         listed = await client.get("/api/content-bank/tasks")
     assert created.status_code == 201 and listed.status_code == 200
     assert listed.json()["items"][0]["task_id"] == created.json()["id"]
+
+
+def methodology(ids):
+    return {"expected_solution":{"solution_text":"Solution","final_answer":"3","solution_steps":["First","Second"]},"rubric":{"grading_mode":"points","notes":None,"items":[{"criterion":"First criterion","max_points":"1.2500","required":True,"common_failure":None},{"criterion":"Second criterion","max_points":"0.7500","required":False,"common_failure":"Failure"}]},"accepted_answers":[{"answer_value":"3","tolerance":"0.01","unit":None,"normalization_rule":None}],"typical_errors":[{"skill_id":str(ids["skill"]),"code":"sign","title":"Sign","description":"Wrong sign","severity":"medium","remediation_hint":None,"detection_hint":"See line"}],"hints":[{"level":1,"hint_text":"One"},{"level":2,"hint_text":"Two"}]}
+
+
+async def test_methodology_put_get_replace_and_catalog_reuse(catalog):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post("/api/content-bank/tasks", json=payload(catalog))
+        version_id = created.json()["initial_version"]["id"]
+        first = await client.put(f"/api/content-bank/task-versions/{version_id}/methodology", json=methodology(catalog))
+        card = await client.get(created.headers["Location"])
+        replacement = {"expected_solution":None,"rubric":None,"accepted_answers":[],"typical_errors":methodology(catalog)["typical_errors"],"hints":[{"level":1,"hint_text":"Replacement"}]}
+        second = await client.put(f"/api/content-bank/task-versions/{version_id}/methodology", json=replacement)
+    assert first.status_code == 200
+    assert first.json()["rubric"]["max_score"] == "2.0000"
+    assert [x["order_index"] for x in first.json()["rubric"]["items"]] == [0, 1]
+    assert [x["level"] for x in card.json()["latest_version"]["methodology"]["hints"]] == [1, 2]
+    assert second.status_code == 200 and second.json()["expected_solution"] is None and second.json()["accepted_answers"] == []
+    assert second.json()["typical_errors"][0]["id"] == first.json()["typical_errors"][0]["id"]
+    async with async_session_factory() as session:
+        assert await session.scalar(text("SELECT count(*) FROM typical_errors")) == 1
+        assert await session.scalar(text("SELECT count(*) FROM rubric_items")) == 0
+
+
+async def test_methodology_conflict_rolls_back_and_envelopes(catalog):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post("/api/content-bank/tasks", json=payload(catalog)); version_id=created.json()["initial_version"]["id"]
+        assert (await client.put(f"/api/content-bank/task-versions/{version_id}/methodology", json=methodology(catalog))).status_code == 200
+        conflicting = methodology(catalog); conflicting["expected_solution"]["solution_text"]="Must rollback"; conflicting["typical_errors"][0]["title"]="Different"
+        response = await client.put(f"/api/content-bank/task-versions/{version_id}/methodology", json=conflicting)
+        missing = await client.put(f"/api/content-bank/task-versions/{uuid4()}/methodology", json=methodology(catalog))
+        invalid = await client.put("/api/content-bank/task-versions/nope/methodology", json={})
+        card = await client.get(created.headers["Location"])
+    assert response.status_code == 409 and response.json()["error"]["code"] == "typical_error_definition_conflict"
+    assert card.json()["latest_version"]["methodology"]["expected_solution"]["solution_text"] == "Solution"
+    assert missing.status_code == 404 and missing.json()["error"]["code"] == "not_found"
+    assert invalid.status_code == 422 and invalid.json()["error"]["code"] == "validation_error"
+
+
+async def test_methodology_rejects_foreign_skill_and_non_number_tolerance(catalog):
+    data=payload(catalog); data["initial_version"]["answer_format"]="short_text"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created=await client.post("/api/content-bank/tasks",json=data); version_id=created.json()["initial_version"]["id"]
+        method=methodology(catalog); method["typical_errors"][0]["skill_id"]=str(catalog["other_skill"])
+        response=await client.put(f"/api/content-bank/task-versions/{version_id}/methodology",json=method)
+    assert response.status_code == 422 and response.json()["error"]["code"] == "validation_error"
+    async with async_session_factory() as session: assert await session.scalar(text("SELECT count(*) FROM expected_solutions")) == 0

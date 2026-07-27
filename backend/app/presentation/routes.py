@@ -5,13 +5,27 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
-from app.application.content_bank import ActorContext, CreateTaskCommand, CreateTaskService, GetTaskCardService, ListTasksService, SkillLinkInput, TaskListQuery, VersionContentInput
+from app.application.content_bank import AcceptedAnswerInput, ActorContext, CreateTaskCommand, CreateTaskService, ExpectedSolutionInput, GetTaskCardService, HintInput, ListTasksService, RubricInput, RubricItemInput, SaveMethodologyCommand, SaveMethodologyService, SkillLinkInput, TaskListQuery, TypicalErrorInput, VersionContentInput
 from app.config import Settings, get_settings
 from app.db.session import async_session_factory
 from app.infrastructure.repository import SQLAlchemyContentBankRepository, SQLAlchemyUnitOfWork
-from app.presentation.schemas import CatalogResponse, TaskCardResponse, TaskCreateRequest, TaskListPageResponse, TaskResponse
+from app.presentation.schemas import CatalogResponse, MethodologyPutRequest, MethodologyResponse, TaskCardResponse, TaskCreateRequest, TaskListPageResponse, TaskResponse
 
 router = APIRouter(prefix="/api/content-bank")
+
+@router.put("/task-versions/{task_version_id}/methodology", response_model=MethodologyResponse)
+async def put_methodology(task_version_id: UUID, payload: MethodologyPutRequest) -> object:
+    expected = payload.expected_solution
+    rubric = payload.rubric
+    command = SaveMethodologyCommand(
+        task_version_id,
+        ExpectedSolutionInput(expected.solution_text, expected.final_answer, tuple(expected.solution_steps)) if expected else None,
+        RubricInput(rubric.grading_mode, rubric.notes, tuple(RubricItemInput(x.criterion, x.max_points, x.required, x.common_failure) for x in rubric.items)) if rubric else None,
+        tuple(AcceptedAnswerInput(x.answer_value, x.tolerance, x.unit, x.normalization_rule) for x in payload.accepted_answers),
+        tuple(TypicalErrorInput(x.skill_id, x.code, x.title, x.description, x.severity, x.remediation_hint, x.detection_hint) for x in payload.typical_errors),
+        tuple(HintInput(x.level, x.hint_text) for x in payload.hints),
+    )
+    return await SaveMethodologyService(SQLAlchemyUnitOfWork(async_session_factory)).save(command)
 
 
 @router.get("/tasks", response_model=TaskListPageResponse)
