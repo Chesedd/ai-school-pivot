@@ -360,3 +360,47 @@ async def test_status_command_not_found_and_invalid_uuid_envelopes(catalog):
         missing_body = await client.post(f"/api/content-bank/tasks/{uuid4()}/versions", json={})
     assert missing.status_code == missing_source.status_code == 404 and missing.json()["error"]["code"] == "not_found"
     assert invalid.status_code == missing_body.status_code == 422
+
+async def test_latest_version_full_text_search_ranking_filters_and_schema(catalog):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        title_data = payload(catalog); title_data["initial_version"].update(title="Движение планеты", statement="Нейтральное условие", source=None)
+        statement_data = payload(catalog); statement_data["initial_version"].update(title="Другая карточка", statement="Рассчитайте движение тела", source=None)
+        source_data = payload(catalog); source_data["initial_version"].update(title="Источник", statement="Нейтральное условие", source="Сборник о движениях")
+        title = await client.post("/api/content-bank/tasks", json=title_data)
+        statement = await client.post("/api/content-bank/tasks", json=statement_data)
+        source = await client.post("/api/content-bank/tasks", json=source_data)
+        found = await client.get("/api/content-bank/tasks", params={"q":"  движения  ", "limit":2})
+        filtered = await client.get("/api/content-bank/tasks", params={"q":"движение", "subject_id":str(catalog["subject"]), "skill_id":str(catalog["skill"])})
+        special = await client.get("/api/content-bank/tasks", params={"q":'" ( - OR & !'})
+        too_long = await client.get("/api/content-bank/tasks", params={"q":"я"*201})
+        invalid_sort = await client.get("/api/content-bank/tasks", params={"sort_by":"relevance"})
+    assert title.status_code == statement.status_code == source.status_code == 201
+    assert found.status_code == 200 and found.json()["total"] == 3 and len(found.json()["items"]) == 2
+    assert found.json()["items"][0]["task_id"] == title.json()["id"]
+    assert filtered.status_code == 200 and filtered.json()["total"] == 3
+    assert special.status_code == 200
+    assert too_long.status_code == invalid_sort.status_code == 422
+    assert "updated_at" in found.json()["items"][0]
+    async with async_session_factory() as session:
+        generated = await session.scalar(text("SELECT is_generated FROM information_schema.columns WHERE table_name='task_versions' AND column_name='search_vector'"))
+        indexdef = await session.scalar(text("SELECT indexdef FROM pg_indexes WHERE tablename='task_versions' AND indexname='ix_task_versions_search_vector_gin'"))
+        vector = await session.scalar(text("SELECT search_vector::text FROM task_versions WHERE task_id=:id"), {"id": title.json()["id"]})
+    assert generated == "ALWAYS" and "USING gin" in indexdef and "движен" in vector
+
+
+async def test_search_uses_only_latest_version_and_archived_semantics(catalog):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        data=payload(catalog); data["initial_version"]["statement"]="Исторический уникальный термин"
+        created=await client.post("/api/content-bank/tasks",json=data); task_id=created.json()["id"]
+        async with async_session_factory() as session:
+            await session.execute(text("UPDATE task_versions SET status='approved', approved_at=now(), approved_by=created_by WHERE task_id=:id"),{"id":task_id}); await session.commit()
+        await client.post(f"/api/content-bank/tasks/{task_id}/versions",json={"source_version_no":1})
+        async with async_session_factory() as session:
+            await session.execute(text("UPDATE task_versions SET statement='Совершенно новый текст' WHERE task_id=:id AND version_no=2"),{"id":task_id}); await session.commit()
+        historical=await client.get("/api/content-bank/tasks",params={"q":"уникальный"})
+        current=await client.get("/api/content-bank/tasks",params={"q":"новый"})
+        await client.post(f"/api/content-bank/tasks/{task_id}/archive")
+        ordinary=await client.get("/api/content-bank/tasks",params={"q":"новый"})
+        archived=await client.get("/api/content-bank/tasks",params={"q":"новый","status":"archived"})
+    assert historical.json()["total"] == 0 and current.json()["total"] == 1
+    assert ordinary.json()["total"] == 0 and archived.json()["total"] == 1

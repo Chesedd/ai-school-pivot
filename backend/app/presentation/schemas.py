@@ -92,6 +92,7 @@ class TaskListItemResponse(BaseModel):
     primary_skill_name: str | None
     created_at: datetime
     archived_at: datetime | None
+    updated_at: datetime
 
 
 class TaskListPageResponse(BaseModel):
@@ -130,6 +131,7 @@ class TaskCardVersionResponse(BaseModel):
     approved_by: UUID | None
     approved_at: datetime | None
     methodology: "MethodologyResponse"
+    updated_at: datetime
 
 
 class ExpectedSolutionRequest(StrictRequest):
@@ -234,6 +236,7 @@ class TaskCardResponse(BaseModel):
     created_by: UUID
     created_at: datetime
     archived_at: datetime | None
+    updated_at: datetime
     latest_version: TaskCardVersionResponse
     approved_version: TaskVersionSummaryResponse | None
     versions: list[TaskVersionSummaryResponse]

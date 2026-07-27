@@ -6,8 +6,8 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, SmallInteger, String, Text, UniqueConstraint, text
-from sqlalchemy.dialects.postgresql import ENUM, JSONB, UUID as PGUUID
+from sqlalchemy import Boolean, CheckConstraint, Computed, DateTime, ForeignKey, Index, Integer, Numeric, SmallInteger, String, Text, UniqueConstraint, text
+from sqlalchemy.dialects.postgresql import ENUM, JSONB, TSVECTOR, UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -88,13 +88,14 @@ class Skill(IdMixin, Base):
 
 class Task(IdMixin, Base):
     __tablename__ = "tasks"
-    __table_args__ = (Index("ix_tasks_subject_id", "subject_id"), Index("ix_tasks_grade_id", "grade_id"), Index("ix_tasks_topic_id", "topic_id"), Index("ix_tasks_subtopic_id", "subtopic_id"), Index("ix_tasks_subject_grade_topic_subtopic", "subject_id", "grade_id", "topic_id", "subtopic_id"), Index("ix_tasks_created_at", "created_at"), Index("ix_tasks_archived_at", "archived_at"))
+    __table_args__ = (Index("ix_tasks_subject_id", "subject_id"), Index("ix_tasks_grade_id", "grade_id"), Index("ix_tasks_topic_id", "topic_id"), Index("ix_tasks_subtopic_id", "subtopic_id"), Index("ix_tasks_subject_grade_topic_subtopic", "subject_id", "grade_id", "topic_id", "subtopic_id"), Index("ix_tasks_created_at", "created_at"), Index("ix_tasks_updated_at", "updated_at"), Index("ix_tasks_archived_at", "archived_at"))
     subject_id: Mapped[UUID] = mapped_column(ForeignKey("subjects.id", ondelete="RESTRICT", name="fk_tasks_subject_id_subjects"))
     grade_id: Mapped[UUID] = mapped_column(ForeignKey("grades.id", ondelete="RESTRICT", name="fk_tasks_grade_id_grades"))
     topic_id: Mapped[UUID] = mapped_column(ForeignKey("topics.id", ondelete="RESTRICT", name="fk_tasks_topic_id_topics"))
     subtopic_id: Mapped[UUID | None] = mapped_column(ForeignKey("subtopics.id", ondelete="RESTRICT", name="fk_tasks_subtopic_id_subtopics"), nullable=True)
     created_by: Mapped[UUID] = mapped_column(uuid_type)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     subject: Mapped[Subject] = relationship(back_populates="tasks")
     grade: Mapped[Grade] = relationship(back_populates="tasks")
@@ -105,7 +106,7 @@ class Task(IdMixin, Base):
 
 class TaskVersion(IdMixin, Base):
     __tablename__ = "task_versions"
-    __table_args__ = (UniqueConstraint("task_id", "version_no", name="uq_task_versions_task_version_no"), CheckConstraint("version_no > 0", name="ck_task_versions_version_no_positive"), CheckConstraint("(approved_at IS NULL) = (approved_by IS NULL)", name="ck_task_versions_approval_pair"), Index("ix_task_versions_task_id_status", "task_id", "status"), Index("ix_task_versions_status", "status"), Index("uq_task_versions_one_approved_per_task", "task_id", unique=True, postgresql_where=text("status = 'approved'")))
+    __table_args__ = (UniqueConstraint("task_id", "version_no", name="uq_task_versions_task_version_no"), CheckConstraint("version_no > 0", name="ck_task_versions_version_no_positive"), CheckConstraint("(approved_at IS NULL) = (approved_by IS NULL)", name="ck_task_versions_approval_pair"), Index("ix_task_versions_task_id_status", "task_id", "status"), Index("ix_task_versions_status", "status"), Index("ix_task_versions_search_vector_gin", "search_vector", postgresql_using="gin"), Index("uq_task_versions_one_approved_per_task", "task_id", unique=True, postgresql_where=text("status = 'approved'")))
     task_id: Mapped[UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE", name="fk_task_versions_task_id_tasks"))
     version_no: Mapped[int] = mapped_column(Integer)
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -117,6 +118,8 @@ class TaskVersion(IdMixin, Base):
     status: Mapped[str] = mapped_column(status_enum, server_default=text("'draft'::task_version_status"))
     created_by: Mapped[UUID] = mapped_column(uuid_type)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+    search_vector: Mapped[object | None] = mapped_column(TSVECTOR, Computed("setweight(to_tsvector('russian'::regconfig, COALESCE(title, '')), 'A') || setweight(to_tsvector('russian'::regconfig, COALESCE(statement, '')), 'B') || setweight(to_tsvector('russian'::regconfig, COALESCE(source, '')), 'C')", persisted=True), nullable=True)
     approved_by: Mapped[UUID | None] = mapped_column(uuid_type, nullable=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     task: Mapped[Task] = relationship(back_populates="versions")
