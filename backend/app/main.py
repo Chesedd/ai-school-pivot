@@ -5,7 +5,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.application.content_bank import ApplicationError, ConflictError, IssuesError, NotFoundError
+from app.application.content_bank import ApplicationError, ConflictError, GoneError, IssuesError, NotFoundError
 from app.config import get_settings
 from app.presentation.routes import router
 
@@ -38,6 +38,10 @@ async def not_found_error(_: Request, exc: NotFoundError) -> JSONResponse:
 @app.exception_handler(ConflictError)
 async def conflict_error(_: Request, exc: ConflictError) -> JSONResponse:
     return error_response(exc.code, str(exc), [], 409)
+
+@app.exception_handler(GoneError)
+async def gone_error(_: Request, exc: GoneError) -> JSONResponse:
+    return error_response(exc.code, str(exc), [], 410)
 
 
 @app.exception_handler(RequestValidationError)
