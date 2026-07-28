@@ -52,7 +52,7 @@ async def _cleanup_catalog() -> None:
             await _assert_test_database(session)
             await session.execute(
                 text(
-                    "TRUNCATE task_skill_links, task_versions, tasks, skills, "
+                    "TRUNCATE audit_log, task_skill_links, task_versions, tasks, skills, "
                     "subtopics, topics, grades, subjects CASCADE"
                 )
             )
@@ -64,7 +64,7 @@ async def catalog():
     async with async_session_factory() as session:
         async with session.begin():
             await _assert_test_database(session)
-            await session.execute(text("TRUNCATE task_skill_links, task_versions, tasks, skills, subtopics, topics, grades, subjects CASCADE"))
+            await session.execute(text("TRUNCATE audit_log, task_skill_links, task_versions, tasks, skills, subtopics, topics, grades, subjects CASCADE"))
             await session.execute(text("INSERT INTO subjects(id,code,name) VALUES (:id,'s','Subject')"), {"id": ids["subject"]})
             await session.execute(text("INSERT INTO grades(id,number,name) VALUES (:id,7,'Grade')"), {"id": ids["grade"]})
             await session.execute(text("INSERT INTO topics(id,subject_id,grade_id,code,name) VALUES (:id,:s,:g,'t','Topic'),(:other,:s,:g,'o','Other')"), {"id": ids["topic"], "other": ids["other_topic"], "s": ids["subject"], "g": ids["grade"]})
@@ -554,3 +554,42 @@ async def test_updated_at_lifecycle_and_read_model_consistency(catalog):
 
         listed = (await client.get("/api/content-bank/tasks", params={"status":"archived"})).json()["items"][0]
         assert listed["updated_at"] == after_archive["updated_at"]
+
+
+async def test_audit_schema_enum_constraints_and_indexes(catalog):
+    async with async_session_factory() as session:
+        enum_values = (await session.execute(text("SELECT enumlabel FROM pg_enum JOIN pg_type ON pg_type.oid=enumtypid WHERE typname='audit_action' ORDER BY enumsortorder"))).scalars().all()
+        indexes = set((await session.execute(text("SELECT indexname FROM pg_indexes WHERE tablename='audit_log'"))).scalars().all())
+        constraints = set((await session.execute(text("SELECT conname FROM pg_constraint WHERE conrelid='audit_log'::regclass"))).scalars().all())
+    assert enum_values == ["task_created", "methodology_updated", "submitted_for_review", "returned_to_draft", "version_approved", "version_created", "task_archived"]
+    assert {"ix_audit_log_task_occurred_at", "ix_audit_log_task_action_occurred_at", "ix_audit_log_task_version_id"} <= indexes
+    assert {"fk_audit_log_task", "fk_audit_log_task_version", "ck_audit_log_version_no_positive"} <= constraints
+
+
+async def test_audit_read_filter_pagination_and_not_found(catalog):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post("/api/content-bank/tasks", json=payload(catalog))
+        task_id = created.json()["id"]
+        version_id = created.json()["initial_version"]["id"]
+        await client.put(f"/api/content-bank/task-versions/{version_id}/methodology", json=methodology(catalog))
+        full = await client.get(f"/api/content-bank/tasks/{task_id}/audit", params={"offset": 0, "limit": 1})
+        filtered = await client.get(f"/api/content-bank/tasks/{task_id}/audit", params={"action": "task_created"})
+        missing = await client.get(f"/api/content-bank/tasks/{uuid4()}/audit")
+        invalid = await client.get(f"/api/content-bank/tasks/{task_id}/audit", params={"action": "unknown"})
+    assert full.status_code == 200 and full.json()["total"] == 2 and len(full.json()["items"]) == 1
+    assert filtered.json()["total"] == 1 and filtered.json()["items"][0]["action"] == "task_created"
+    assert filtered.json()["items"][0]["actor_id"] == "00000000-0000-4000-8000-000000000001"
+    assert missing.status_code == 404 and invalid.status_code == 422
+
+
+async def test_archive_reason_is_atomic_and_idempotent_in_audit(catalog):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        created = await client.post("/api/content-bank/tasks", json=payload(catalog)); task_id = created.json()["id"]
+        failed = await client.post(f"/api/content-bank/tasks/{task_id}/versions/1/approve", json={})
+        await client.post(f"/api/content-bank/tasks/{task_id}/archive", json={"reason": "obsolete"})
+        await client.post(f"/api/content-bank/tasks/{task_id}/archive", json={"reason": "again"})
+        audit = (await client.get(f"/api/content-bank/tasks/{task_id}/audit")).json()
+    assert failed.status_code in {409, 422}
+    archived = [item for item in audit["items"] if item["action"] == "task_archived"]
+    assert len(archived) == 1 and archived[0]["reason"] == "obsolete"
+    assert not any(item["action"] == "version_approved" for item in audit["items"])

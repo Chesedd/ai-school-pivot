@@ -12,6 +12,7 @@ from uuid import UUID
 TASK_TYPES = frozenset({"test", "calculation", "problem", "open_question", "essay"})
 DIFFICULTIES = frozenset({"basic", "standard", "advanced"})
 STATUSES = frozenset({"draft", "review", "approved", "archived"})
+AUDIT_ACTIONS = frozenset({"task_created", "methodology_updated", "submitted_for_review", "returned_to_draft", "version_approved", "version_created", "task_archived"})
 SORT_FIELDS = frozenset({"created_at", "updated_at", "title", "difficulty", "status", "version_no", "relevance"})
 SORT_ORDERS = frozenset({"asc", "desc"})
 
@@ -298,6 +299,8 @@ class LockedVersion:
     status: str
     is_latest: bool
     skill_ids: frozenset[UUID]
+    task_id: UUID | None = None
+    version_no: int | None = None
 
 
 @dataclass(frozen=True)
@@ -332,6 +335,9 @@ class ApplicationError(Exception):
 
 class NotFoundError(Exception):
     """An application-level missing aggregate error."""
+    def __init__(self, message: str, code: str = "not_found") -> None:
+        super().__init__(message)
+        self.code = code
 
 class ConflictError(Exception):
     def __init__(self, message: str, code: str = "conflict") -> None:
@@ -398,6 +404,51 @@ class ArchiveResult:
     task_id: UUID
     archived_at: datetime
     latest_status: str
+    latest_version_id: UUID | None = None
+    latest_version_no: int | None = None
+    previous_status: str | None = None
+    changed: bool = True
+
+
+@dataclass(frozen=True)
+class AuditEventRecord:
+    task_id: UUID
+    task_version_id: UUID | None
+    version_no: int | None
+    action: str
+    actor_id: UUID
+    reason: str | None = None
+    details: dict[str, object] | None = None
+
+
+@dataclass(frozen=True)
+class AuditEventDTO:
+    id: UUID
+    task_id: UUID
+    task_version_id: UUID | None
+    version_no: int | None
+    action: str
+    actor_id: UUID
+    reason: str | None
+    details: dict[str, object]
+    occurred_at: datetime
+
+
+@dataclass(frozen=True)
+class AuditPage:
+    items: tuple[AuditEventDTO, ...]
+    total: int
+    offset: int
+    limit: int
+
+
+class AuditWriter:
+    """Append through the business transaction's repository; never commits."""
+    def __init__(self, repository: ContentBankRepository) -> None:
+        self.repository = repository
+
+    async def write(self, event: AuditEventRecord) -> None:
+        await self.repository.append_audit(event)
 
 
 class ContentBankRepository(Protocol):
@@ -416,6 +467,8 @@ class ContentBankRepository(Protocol):
     async def archive_other_approved(self, task_id: UUID, except_version_id: UUID) -> None: ...
     async def clone_version(self, task_id: UUID, source_version_no: int, actor: ActorContext) -> VersionState: ...
     async def archive_task_versions(self, task_id: UUID, archived_at: datetime) -> ArchiveResult | None: ...
+    async def append_audit(self, event: AuditEventRecord) -> None: ...
+    async def list_audit(self, task_id: UUID, offset: int, limit: int, action: str | None) -> AuditPage | None: ...
 
 
 class UnitOfWork(Protocol):
@@ -472,6 +525,7 @@ class CreateTaskService:
             if details:
                 raise ApplicationError(details)
             result = await repository.create_task_with_initial_version(command, actor)
+            await AuditWriter(repository).write(AuditEventRecord(result.id, result.initial_version.id, 1, "task_created", actor.actor_id, details={}))
             await self.uow.commit()
             return result
 
@@ -539,7 +593,7 @@ class SaveMethodologyService:
     def __init__(self, uow: UnitOfWork) -> None:
         self.uow = uow
 
-    async def save(self, command: SaveMethodologyCommand) -> MethodologyDTO:
+    async def save(self, command: SaveMethodologyCommand, actor: ActorContext) -> MethodologyDTO:
         details = self.validate(command)
         if details:
             raise ApplicationError(details)
@@ -560,6 +614,11 @@ class SaveMethodologyService:
             if details:
                 raise ApplicationError(details)
             result = await self.uow.repository.replace_methodology(command)
+            await AuditWriter(self.uow.repository).write(AuditEventRecord(
+                version.task_id, version.id, version.version_no, "methodology_updated", actor.actor_id,
+                details={"rubric_items_count": len(command.rubric.items) if command.rubric else 0,
+                    "accepted_answers_count": len(command.accepted_answers), "hints_count": len(command.hints),
+                    "typical_error_links_count": len(command.typical_errors)}))
             await self.uow.commit()
             return result
 
@@ -641,6 +700,7 @@ class StatusCycleService:
                 raise IssuesError("validation_error", "Версия структурно некорректна.", structural)
             warnings = _methodology_issues(version)
             await self.uow.repository.set_version_status(version.task_version_id, "review")
+            await AuditWriter(self.uow.repository).write(AuditEventRecord(task_id, version.task_version_id, version.version_no, "submitted_for_review", actor.actor_id, details={"from_status": "draft", "to_status": "review"}))
             await self.uow.commit()
             return self._result(version, "review", ValidationReport(not warnings, tuple(warnings)))
 
@@ -648,6 +708,7 @@ class StatusCycleService:
         async with self.uow:
             version = await self._lock_active_latest(task_id, version_no, "review")
             await self.uow.repository.set_version_status(version.task_version_id, "draft")
+            await AuditWriter(self.uow.repository).write(AuditEventRecord(task_id, version.task_version_id, version.version_no, "returned_to_draft", actor.actor_id, reason=reason, details={"from_status": "review", "to_status": "draft"}))
             await self.uow.commit()
             return self._result(version, "draft")
 
@@ -668,6 +729,8 @@ class StatusCycleService:
             now = datetime.now(timezone.utc)
             await self.uow.repository.archive_other_approved(task_id, version.task_version_id)
             await self.uow.repository.set_version_status(version.task_version_id, "approved", now, actor.actor_id)
+            audit_details: dict[str, object] = {"from_status": "review", "to_status": "approved"}
+            await AuditWriter(self.uow.repository).write(AuditEventRecord(task_id, version.task_version_id, version.version_no, "version_approved", actor.actor_id, details=audit_details))
             await self.uow.commit()
             result = self._result(version, "approved", ValidationReport(True, ()))
             return StatusCommandResult(**{**result.__dict__, "approved_at": now, "approved_by": actor.actor_id})
@@ -702,6 +765,7 @@ class CreateVersionService:
             if source.status != "approved" or not source.is_latest:
                 raise ConflictError("Исходная версия не является последней утверждённой.", "invalid_source_version")
             result = await self.uow.repository.clone_version(command.task_id, command.source_version_no, actor)
+            await AuditWriter(self.uow.repository).write(AuditEventRecord(command.task_id, result.task_version_id, result.version_no, "version_created", actor.actor_id, details={"source_version_no": command.source_version_no}))
             await self.uow.commit()
             return result
 
@@ -710,10 +774,23 @@ class ArchiveTaskService:
     def __init__(self, uow: UnitOfWork) -> None:
         self.uow = uow
 
-    async def archive(self, task_id: UUID, actor: ActorContext) -> ArchiveResult:
+    async def archive(self, task_id: UUID, actor: ActorContext, reason: str | None = None) -> ArchiveResult:
         async with self.uow:
             result = await self.uow.repository.archive_task_versions(task_id, datetime.now(timezone.utc))
             if result is None:
                 raise NotFoundError("Задание не найдено.")
+            if result.changed:
+                await AuditWriter(self.uow.repository).write(AuditEventRecord(task_id, result.latest_version_id, result.latest_version_no, "task_archived", actor.actor_id, reason=reason, details={"from_status": result.previous_status, "to_status": "archived"}))
             await self.uow.commit()
             return result
+
+
+class GetAuditService:
+    def __init__(self, repository: ContentBankRepository) -> None:
+        self.repository = repository
+
+    async def get(self, task_id: UUID, offset: int, limit: int, action: str | None) -> AuditPage:
+        page = await self.repository.list_audit(task_id, offset, limit, action)
+        if page is None:
+            raise NotFoundError("Задание не найдено.", "task_not_found")
+        return page

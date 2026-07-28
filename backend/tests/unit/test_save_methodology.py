@@ -5,8 +5,10 @@ from uuid import uuid4
 import pytest
 
 from app.application.content_bank import (AcceptedAnswerInput, ApplicationError, ConflictError,
-    ExpectedSolutionInput, HintInput, LockedVersion, RubricInput, RubricItemInput,
+    ActorContext, ExpectedSolutionInput, HintInput, LockedVersion, RubricInput, RubricItemInput,
     SaveMethodologyCommand, SaveMethodologyService, TypicalErrorInput)
+
+ACTOR = ActorContext(uuid4())
 
 
 def command(**changes):
@@ -35,7 +37,7 @@ class Uow:
 async def test_save_commits_once_for_latest_draft():
     cmd, skill = command()
     uow = Uow(LockedVersion(cmd.task_version_id, "number", "draft", True, frozenset({skill})))
-    await SaveMethodologyService(uow).save(cmd)
+    await SaveMethodologyService(uow).save(cmd, ACTOR)
     assert uow.committed
     uow.repository.replace_methodology.assert_awaited_once_with(cmd)
 
@@ -43,7 +45,7 @@ async def test_save_commits_once_for_latest_draft():
 @pytest.mark.parametrize("status,latest", [("review", True), ("approved", True), ("archived", True), ("draft", False)])
 async def test_only_latest_draft_is_editable(status, latest):
     cmd, skill = command(); uow = Uow(LockedVersion(cmd.task_version_id, "number", status, latest, frozenset({skill})))
-    with pytest.raises(ConflictError): await SaveMethodologyService(uow).save(cmd)
+    with pytest.raises(ConflictError): await SaveMethodologyService(uow).save(cmd, ACTOR)
     assert not uow.committed
 
 
@@ -55,7 +57,7 @@ async def test_only_latest_draft_is_editable(status, latest):
 ])
 async def test_payload_invariants_are_rejected_before_repository(change):
     cmd, skill = command(**change); uow = Uow(LockedVersion(cmd.task_version_id, "number", "draft", True, frozenset({skill})))
-    with pytest.raises(ApplicationError): await SaveMethodologyService(uow).save(cmd)
+    with pytest.raises(ApplicationError): await SaveMethodologyService(uow).save(cmd, ACTOR)
     uow.repository.lock_version.assert_not_awaited()
 
 
@@ -63,6 +65,6 @@ async def test_tolerance_is_number_only_and_skill_must_be_linked():
     foreign = uuid4()
     cmd, _ = command(accepted_answers=(AcceptedAnswerInput("x", Decimal("0.1"), None, None),), skill=foreign)
     uow = Uow(LockedVersion(cmd.task_version_id, "short_text", "draft", True, frozenset()))
-    with pytest.raises(ApplicationError) as caught: await SaveMethodologyService(uow).save(cmd)
+    with pytest.raises(ApplicationError) as caught: await SaveMethodologyService(uow).save(cmd, ACTOR)
     assert {x.code for x in caught.value.details} == {"not_allowed", "invalid_relation"}
     assert not uow.committed
