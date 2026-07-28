@@ -5,13 +5,28 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
-from app.application.content_bank import AcceptedAnswerInput, ActorContext, ApplicationError, ArchiveTaskService, CreateTaskCommand, CreateTaskService, CreateVersionCommand, CreateVersionService, ExpectedSolutionInput, GetAuditService, GetTaskCardService, HintInput, ListTasksService, RubricInput, RubricItemInput, SaveMethodologyCommand, SaveMethodologyService, SkillLinkInput, StatusCycleService, TaskListQuery, TypicalErrorInput, ValidationDetail, VersionContentInput
+from app.application.content_bank import AcceptedAnswerInput, ActorContext, ApplicationError, ArchiveTaskService, CreateTaskCommand, CreateTaskService, CreateVersionCommand, CreateVersionService, ExpectedSolutionInput, GetAuditService, GetTaskCardService, HintInput, ImportCommitService, ImportPreviewService, ImportRow, ListTasksService, RubricInput, RubricItemInput, SaveMethodologyCommand, SaveMethodologyService, SkillLinkInput, StatusCycleService, TaskListQuery, TypicalErrorInput, ValidationDetail, VersionContentInput
 from app.config import Settings, get_settings
 from app.db.session import async_session_factory
 from app.infrastructure.repository import SQLAlchemyContentBankRepository, SQLAlchemyUnitOfWork
-from app.presentation.schemas import AuditPageResponse, ArchiveRequest, ArchiveResponse, CatalogResponse, CreatedVersionResponse, CreateVersionRequest, EmptyRequest, MethodologyPutRequest, MethodologyResponse, ReturnToDraftRequest, StatusCommandResponse, TaskCardResponse, TaskCreateRequest, TaskListPageResponse, TaskResponse
+from app.presentation.schemas import AuditPageResponse, ArchiveRequest, ArchiveResponse, CatalogResponse, CreatedVersionResponse, CreateVersionRequest, EmptyRequest, ImportCommitRequest, ImportCommitResponse, ImportPreviewRequest, ImportPreviewResponse, MethodologyPutRequest, MethodologyResponse, ReturnToDraftRequest, StatusCommandResponse, TaskCardResponse, TaskCreateRequest, TaskListPageResponse, TaskResponse
 
 router = APIRouter(prefix="/api/content-bank")
+
+def _create_command(payload) -> CreateTaskCommand:
+    c=payload.initial_version
+    return CreateTaskCommand(payload.subject_id,payload.grade_id,payload.topic_id,payload.subtopic_id,VersionContentInput(c.title,c.statement,c.task_type,c.answer_format,c.difficulty,c.source,tuple(SkillLinkInput(x.skill_id,x.weight,x.is_primary) for x in c.skills)))
+
+@router.post("/imports/preview",response_model=ImportPreviewResponse)
+async def preview_import(payload: ImportPreviewRequest, settings: Settings=Depends(get_settings)) -> object:
+    p=await ImportPreviewService(SQLAlchemyUnitOfWork(async_session_factory),settings.content_bank_import_preview_ttl_minutes).preview(payload.format,tuple(ImportRow(r.row_number,_create_command(r)) for r in payload.rows),ActorContext(settings.content_bank_dev_actor_id))
+    valid=sum(r.status=="valid" for r in p.rows)
+    return {"import_token":p.import_token,"format":p.format,"expires_at":p.expires_at,"can_commit":valid>0,"summary":{"rows_total":len(p.rows),"rows_valid":valid,"rows_invalid":len(p.rows)-valid},"rows":p.rows}
+
+@router.post("/imports/commit",response_model=ImportCommitResponse,status_code=201)
+async def commit_import(payload: ImportCommitRequest, settings: Settings=Depends(get_settings)) -> object:
+    items=await ImportCommitService(SQLAlchemyUnitOfWork(async_session_factory)).commit(payload.import_token,tuple(payload.row_numbers),ActorContext(settings.content_bank_dev_actor_id))
+    return {"imported_count":len(items),"items":[{"row_number":n,"task_id":t.id,"task_version_id":t.initial_version.id,"version_no":1,"status":"draft"} for n,t in items]}
 
 @router.put("/task-versions/{task_version_id}/methodology", response_model=MethodologyResponse)
 async def put_methodology(task_version_id: UUID, payload: MethodologyPutRequest, settings: Settings = Depends(get_settings)) -> object:
