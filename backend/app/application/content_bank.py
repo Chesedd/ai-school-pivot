@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from types import TracebackType
 from typing import Protocol, Self
-from uuid import UUID
+from uuid import UUID, uuid4
 
 TASK_TYPES = frozenset({"test", "calculation", "problem", "open_question", "essay"})
 DIFFICULTIES = frozenset({"basic", "standard", "advanced"})
@@ -344,6 +344,10 @@ class ConflictError(Exception):
         super().__init__(message)
         self.code = code
 
+class GoneError(Exception):
+    def __init__(self, message: str, code: str) -> None:
+        super().__init__(message); self.code = code
+
 
 class IssuesError(Exception):
     """A command validation failure that carries every discovered issue."""
@@ -469,6 +473,9 @@ class ContentBankRepository(Protocol):
     async def archive_task_versions(self, task_id: UUID, archived_at: datetime) -> ArchiveResult | None: ...
     async def append_audit(self, event: AuditEventRecord) -> None: ...
     async def list_audit(self, task_id: UUID, offset: int, limit: int, action: str | None) -> AuditPage | None: ...
+    async def save_import_preview(self, preview: ImportPreviewRecord) -> None: ...
+    async def get_import_preview_for_update(self, token: UUID) -> ImportPreviewRecord | None: ...
+    async def mark_import_preview_committed(self, token: UUID, at: datetime) -> None: ...
 
 
 class UnitOfWork(Protocol):
@@ -492,9 +499,23 @@ class CreateTaskService:
         self.uow = uow
 
     async def create_task(self, command: CreateTaskCommand, actor: ActorContext) -> TaskDTO:
-        details = self._validate_values(command)
         async with self.uow:
-            repository = self.uow.repository
+            result = await CreateTaskOperation(self.uow.repository).create(command, actor)
+            await self.uow.commit()
+            return result
+
+    @staticmethod
+    def _validate_values(command: CreateTaskCommand) -> list[ValidationDetail]:
+        return CreateTaskOperation.validate_values(command)
+
+
+class CreateTaskOperation:
+    """Shared transaction-neutral task/v1/skills/audit operation."""
+    def __init__(self, repository: ContentBankRepository) -> None: self.repository = repository
+
+    async def create(self, command: CreateTaskCommand, actor: ActorContext) -> TaskDTO:
+            details = self.validate_values(command)
+            repository = self.repository
             subject = await repository.get_subject(command.subject_id)
             grade = await repository.get_grade(command.grade_id)
             topic = await repository.get_topic(command.topic_id)
@@ -526,11 +547,10 @@ class CreateTaskService:
                 raise ApplicationError(details)
             result = await repository.create_task_with_initial_version(command, actor)
             await AuditWriter(repository).write(AuditEventRecord(result.id, result.initial_version.id, 1, "task_created", actor.actor_id, details={}))
-            await self.uow.commit()
             return result
 
     @staticmethod
-    def _validate_values(command: CreateTaskCommand) -> list[ValidationDetail]:
+    def validate_values(command: CreateTaskCommand) -> list[ValidationDetail]:
         links = command.initial_version.skills
         details: list[ValidationDetail] = []
         ids = [link.skill_id for link in links]
@@ -547,6 +567,75 @@ class CreateTaskService:
         if command.initial_version.answer_format not in allowed:
             details.append(ValidationDetail("initial_version.answer_format", "incompatible", "Формат ответа несовместим с типом задания."))
         return details
+
+
+@dataclass(frozen=True)
+class ImportRow:
+    row_number: int
+    command: CreateTaskCommand
+
+@dataclass(frozen=True)
+class ImportIssue:
+    code: str; field: str; message: str; severity: str = "error"
+
+@dataclass(frozen=True)
+class ImportPreviewRow:
+    row_number: int; status: str; command: CreateTaskCommand; issues: tuple[ImportIssue, ...]
+
+@dataclass(frozen=True)
+class ImportPreviewRecord:
+    import_token: UUID; format: str; actor_id: UUID; rows: tuple[ImportPreviewRow, ...]
+    created_at: datetime; expires_at: datetime; committed_at: datetime | None = None
+
+class ImportPreviewService:
+    def __init__(self, uow: UnitOfWork, ttl_minutes: int = 30) -> None: self.uow, self.ttl_minutes = uow, ttl_minutes
+    async def preview(self, format: str, rows: tuple[ImportRow, ...], actor: ActorContext) -> ImportPreviewRecord:
+        if format not in {"csv", "xlsx"} or not rows or len(rows) > 500 or len({r.row_number for r in rows}) != len(rows):
+            raise IssuesError("import_validation_error", "Импорт содержит ошибки.", [ValidationDetail("rows", "invalid", "Нужны 1–500 строк с уникальными row_number.")])
+        now = datetime.now(timezone.utc); checked = []
+        async with self.uow:
+            op = CreateTaskOperation(self.uow.repository)
+            for row in rows:
+                issues = [ImportIssue(x.code, x.field, x.message) for x in op.validate_values(row.command)]
+                # Catalog validation uses the same operation without writes via a dedicated check.
+                issues += [ImportIssue(x.code, x.field, x.message) for x in await self._catalog_issues(op.repository, row.command)]
+                checked.append(ImportPreviewRow(row.row_number, "invalid" if issues else "valid", row.command, tuple(issues)))
+            record = ImportPreviewRecord(uuid4(), format, actor.actor_id, tuple(checked), now, now + __import__('datetime').timedelta(minutes=self.ttl_minutes))
+            await self.uow.repository.save_import_preview(record); await self.uow.commit(); return record
+
+    @staticmethod
+    async def _catalog_issues(repo: ContentBankRepository, command: CreateTaskCommand) -> list[ValidationDetail]:
+        d=[]; subject=await repo.get_subject(command.subject_id); grade=await repo.get_grade(command.grade_id); topic=await repo.get_topic(command.topic_id); sub=await repo.get_subtopic(command.subtopic_id) if command.subtopic_id else None; skills=await repo.get_skills({x.skill_id for x in command.initial_version.skills})
+        if not subject:d.append(ValidationDetail("subject_id","not_found","Предмет не найден."))
+        if not grade:d.append(ValidationDetail("grade_id","not_found","Класс не найден."))
+        if not topic:d.append(ValidationDetail("topic_id","not_found","Тема не найдена."))
+        elif topic.subject_id!=command.subject_id or topic.grade_id!=command.grade_id:d.append(ValidationDetail("topic_id","invalid_relation","Нарушена иерархия каталога."))
+        if command.subtopic_id and not sub:d.append(ValidationDetail("subtopic_id","not_found","Подтема не найдена."))
+        elif sub and sub.topic_id!=command.topic_id:d.append(ValidationDetail("subtopic_id","invalid_relation","Нарушена иерархия каталога."))
+        for i,x in enumerate(command.initial_version.skills):
+            s=skills.get(x.skill_id)
+            if not s:d.append(ValidationDetail(f"initial_version.skills.{i}.skill_id","not_found","Навык не найден."))
+            elif s.topic_id!=command.topic_id or (command.subtopic_id and s.subtopic_id!=command.subtopic_id):d.append(ValidationDetail(f"initial_version.skills.{i}.skill_id","invalid_relation","Нарушена иерархия каталога."))
+        return d
+
+class ImportCommitService:
+    def __init__(self, uow: UnitOfWork) -> None: self.uow=uow
+    async def commit(self, token: UUID, row_numbers: tuple[int,...], actor: ActorContext) -> tuple[tuple[int,TaskDTO],...]:
+        if not row_numbers or len(row_numbers)>500 or len(set(row_numbers))!=len(row_numbers): raise IssuesError("import_validation_error","Некорректный выбор строк.",[ValidationDetail("row_numbers","invalid","Укажите уникальные номера строк.")])
+        async with self.uow:
+            p=await self.uow.repository.get_import_preview_for_update(token)
+            if not p or p.actor_id!=actor.actor_id: raise NotFoundError("Preview импорта не найден.","import_token_not_found")
+            now=datetime.now(timezone.utc)
+            if p.committed_at: raise ConflictError("Token уже использован.","import_token_already_committed")
+            if p.expires_at<=now: raise GoneError("Token истёк.","import_token_expired")
+            by_no={r.row_number:r for r in p.rows}; selected=[]
+            for n in row_numbers:
+                r=by_no.get(n)
+                if not r or r.status!="valid": raise IssuesError("import_validation_error","Некорректный выбор строк.",[ValidationDetail("row_numbers","invalid","Выбрана отсутствующая или невалидная строка.")])
+                selected.append(r)
+            result=[]; op=CreateTaskOperation(self.uow.repository)
+            for r in selected: result.append((r.row_number,await op.create(r.command,actor)))
+            await self.uow.repository.mark_import_preview_committed(token,now); await self.uow.commit(); return tuple(result)
 
 
 class ListTasksService:

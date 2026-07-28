@@ -330,3 +330,27 @@ class AuditPageResponse(BaseModel):
     total: int
     offset: int
     limit: int
+
+class ImportRowRequest(TaskCreateRequest):
+    row_number: int = Field(gt=0)
+
+class ImportPreviewRequest(StrictRequest):
+    format: Literal["csv", "xlsx"]
+    rows: list[ImportRowRequest] = Field(min_length=1, max_length=500)
+
+class ImportIssueResponse(BaseModel):
+    code: str; field: str; message: str; severity: str
+class ImportPreviewRowResponse(BaseModel):
+    row_number: int; status: str; issues: list[ImportIssueResponse]
+class ImportSummaryResponse(BaseModel):
+    rows_total: int; rows_valid: int; rows_invalid: int
+class ImportPreviewResponse(BaseModel):
+    import_token: UUID; format: str; expires_at: datetime; can_commit: bool
+    summary: ImportSummaryResponse; rows: list[ImportPreviewRowResponse]
+class ImportCommitRequest(StrictRequest):
+    import_token: UUID
+    row_numbers: list[int] = Field(max_length=500)
+class ImportCommitItemResponse(BaseModel):
+    row_number: int; task_id: UUID; task_version_id: UUID; version_no: int; status: str
+class ImportCommitResponse(BaseModel):
+    imported_count: int; items: list[ImportCommitItemResponse]

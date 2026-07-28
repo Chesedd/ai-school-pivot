@@ -1,6 +1,6 @@
 # AI School Pivot
 
-Content Bank MVP through phase 2.9A: FastAPI/SQLAlchemy task slices, version-scoped methodology,
+Content Bank MVP through phase 2.10A: FastAPI/SQLAlchemy task slices, version-scoped methodology,
 a transactionally atomic, read-only audit history API,
 a filterable React/Vite task table and creation form, and PostgreSQL 17.
 Alembic remains the schema owner.
@@ -54,3 +54,22 @@ Phase 2.9A adds `audit_log` and `GET
 running the backend tests. A PostgreSQL integration run requires a separately
 created database whose name ends in `_test` and `TEST_DATABASE_URL`; do not
 seed that test database.
+
+## JSON import preview and commit (2.10A)
+
+CSV/XLSX parsing is intentionally performed by the frontend client in phase
+2.10B. The backend accepts normalized JSON and independently validates it.
+
+```bash
+curl -sS -H 'Content-Type: application/json' -d @preview.json \
+  http://localhost:8000/api/content-bank/imports/preview
+# Copy import_token and valid row_number values, then:
+curl -sS -H 'Content-Type: application/json' \
+  -d '{"import_token":"<token>","row_numbers":[2]}' \
+  http://localhost:8000/api/content-bank/imports/commit
+```
+
+`preview.json` has `{"format":"csv","rows":[...]}`; each row is the normal
+task-create payload plus a stable `row_number`. Preview persists no task or
+audit event. Commit atomically creates only the selected valid rows. Tokens
+expire after 30 minutes and can be committed once.
