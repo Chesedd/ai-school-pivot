@@ -11,12 +11,51 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from app.application.content_bank import AcceptedAnswerDTO, ActorContext, ArchiveResult, AuditEventDTO, AuditEventRecord, AuditPage, CatalogRecord, CatalogRef, ConflictError, CreateTaskCommand, EMPTY_METHODOLOGY, ExpectedSolutionDTO, HintDTO, LockedVersion, MethodologyDTO, RubricDTO, RubricItemDTO, SaveMethodologyCommand, SkillLinkDTO, TaskCard, TaskCardVersion, TaskDTO, TaskListItem, TaskListPage, TaskListQuery, TaskVersionDTO, TaskVersionSummary, TypicalErrorDTO, VersionState
-from app.infrastructure.models import AcceptedAnswer, AuditLog, ExpectedSolution, Grade, Hint, Rubric, RubricItem, Skill, Subject, Subtopic, Task, TaskErrorLink, TaskSkillLink, TaskVersion, Topic, TypicalError
+from app.infrastructure.models import AcceptedAnswer, AuditLog, ExpectedSolution, Grade, Hint, ImportPreview, Rubric, RubricItem, Skill, Subject, Subtopic, Task, TaskErrorLink, TaskSkillLink, TaskVersion, Topic, TypicalError
+from app.application.content_bank import ImportCatalogContext, ImportIssue, ImportPreviewRecord, ImportPreviewRow, SkillLinkInput, VersionContentInput
 
 
 class SQLAlchemyContentBankRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    @staticmethod
+    def _command_json(c: CreateTaskCommand) -> dict:
+        v=c.initial_version
+        return {"subject_id":str(c.subject_id),"grade_id":str(c.grade_id),"topic_id":str(c.topic_id),"subtopic_id":str(c.subtopic_id) if c.subtopic_id else None,"initial_version":{"title":v.title,"statement":v.statement,"task_type":v.task_type,"answer_format":v.answer_format,"difficulty":v.difficulty,"source":v.source,"skills":[{"skill_id":str(x.skill_id),"weight":str(x.weight),"is_primary":x.is_primary} for x in v.skills]}}
+
+    @staticmethod
+    def _command_from_json(x: dict) -> CreateTaskCommand:
+        from decimal import Decimal
+        v=x["initial_version"]
+        return CreateTaskCommand(UUID(x["subject_id"]),UUID(x["grade_id"]),UUID(x["topic_id"]),UUID(x["subtopic_id"]) if x["subtopic_id"] else None,VersionContentInput(v["title"],v["statement"],v["task_type"],v["answer_format"],v["difficulty"],v["source"],tuple(SkillLinkInput(UUID(s["skill_id"]),Decimal(s["weight"]),s["is_primary"]) for s in v["skills"])))
+
+    async def save_import_preview(self, p: ImportPreviewRecord) -> None:
+        rows=[{"row_number":r.row_number,"status":r.status,"command":self._command_json(r.command),"issues":[i.__dict__ for i in r.issues]} for r in p.rows]
+        self.session.add(ImportPreview(import_token=p.import_token,format=p.format,actor_id=p.actor_id,rows=rows,created_at=p.created_at,expires_at=p.expires_at,committed_at=p.committed_at)); await self.session.flush()
+
+    async def get_import_preview_for_update(self, token: UUID) -> ImportPreviewRecord | None:
+        m=(await self.session.execute(select(ImportPreview).where(ImportPreview.import_token==token).with_for_update())).scalar_one_or_none()
+        if not m:return None
+        rows=tuple(ImportPreviewRow(x["row_number"],x["status"],self._command_from_json(x["command"]),tuple(ImportIssue(**i) for i in x["issues"])) for x in m.rows)
+        return ImportPreviewRecord(m.import_token,m.format,m.actor_id,rows,m.created_at,m.expires_at,m.committed_at)
+
+    async def mark_import_preview_committed(self, token: UUID, at: datetime) -> None:
+        await self.session.execute(update(ImportPreview).where(ImportPreview.import_token==token).values(committed_at=at))
+
+    async def get_import_catalog_context(self, commands: tuple[CreateTaskCommand, ...]) -> ImportCatalogContext:
+        subject_ids={c.subject_id for c in commands}; grade_ids={c.grade_id for c in commands}; topic_ids={c.topic_id for c in commands}
+        subtopic_ids={c.subtopic_id for c in commands if c.subtopic_id}; skill_ids={s.skill_id for c in commands for s in c.initial_version.skills}
+        subjects=(await self.session.execute(select(Subject).where(Subject.id.in_(subject_ids)))).scalars()
+        grades=(await self.session.execute(select(Grade).where(Grade.id.in_(grade_ids)))).scalars()
+        topics=(await self.session.execute(select(Topic).where(Topic.id.in_(topic_ids)))).scalars()
+        subtopics=(await self.session.execute(select(Subtopic).where(Subtopic.id.in_(subtopic_ids)))).scalars()
+        skills=(await self.session.execute(select(Skill).options(selectinload(Skill.subtopic)).where(Skill.id.in_(skill_ids)))).scalars()
+        return ImportCatalogContext(
+            {x.id:CatalogRecord(x.id,x.name) for x in subjects}, {x.id:CatalogRecord(x.id,x.name) for x in grades},
+            {x.id:CatalogRecord(x.id,x.name,subject_id=x.subject_id,grade_id=x.grade_id) for x in topics},
+            {x.id:CatalogRecord(x.id,x.name,topic_id=x.topic_id) for x in subtopics},
+            {x.id:CatalogRecord(x.id,x.name,topic_id=x.subtopic.topic_id,subtopic_id=x.subtopic_id) for x in skills})
 
     async def get_subject(self, value: UUID) -> CatalogRecord | None:
         row = await self.session.get(Subject, value)

@@ -235,3 +235,19 @@ class AuditLog(IdMixin, Base):
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     details: Mapped[dict[str, object]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+
+class ImportPreview(Base):
+    __tablename__ = "import_previews"
+    __table_args__ = (
+        CheckConstraint("format IN ('csv','xlsx')", name="ck_import_previews_format"),
+        CheckConstraint("expires_at > created_at", name="ck_import_previews_expiry"),
+        CheckConstraint("committed_at IS NULL OR committed_at >= created_at", name="ck_import_previews_committed_at"),
+        Index("ix_import_previews_expires_at", "expires_at"),
+    )
+    import_token: Mapped[UUID] = mapped_column(uuid_type, primary_key=True)
+    format: Mapped[str] = mapped_column(String(8))
+    actor_id: Mapped[UUID] = mapped_column(uuid_type)
+    rows: Mapped[list[dict[str, object]]] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    committed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
