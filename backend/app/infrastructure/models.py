@@ -22,6 +22,7 @@ answer_format_enum = ENUM("single_choice", "multiple_choice", "short_text", "num
 difficulty_enum = ENUM("basic", "standard", "advanced", name="difficulty_level", create_type=False)
 grading_mode_enum = ENUM("points", name="grading_mode", create_type=False)
 severity_enum = ENUM("low", "medium", "high", name="typical_error_severity", create_type=False)
+audit_action_enum = ENUM("task_created", "methodology_updated", "submitted_for_review", "returned_to_draft", "version_approved", "version_created", "task_archived", name="audit_action", create_type=False)
 
 
 class IdMixin:
@@ -216,3 +217,21 @@ class Hint(IdMixin, Base):
     level: Mapped[int] = mapped_column(Integer)
     hint_text: Mapped[str] = mapped_column(Text)
     task_version: Mapped[TaskVersion] = relationship(back_populates="hints")
+
+
+class AuditLog(IdMixin, Base):
+    __tablename__ = "audit_log"
+    __table_args__ = (
+        CheckConstraint("version_no > 0", name="ck_audit_log_version_no_positive"),
+        Index("ix_audit_log_task_occurred_at", "task_id", "occurred_at"),
+        Index("ix_audit_log_task_action_occurred_at", "task_id", "action", "occurred_at"),
+        Index("ix_audit_log_task_version_id", "task_version_id"),
+    )
+    task_id: Mapped[UUID] = mapped_column(ForeignKey("tasks.id", ondelete="RESTRICT", name="fk_audit_log_task"))
+    task_version_id: Mapped[UUID | None] = mapped_column(ForeignKey("task_versions.id", ondelete="RESTRICT", name="fk_audit_log_task_version"), nullable=True)
+    version_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    action: Mapped[str] = mapped_column(audit_action_enum)
+    actor_id: Mapped[UUID] = mapped_column(uuid_type)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    details: Mapped[dict[str, object]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))

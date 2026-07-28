@@ -10,8 +10,8 @@ from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
-from app.application.content_bank import AcceptedAnswerDTO, ActorContext, ArchiveResult, CatalogRecord, CatalogRef, ConflictError, CreateTaskCommand, EMPTY_METHODOLOGY, ExpectedSolutionDTO, HintDTO, LockedVersion, MethodologyDTO, RubricDTO, RubricItemDTO, SaveMethodologyCommand, SkillLinkDTO, TaskCard, TaskCardVersion, TaskDTO, TaskListItem, TaskListPage, TaskListQuery, TaskVersionDTO, TaskVersionSummary, TypicalErrorDTO, VersionState
-from app.infrastructure.models import AcceptedAnswer, ExpectedSolution, Grade, Hint, Rubric, RubricItem, Skill, Subject, Subtopic, Task, TaskErrorLink, TaskSkillLink, TaskVersion, Topic, TypicalError
+from app.application.content_bank import AcceptedAnswerDTO, ActorContext, ArchiveResult, AuditEventDTO, AuditEventRecord, AuditPage, CatalogRecord, CatalogRef, ConflictError, CreateTaskCommand, EMPTY_METHODOLOGY, ExpectedSolutionDTO, HintDTO, LockedVersion, MethodologyDTO, RubricDTO, RubricItemDTO, SaveMethodologyCommand, SkillLinkDTO, TaskCard, TaskCardVersion, TaskDTO, TaskListItem, TaskListPage, TaskListQuery, TaskVersionDTO, TaskVersionSummary, TypicalErrorDTO, VersionState
+from app.infrastructure.models import AcceptedAnswer, AuditLog, ExpectedSolution, Grade, Hint, Rubric, RubricItem, Skill, Subject, Subtopic, Task, TaskErrorLink, TaskSkillLink, TaskVersion, Topic, TypicalError
 
 
 class SQLAlchemyContentBankRepository:
@@ -152,7 +152,7 @@ class SQLAlchemyContentBankRepository:
             return None
         latest_no = await self.session.scalar(select(func.max(TaskVersion.version_no)).where(TaskVersion.task_id == version.task_id))
         skill_ids = frozenset((await self.session.scalars(select(TaskSkillLink.skill_id).where(TaskSkillLink.task_version_id == version.id))).all())
-        return LockedVersion(version.id, version.answer_format, version.status, version.version_no == latest_no, skill_ids)
+        return LockedVersion(version.id, version.answer_format, version.status, version.version_no == latest_no, skill_ids, version.task_id, version.version_no)
 
     async def lock_task_version(self, task_id: UUID, version_no: int) -> VersionState | None:
         task = await self.session.scalar(select(Task).where(Task.id == task_id).with_for_update())
@@ -233,7 +233,9 @@ class SQLAlchemyContentBankRepository:
         task = await self.session.scalar(select(Task).where(Task.id == task_id).with_for_update())
         if task is None: return None
         versions = (await self.session.scalars(select(TaskVersion).where(TaskVersion.task_id == task_id).order_by(TaskVersion.version_no.desc()).with_for_update())).all()
-        if task.archived_at is None:
+        changed = task.archived_at is None
+        previous_status = versions[0].status
+        if changed:
             task.archived_at = archived_at
             task.updated_at = func.now()
             for version in versions:
@@ -241,7 +243,24 @@ class SQLAlchemyContentBankRepository:
                     version.status = "archived"
                     version.updated_at = func.now()
             await self.session.flush()
-        return ArchiveResult(task.id, task.archived_at, versions[0].status)
+        return ArchiveResult(task.id, task.archived_at, versions[0].status, versions[0].id, versions[0].version_no, previous_status, changed)
+
+    async def append_audit(self, event: AuditEventRecord) -> None:
+        self.session.add(AuditLog(task_id=event.task_id, task_version_id=event.task_version_id,
+            version_no=event.version_no, action=event.action, actor_id=event.actor_id,
+            reason=event.reason, details=event.details or {}))
+        await self.session.flush()
+
+    async def list_audit(self, task_id: UUID, offset: int, limit: int, action: str | None) -> AuditPage | None:
+        if await self.session.get(Task, task_id) is None:
+            return None
+        filtered = select(AuditLog).where(AuditLog.task_id == task_id)
+        if action is not None:
+            filtered = filtered.where(AuditLog.action == action)
+        total = int((await self.session.scalar(select(func.count()).select_from(filtered.subquery()))) or 0)
+        rows = (await self.session.scalars(filtered.order_by(AuditLog.occurred_at.desc(), AuditLog.id.desc()).offset(offset).limit(limit))).all()
+        return AuditPage(tuple(AuditEventDTO(row.id, row.task_id, row.task_version_id, row.version_no,
+            row.action, row.actor_id, row.reason, row.details, row.occurred_at) for row in rows), total, offset, limit)
 
     async def replace_methodology(self, command: SaveMethodologyCommand) -> MethodologyDTO:
         version_id = command.task_version_id

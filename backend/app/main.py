@@ -33,7 +33,7 @@ async def issues_error(_: Request, exc: IssuesError) -> JSONResponse:
 
 @app.exception_handler(NotFoundError)
 async def not_found_error(_: Request, exc: NotFoundError) -> JSONResponse:
-    return error_response("not_found", str(exc), [], 404)
+    return error_response(exc.code, str(exc), [], 404)
 
 @app.exception_handler(ConflictError)
 async def conflict_error(_: Request, exc: ConflictError) -> JSONResponse:

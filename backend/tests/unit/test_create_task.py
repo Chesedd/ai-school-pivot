@@ -13,6 +13,8 @@ class Repo:
     def __init__(self):
         self.subject, self.grade, self.topic, self.subtopic, self.skill = [uuid4() for _ in range(5)]
         self.fail = False
+        self.audit_events = []
+    async def append_audit(self, event): self.audit_events.append(event)
     async def get_subject(self, value): return CatalogRecord(value, "s") if value == self.subject else None
     async def get_grade(self, value): return CatalogRecord(value, "g") if value == self.grade else None
     async def get_topic(self, value): return CatalogRecord(value, "t", subject_id=self.subject, grade_id=self.grade) if value == self.topic else None
@@ -42,6 +44,7 @@ async def test_success():
     repo, actor = Repo(), ActorContext(uuid4()); uow = Uow(repo)
     result = await CreateTaskService(uow).create_task(command(repo), actor)
     assert result.initial_version.version_no == 1 and result.initial_version.status == "draft" and uow.committed
+    assert [event.action for event in repo.audit_events] == ["task_created"]
 
 
 @pytest.mark.parametrize("links,code", [([], "primary_count"), ([False, False], "primary_count"), ([True, True], "primary_count"), ([True, False], "duplicate"), ([True], "weight_sum")])
