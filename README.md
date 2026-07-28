@@ -73,3 +73,17 @@ curl -sS -H 'Content-Type: application/json' \
 task-create payload plus a stable `row_number`. Preview persists no task or
 audit event. Commit atomically creates only the selected valid rows. Tokens
 expire after 30 minutes and can be committed once.
+
+Windows PowerShell 5.1 verification must obtain container configuration without
+parsing `.env` and must not print connection strings:
+
+```powershell
+$PgUser = (docker compose exec -T postgres printenv POSTGRES_USER).Trim()
+$DevDatabaseUrl = (docker compose exec -T backend printenv DATABASE_URL).Trim()
+$TestDatabaseUrl = $DevDatabaseUrl -replace '/[^/?]+(\?.*)?$', '/content_bank_test$1'
+```
+
+For a mixed preview, first commit its invalid row and assert HTTP 422,
+`import_validation_error`, and NULL `committed_at`; only then commit the valid
+subset with that token. Expiration uses a separate uncommitted token. Repeating
+a successful commit must return `import_token_already_committed`.

@@ -238,7 +238,12 @@ class AuditLog(IdMixin, Base):
 
 class ImportPreview(Base):
     __tablename__ = "import_previews"
-    __table_args__ = (Index("ix_import_previews_expires_at", "expires_at"),)
+    __table_args__ = (
+        CheckConstraint("format IN ('csv','xlsx')", name="ck_import_previews_format"),
+        CheckConstraint("expires_at > created_at", name="ck_import_previews_expiry"),
+        CheckConstraint("committed_at IS NULL OR committed_at >= created_at", name="ck_import_previews_committed_at"),
+        Index("ix_import_previews_expires_at", "expires_at"),
+    )
     import_token: Mapped[UUID] = mapped_column(uuid_type, primary_key=True)
     format: Mapped[str] = mapped_column(String(8))
     actor_id: Mapped[UUID] = mapped_column(uuid_type)

@@ -59,6 +59,14 @@ class CatalogRecord:
     topic_id: UUID | None = None
     subtopic_id: UUID | None = None
 
+@dataclass(frozen=True)
+class ImportCatalogContext:
+    subjects: dict[UUID, CatalogRecord]
+    grades: dict[UUID, CatalogRecord]
+    topics: dict[UUID, CatalogRecord]
+    subtopics: dict[UUID, CatalogRecord]
+    skills: dict[UUID, CatalogRecord]
+
 
 @dataclass(frozen=True)
 class SkillLinkDTO:
@@ -476,6 +484,7 @@ class ContentBankRepository(Protocol):
     async def save_import_preview(self, preview: ImportPreviewRecord) -> None: ...
     async def get_import_preview_for_update(self, token: UUID) -> ImportPreviewRecord | None: ...
     async def mark_import_preview_committed(self, token: UUID, at: datetime) -> None: ...
+    async def get_import_catalog_context(self, commands: tuple[CreateTaskCommand, ...]) -> ImportCatalogContext: ...
 
 
 class UnitOfWork(Protocol):
@@ -513,15 +522,20 @@ class CreateTaskOperation:
     """Shared transaction-neutral task/v1/skills/audit operation."""
     def __init__(self, repository: ContentBankRepository) -> None: self.repository = repository
 
-    async def create(self, command: CreateTaskCommand, actor: ActorContext) -> TaskDTO:
+    async def create(self, command: CreateTaskCommand, actor: ActorContext, catalog: ImportCatalogContext | None = None) -> TaskDTO:
             details = self.validate_values(command)
             repository = self.repository
-            subject = await repository.get_subject(command.subject_id)
-            grade = await repository.get_grade(command.grade_id)
-            topic = await repository.get_topic(command.topic_id)
-            subtopic = await repository.get_subtopic(command.subtopic_id) if command.subtopic_id else None
-            skill_ids = {link.skill_id for link in command.initial_version.skills}
-            skills = await repository.get_skills(skill_ids)
+            if catalog is None:
+                subject = await repository.get_subject(command.subject_id)
+                grade = await repository.get_grade(command.grade_id)
+                topic = await repository.get_topic(command.topic_id)
+                subtopic = await repository.get_subtopic(command.subtopic_id) if command.subtopic_id else None
+                skills = await repository.get_skills({link.skill_id for link in command.initial_version.skills})
+            else:
+                subject, grade = catalog.subjects.get(command.subject_id), catalog.grades.get(command.grade_id)
+                topic = catalog.topics.get(command.topic_id)
+                subtopic = catalog.subtopics.get(command.subtopic_id) if command.subtopic_id else None
+                skills = catalog.skills
             if subject is None:
                 details.append(ValidationDetail("subject_id", "not_found", "Предмет не найден."))
             if grade is None:
@@ -595,17 +609,18 @@ class ImportPreviewService:
         now = datetime.now(timezone.utc); checked = []
         async with self.uow:
             op = CreateTaskOperation(self.uow.repository)
+            catalog = await self.uow.repository.get_import_catalog_context(tuple(r.command for r in rows))
             for row in rows:
                 issues = [ImportIssue(x.code, x.field, x.message) for x in op.validate_values(row.command)]
                 # Catalog validation uses the same operation without writes via a dedicated check.
-                issues += [ImportIssue(x.code, x.field, x.message) for x in await self._catalog_issues(op.repository, row.command)]
+                issues += [ImportIssue(x.code, x.field, x.message) for x in self._catalog_issues(catalog, row.command)]
                 checked.append(ImportPreviewRow(row.row_number, "invalid" if issues else "valid", row.command, tuple(issues)))
             record = ImportPreviewRecord(uuid4(), format, actor.actor_id, tuple(checked), now, now + __import__('datetime').timedelta(minutes=self.ttl_minutes))
             await self.uow.repository.save_import_preview(record); await self.uow.commit(); return record
 
     @staticmethod
-    async def _catalog_issues(repo: ContentBankRepository, command: CreateTaskCommand) -> list[ValidationDetail]:
-        d=[]; subject=await repo.get_subject(command.subject_id); grade=await repo.get_grade(command.grade_id); topic=await repo.get_topic(command.topic_id); sub=await repo.get_subtopic(command.subtopic_id) if command.subtopic_id else None; skills=await repo.get_skills({x.skill_id for x in command.initial_version.skills})
+    def _catalog_issues(catalog: ImportCatalogContext, command: CreateTaskCommand) -> list[ValidationDetail]:
+        d=[]; subject=catalog.subjects.get(command.subject_id); grade=catalog.grades.get(command.grade_id); topic=catalog.topics.get(command.topic_id); sub=catalog.subtopics.get(command.subtopic_id) if command.subtopic_id else None; skills=catalog.skills
         if not subject:d.append(ValidationDetail("subject_id","not_found","Предмет не найден."))
         if not grade:d.append(ValidationDetail("grade_id","not_found","Класс не найден."))
         if not topic:d.append(ValidationDetail("topic_id","not_found","Тема не найдена."))
@@ -634,7 +649,8 @@ class ImportCommitService:
                 if not r or r.status!="valid": raise IssuesError("import_validation_error","Некорректный выбор строк.",[ValidationDetail("row_numbers","invalid","Выбрана отсутствующая или невалидная строка.")])
                 selected.append(r)
             result=[]; op=CreateTaskOperation(self.uow.repository)
-            for r in selected: result.append((r.row_number,await op.create(r.command,actor)))
+            catalog=await self.uow.repository.get_import_catalog_context(tuple(r.command for r in selected))
+            for r in selected: result.append((r.row_number,await op.create(r.command,actor,catalog)))
             await self.uow.repository.mark_import_preview_committed(token,now); await self.uow.commit(); return tuple(result)
 
 
