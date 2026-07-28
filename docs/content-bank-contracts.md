@@ -1,4 +1,4 @@
-# Content Bank MVP — контракты фаз 2.2–2.9A
+# Content Bank MVP — контракты фаз 2.2–2.10A
 
 > Статус: проектный контракт v0.1. Этот документ фиксирует границы и
 > интерфейсы до создания схемы БД, HTTP-обработчиков и клиентских компонентов.
@@ -332,6 +332,44 @@ HTTP-валидация пути, query или JSON возвращает 422 `va
 `approval_requirements_not_met` — 422; `import_validation_error` — 422.
 Неожиданная ошибка — 500 `internal_error` без внутренних деталей и traceback.
 Каждая валидационная проблема всегда имеет `field`, `code`, `message`.
+
+## 18. Фаза 2.10A — token-based JSON import
+
+Backend не получает файлы: в 2.10B frontend разбирает CSV/XLSX, а сервер заново
+валидирует нормализованный JSON. Preview принимает `format` (`csv`/`xlsx`) и
+`rows` (1–500). Каждая строка содержит уникальный положительный `row_number` и
+ровно поля обычного create: `subject_id`, `grade_id`, `topic_id`, nullable
+`subtopic_id`, `initial_version` (`title`, `statement`, `task_type`,
+`answer_format`, `difficulty`, `source`, `skills` с `skill_id`, `weight`,
+`is_primary`). UUID и actor задания серверные; импорт всегда создаёт draft v1.
+
+```json
+{"format":"csv","rows":[{"row_number":2,"subject_id":"uuid","grade_id":"uuid","topic_id":"uuid","subtopic_id":"uuid","initial_version":{"title":"Циклы","statement":"Решите задачу","task_type":"problem","answer_format":"number","difficulty":"basic","source":null,"skills":[{"skill_id":"uuid","weight":"1.0000","is_primary":true}]}}]}
+```
+
+`POST /api/content-bank/imports/preview` сохраняет только preview и возвращает
+`import_token`, `format`, `expires_at`, `can_commit`, summary с
+`rows_total/rows_valid/rows_invalid`, а также rows с `row_number`, `status` и
+issues (`code`, `field`, `message`, `severity`). Mixed preview допустим.
+
+`POST /api/content-bank/imports/commit` принимает
+`{"import_token":"uuid","row_numbers":[2]}`. Выбор обязан быть непустым,
+уникальным и включать только существующие valid rows. Ответ 201 содержит
+`imported_count` и items (`row_number`, `task_id`, `task_version_id`,
+`version_no`, `status`).
+
+Preview token — UUID, генерируемый сервером, принадлежит actor и действует 30
+минут (настройка `CONTENT_BANK_IMPORT_PREVIEW_TTL_MINUTES`). Он одноразовый.
+Commit блокирует preview через `SELECT FOR UPDATE`, создаёт все выбранные
+task/v1/skills/audit, отмечает `committed_at` и делает один commit. Любая ошибка
+откатывает всё, включая отметку. Коды lifecycle: `import_token_not_found` (404),
+`import_token_expired` (410), `import_token_already_committed` (409);
+структура/выбор строк — `import_validation_error` (422).
+
+PostgreSQL `import_previews` хранит token, format, actor_id, нормализованные rows
+и validation result в JSONB, created_at, expires_at, committed_at; исходный файл
+и секреты не сохраняются. Повторный новый preview тех же данных может создать
+новые UUID: semantic deduplication отложена до 2.11. Методика не импортируется.
 
 Возможный дубль не является фатальной ошибкой: успешные create/preview могут
 вернуть `warnings: [{"code":"duplicate_warning","message":"...",
