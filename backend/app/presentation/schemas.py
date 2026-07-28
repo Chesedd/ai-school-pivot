@@ -311,3 +311,22 @@ class ArchiveResponse(BaseModel):
     task_id: UUID
     archived_at: datetime
     latest_status: str
+
+
+class AuditEventResponse(BaseModel):
+    id: UUID
+    task_id: UUID
+    task_version_id: UUID | None
+    version_no: int | None
+    action: str
+    actor_id: UUID
+    reason: str | None
+    details: dict[str, object]
+    occurred_at: datetime
+
+
+class AuditPageResponse(BaseModel):
+    items: list[AuditEventResponse]
+    total: int
+    offset: int
+    limit: int

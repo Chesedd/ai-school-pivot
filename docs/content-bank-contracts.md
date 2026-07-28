@@ -1,4 +1,4 @@
-# Content Bank MVP — контракты фаз 2.2–2.6A
+# Content Bank MVP — контракты фаз 2.2–2.9A
 
 > Статус: проектный контракт v0.1. Этот документ фиксирует границы и
 > интерфейсы до создания схемы БД, HTTP-обработчиков и клиентских компонентов.
@@ -174,6 +174,49 @@ offset-пагинацию: `offset` (>=0, default 0), `limit` (1..100, default 2
 | POST `/imports/preview` | `{ "format": "json", "rows": [...] }` | 200 ImportPreview | 422 |
 | POST `/imports/commit` | `{ "import_token": "uuid", "row_numbers": [1] }` | 201 ImportResult | 409, 422 |
 | POST `/duplicates/check` | `{ "statement": "...", "subject_id": "uuid", "grade_id": "uuid", "topic_id": "uuid", "exclude_task_id": null }` | 200 DuplicateCandidates | 422 |
+
+## 2.9A Audit Log
+
+`audit_log` — append-only журнал бизнес-мутаций. Его схема: `id UUID PRIMARY
+KEY DEFAULT gen_random_uuid()`, `task_id UUID NOT NULL` с `FK tasks.id ON
+DELETE RESTRICT`, nullable `task_version_id UUID` с `FK task_versions.id ON
+DELETE RESTRICT`, nullable `version_no INTEGER CHECK (version_no > 0)`,
+`action audit_action NOT NULL`, `actor_id UUID NOT NULL`, nullable `reason
+TEXT`, `details JSONB NOT NULL DEFAULT '{}'`, `occurred_at TIMESTAMPTZ NOT NULL
+DEFAULT CURRENT_TIMESTAMP`. Индексы ограничены ближайшими запросами:
+`(task_id, occurred_at)`, `(task_id, action, occurred_at)` и
+`(task_version_id)`.
+
+Закрытый PostgreSQL enum `audit_action` содержит ровно `task_created`,
+`methodology_updated`, `submitted_for_review`, `returned_to_draft`,
+`version_approved`, `version_created`, `task_archived`. Создание task/v1 пишет
+только `task_created`. `actor_id` всегда берётся из server-side
+`CONTENT_BANK_DEV_ACTOR_ID`; в API нет поля или команды, позволяющих клиенту
+создать событие либо подменить actor. FK на users отсутствует до появления
+authentication.
+
+`reason` используется для `returned_to_draft` и опционально для
+`task_archived`. `details` хранит только компактные метаданные: переходы
+статуса, `source_version_no` либо количества rubric items, accepted answers,
+hints и typical-error links. Условие, решение, ответы, текст рубрики,
+подсказки, payload целиком, секреты и URL БД в журнал не попадают.
+
+Application/repository API журнала предоставляет только append и read, без
+update/delete. `AuditWriter` использует repository того же Unit of Work и
+выполняет insert после успешной бизнес-мутации, но до единственного commit.
+Он не создаёт session и не делает commit. Ошибка insert не подавляется и
+откатывает всю транзакцию. Validation/not-found/conflict, rollback, read
+операции и повторное идемпотентное архивирование событий не создают.
+
+`GET /api/content-bank/tasks/{task_id}/audit` принимает `offset` (>= 0,
+default 0), `limit` (1..100, default 50) и optional `action: audit_action`.
+Ответ `{ "items": [AuditEvent], "total": 1, "offset": 0, "limit": 50 }`;
+AuditEvent содержит `id`, `task_id`, nullable `task_version_id`, nullable
+`version_no`, `action`, `actor_id`, nullable `reason`, `details` и UTC
+`occurred_at`. События отсортированы newest-first с tie-breaker по `id`;
+`total` вычисляется после action-filter и до pagination. Архивная карточка
+доступна, неизвестная task даёт стандартный 404, неверные action/pagination —
+стандартный validation envelope. Endpoint строго read-only.
 
 `sort` принимает только `created_at`, `updated_at`, `title`, `latest_version_no`
 с префиксом `-` для убывания; default `-updated_at`. `status` фильтрует
