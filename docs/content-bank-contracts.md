@@ -1,4 +1,4 @@
-# Content Bank MVP — контракты фаз 2.2–2.10A
+# Content Bank MVP — контракты фаз 2.2–2.10B
 
 > Статус: проектный контракт v0.1. Этот документ фиксирует границы и
 > интерфейсы до создания схемы БД, HTTP-обработчиков и клиентских компонентов.
@@ -171,9 +171,42 @@ offset-пагинацию: `offset` (>=0, default 0), `limit` (1..100, default 2
 | POST `/tasks/{task_id}/versions/{version_no}/approve` | `{}` | 200 TaskVersion | 404, 409, 422 |
 | POST `/tasks/{task_id}/archive` | optional `{ "reason": "..." }` | 200 TaskCard | 404, 409 |
 | GET `/catalog/{catalog_name}` | `catalog_name`: subjects, grades, topics, subtopics, skills; optional parent filters | 200 CatalogDTO | 404, 422 |
-| POST `/imports/preview` | `{ "format": "json", "rows": [...] }` | 200 ImportPreview | 422 |
+| POST `/imports/preview` | `{ "format": "csv", "rows": [...] }` (`format`: `csv` или `xlsx`) | 200 ImportPreview | 422 |
 | POST `/imports/commit` | `{ "import_token": "uuid", "row_numbers": [1] }` | 201 ImportResult | 409, 422 |
 | POST `/duplicates/check` | `{ "statement": "...", "subject_id": "uuid", "grade_id": "uuid", "topic_id": "uuid", "exclude_task_id": null }` | 200 DuplicateCandidates | 422 |
+
+### 2.10B Табличный frontend-импорт
+
+CSV и лист `Tasks` книги XLSX используют точные 13 колонок (порядок колонок
+может быть произвольным):
+
+```text
+subject_code
+grade_number
+topic_code
+subtopic_code
+title
+statement
+task_type
+answer_format
+difficulty
+source
+primary_skill_code
+primary_skill_weight
+additional_skills
+```
+
+Frontend принимает только `.csv` и `.xlsx`; форматы `.xls` и `.xlsm` не
+поддерживаются. Размер файла ограничен 5 МиБ до parsing, а таблица — 500
+непустыми строками данных. Для XLSX допускается ровно один лист с точным
+именем `Tasks`; остальные листы не участвуют в импорте.
+
+Frontend не выполняет формулы. Публичный browser API `read-excel-file` может
+вернуть сохранённое вычисленное значение формульной ячейки и не гарантирует
+предоставление признака исходной формулы. Поэтому MVP не гарантирует
+обнаружение и отклонение всех формульных ячеек. Создаваемый frontend
+XLSX-шаблон формул не содержит. Ручной разбор XLSX ZIP/XML, добавление
+формульного движка и исполнение содержимого ячеек запрещены.
 
 ## 2.9A Audit Log
 
