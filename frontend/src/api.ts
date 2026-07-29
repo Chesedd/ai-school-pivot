@@ -3,6 +3,11 @@ export const apiBase=import.meta.env.VITE_API_BASE_URL??"http://localhost:8000";
 export type ValidationIssue={field?:string;code?:string;message:string};
 export class ApiError extends Error{constructor(public status:number,public code:string,message:string,public details:any=[]){super(message)}}
 async function request(path:string,init?:RequestInit){const response=await fetch(`${apiBase}${path}`,init);let data:any={};try{data=await response.json()}catch{}if(!response.ok)throw new ApiError(response.status,data.error?.code??"unexpected_error",data.error?.message??"Ошибка API",data.error?.details??[]);return data}
+export type ImportRowPayload={row_number:number;subject_id:string;grade_id:string;topic_id:string;subtopic_id:string|null;initial_version:{title:string|null;statement:string;task_type:string;answer_format:string;difficulty:string;source:string|null;skills:{skill_id:string;weight:string;is_primary:boolean}[]}};
+export type ImportPreview={import_token:string;format:"csv"|"xlsx";expires_at:string;can_commit:boolean;summary:{rows_total:number;rows_valid:number;rows_invalid:number};rows:{row_number:number;status:"valid"|"invalid";issues:{severity:string;code:string;field:string;message:string}[]}[]};
+export type ImportCommit={imported_count:number;items:{row_number:number;task_id:string;task_version_id:string;version_no:number;status:string}[]};
+export const previewTaskImport=(payload:{format:"csv"|"xlsx";rows:ImportRowPayload[]},signal?:AbortSignal):Promise<ImportPreview>=>request("/api/content-bank/imports/preview",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload),signal});
+export const commitTaskImport=(payload:{import_token:string;row_numbers:number[]},signal?:AbortSignal):Promise<ImportCommit>=>request("/api/content-bank/imports/commit",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload),signal});
 export type AuditAction="task_created"|"methodology_updated"|"submitted_for_review"|"returned_to_draft"|"version_approved"|"version_created"|"task_archived";
 export type AuditEvent={id:string;task_id:string;task_version_id:string|null;version_no:number|null;action:AuditAction;actor_id:string;reason:string|null;details:Record<string,unknown>;occurred_at:string};
 export type AuditPage={items:AuditEvent[];total:number;offset:number;limit:number};
