@@ -10,11 +10,12 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
-    "exceljs": "4.4.0",
     "papaparse": "5.5.4",
     "react": "latest",
     "react-dom": "latest",
-    "vite": "latest"
+    "read-excel-file": "9.3.5",
+    "vite": "latest",
+    "write-excel-file": "4.1.1"
   },
   "devDependencies": {
     "@testing-library/react": "latest",
