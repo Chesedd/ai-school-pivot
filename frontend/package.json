@@ -10,17 +10,20 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
-    "vite": "latest",
+    "exceljs": "4.4.0",
+    "papaparse": "5.5.4",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "vite": "latest"
   },
   "devDependencies": {
     "@testing-library/react": "latest",
     "@testing-library/user-event": "latest",
-    "jsdom": "latest",
-    "typescript": "latest",
+    "@types/papaparse": "5.5.2",
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "jsdom": "latest",
+    "typescript": "latest",
     "vitest": "latest"
   }
 }
