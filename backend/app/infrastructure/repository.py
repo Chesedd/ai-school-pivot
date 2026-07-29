@@ -10,7 +10,7 @@ from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
-from app.application.content_bank import AcceptedAnswerDTO, ActorContext, ArchiveResult, AuditEventDTO, AuditEventRecord, AuditPage, CatalogRecord, CatalogRef, ConflictError, CreateTaskCommand, EMPTY_METHODOLOGY, ExpectedSolutionDTO, HintDTO, LockedVersion, MethodologyDTO, RubricDTO, RubricItemDTO, SaveMethodologyCommand, SkillLinkDTO, TaskCard, TaskCardVersion, TaskDTO, TaskListItem, TaskListPage, TaskListQuery, TaskVersionDTO, TaskVersionSummary, TypicalErrorDTO, VersionState
+from app.application.content_bank import AcceptedAnswerDTO, ActorContext, ArchiveResult, AuditEventDTO, AuditEventRecord, AuditPage, CatalogRecord, CatalogRef, ConflictError, CreateTaskCommand, DUPLICATE_CANDIDATE_THRESHOLD, DuplicateCandidate, DuplicateCandidateRecord, DuplicateQuery, EMPTY_METHODOLOGY, ExpectedSolutionDTO, HintDTO, LockedVersion, MethodologyDTO, RubricDTO, RubricItemDTO, SaveMethodologyCommand, SkillLinkDTO, TaskCard, TaskCardVersion, TaskDTO, TaskListItem, TaskListPage, TaskListQuery, TaskVersionDTO, TaskVersionSummary, TypicalErrorDTO, VersionState
 from app.infrastructure.models import AcceptedAnswer, AuditLog, ExpectedSolution, Grade, Hint, ImportPreview, Rubric, RubricItem, Skill, Subject, Subtopic, Task, TaskErrorLink, TaskSkillLink, TaskVersion, Topic, TypicalError
 from app.application.content_bank import ImportCatalogContext, ImportIssue, ImportPreviewRecord, ImportPreviewRow, SkillLinkInput, VersionContentInput
 
@@ -18,6 +18,26 @@ from app.application.content_bank import ImportCatalogContext, ImportIssue, Impo
 class SQLAlchemyContentBankRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def find_duplicate_candidates(self, query: DuplicateQuery) -> tuple[DuplicateCandidateRecord, ...]:
+        # SET LOCAL controls the `%` operator and therefore the GIN-indexed
+        # candidate scan. All policy filtering and the public limit happen later.
+        await self.session.execute(select(func.set_config("pg_trgm.similarity_threshold",str(DUPLICATE_CANDIDATE_THRESHOLD),True)))
+        latest_numbers=select(TaskVersion.task_id,func.max(TaskVersion.version_no).label("version_no")).group_by(TaskVersion.task_id).subquery()
+        primary=TaskSkillLink.__table__.alias("duplicate_primary_skill")
+        normalized=func.regexp_replace(func.lower(func.btrim(TaskVersion.statement)),r"\s+"," ","g")
+        score=func.similarity(normalized,query.statement)
+        stmt=(select(Task.id,TaskVersion.id,TaskVersion.version_no,TaskVersion.title,TaskVersion.status,
+            TaskVersion.statement,score,primary.c.skill_id,ExpectedSolution.final_answer)
+            .join(latest_numbers,and_(latest_numbers.c.task_id==Task.id))
+            .join(TaskVersion,and_(TaskVersion.task_id==Task.id,TaskVersion.version_no==latest_numbers.c.version_no))
+            .outerjoin(primary,and_(primary.c.task_version_id==TaskVersion.id,primary.c.is_primary.is_(True)))
+            .outerjoin(ExpectedSolution,ExpectedSolution.task_version_id==TaskVersion.id)
+            .where(Task.archived_at.is_(None),TaskVersion.status.in_(("draft","review","approved")),
+                TaskVersion.statement.op("%")(query.statement)))
+        if query.exclude_task_id is not None: stmt=stmt.where(Task.id!=query.exclude_task_id)
+        rows=(await self.session.execute(stmt)).all()
+        return tuple(DuplicateCandidateRecord(*row) for row in rows)
 
     @staticmethod
     def _command_json(c: CreateTaskCommand) -> dict:
@@ -31,13 +51,21 @@ class SQLAlchemyContentBankRepository:
         return CreateTaskCommand(UUID(x["subject_id"]),UUID(x["grade_id"]),UUID(x["topic_id"]),UUID(x["subtopic_id"]) if x["subtopic_id"] else None,VersionContentInput(v["title"],v["statement"],v["task_type"],v["answer_format"],v["difficulty"],v["source"],tuple(SkillLinkInput(UUID(s["skill_id"]),Decimal(s["weight"]),s["is_primary"]) for s in v["skills"])))
 
     async def save_import_preview(self, p: ImportPreviewRecord) -> None:
-        rows=[{"row_number":r.row_number,"status":r.status,"command":self._command_json(r.command),"issues":[i.__dict__ for i in r.issues]} for r in p.rows]
+        def issue_json(i):
+            return {"code":i.code,"field":i.field,"message":i.message,"severity":i.severity,
+                "duplicate_row_number":i.duplicate_row_number,
+                "duplicate_candidates":[{**c.__dict__,"task_id":str(c.task_id),"task_version_id":str(c.task_version_id),"reasons":list(c.reasons)} for c in i.duplicate_candidates]}
+        rows=[{"row_number":r.row_number,"status":r.status,"command":self._command_json(r.command),"issues":[issue_json(i) for i in r.issues]} for r in p.rows]
         self.session.add(ImportPreview(import_token=p.import_token,format=p.format,actor_id=p.actor_id,rows=rows,created_at=p.created_at,expires_at=p.expires_at,committed_at=p.committed_at)); await self.session.flush()
 
     async def get_import_preview_for_update(self, token: UUID) -> ImportPreviewRecord | None:
         m=(await self.session.execute(select(ImportPreview).where(ImportPreview.import_token==token).with_for_update())).scalar_one_or_none()
         if not m:return None
-        rows=tuple(ImportPreviewRow(x["row_number"],x["status"],self._command_from_json(x["command"]),tuple(ImportIssue(**i) for i in x["issues"])) for x in m.rows)
+        def issue_from_json(i):
+            candidates=tuple(DuplicateCandidate(
+                UUID(c["task_id"]),UUID(c["task_version_id"]),c["version_no"],c["title"],c["status"],c["statement"],c["statement_similarity"],c["same_primary_skill"],c["same_final_answer"],tuple(c["reasons"])) for c in i.get("duplicate_candidates",()))
+            return ImportIssue(i["code"],i["field"],i["message"],i.get("severity","error"),candidates,i.get("duplicate_row_number"))
+        rows=tuple(ImportPreviewRow(x["row_number"],x["status"],self._command_from_json(x["command"]),tuple(issue_from_json(i) for i in x["issues"])) for x in m.rows)
         return ImportPreviewRecord(m.import_token,m.format,m.actor_id,rows,m.created_at,m.expires_at,m.committed_at)
 
     async def mark_import_preview_committed(self, token: UUID, at: datetime) -> None:

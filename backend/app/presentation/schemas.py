@@ -68,6 +68,24 @@ class TaskResponse(BaseModel):
     created_by: UUID
     created_at: datetime
     initial_version: TaskVersionResponse
+    duplicate_warnings: list["DuplicateCandidateResponse"] = Field(default_factory=list)
+
+
+DuplicateReason = Literal["exact_statement", "high_statement_similarity", "same_primary_skill", "same_final_answer"]
+class DuplicateCheckRequest(StrictRequest):
+    statement: str
+    primary_skill_id: UUID
+    final_answer: str | None = None
+    exclude_task_id: UUID | None = None
+    limit: int = Field(default=5, ge=1, le=20)
+class DuplicateCandidateResponse(BaseModel):
+    task_id: UUID; task_version_id: UUID; version_no: int; title: str | None
+    status: Literal["draft","review","approved"]; statement: str
+    statement_similarity: float; same_primary_skill: bool; same_final_answer: bool
+    reasons: list[DuplicateReason]
+class DuplicateCheckResponse(BaseModel):
+    has_likely_duplicates: bool
+    items: list[DuplicateCandidateResponse]
 
 
 class TaskListItemResponse(BaseModel):
@@ -342,6 +360,8 @@ class ImportPreviewRequest(StrictRequest):
 
 class ImportIssueResponse(BaseModel):
     code: str; field: str; message: str; severity: str
+    duplicate_candidates: list[DuplicateCandidateResponse] = Field(default_factory=list)
+    duplicate_row_number: int | None = None
 class ImportPreviewRowResponse(BaseModel):
     row_number: int; status: str; issues: list[ImportIssueResponse]
 class ImportSummaryResponse(BaseModel):

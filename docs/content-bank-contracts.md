@@ -1,4 +1,4 @@
-# Content Bank MVP — контракты фаз 2.2–2.10B
+# Content Bank MVP — контракты фаз 2.2–2.11A
 
 > Статус: проектный контракт v0.1. Этот документ фиксирует границы и
 > интерфейсы до создания схемы БД, HTTP-обработчиков и клиентских компонентов.
@@ -173,7 +173,50 @@ offset-пагинацию: `offset` (>=0, default 0), `limit` (1..100, default 2
 | GET `/catalog/{catalog_name}` | `catalog_name`: subjects, grades, topics, subtopics, skills; optional parent filters | 200 CatalogDTO | 404, 422 |
 | POST `/imports/preview` | `{ "format": "csv", "rows": [...] }` (`format`: `csv` или `xlsx`) | 200 ImportPreview | 422 |
 | POST `/imports/commit` | `{ "import_token": "uuid", "row_numbers": [1] }` | 201 ImportResult | 409, 422 |
-| POST `/duplicates/check` | `{ "statement": "...", "subject_id": "uuid", "grade_id": "uuid", "topic_id": "uuid", "exclude_task_id": null }` | 200 DuplicateCandidates | 422 |
+| POST `/task-versions/check-duplicates` | `{ "statement": "...", "primary_skill_id": "uuid", "final_answer": null, "exclude_task_id": null, "limit": 5 }` | 200 DuplicateCandidates | 422 |
+
+## 2.11A Базовая дедупликация (warning-only)
+
+`POST /api/content-bank/task-versions/check-duplicates` принимает обязательные
+непустые после trim `statement` и UUID `primary_skill_id`, nullable
+`final_answer`, nullable `exclude_task_id`, а также `limit` (default 5, 1..20).
+Ответ: `{ "has_likely_duplicates": true, "items": [...] }`; item содержит
+`task_id`, `task_version_id`, `version_no`, nullable `title`, `status`, полное
+`statement`, округлённый до четырёх знаков `statement_similarity`, флаги
+`same_primary_skill`, `same_final_answer` и `reasons`.
+
+Допустимые причины строго ограничены `exact_statement`,
+`high_statement_similarity`, `same_primary_skill`, `same_final_answer`.
+Текст trim-ится, Unicode-case-нормализуется и схлопывает whitespace. PostgreSQL
+`pg_trgm similarity()` рассчитывает сходство условия. Final answer сравнивается
+точно после trim/casefold/схлопывания whitespace и только когда оба ответа
+непустые. Candidate scan использует GIN-совместимый оператор `%` с минимальным
+порогом 0.55. Вероятный дубликат: точное условие; similarity >= 0.85;
+similarity >= 0.70 плюс тот же primary skill; либо similarity >= 0.65 плюс тот
+же final answer. Один короткий одинаковый ответ без похожего условия не
+достаточен. Порядок: exact, similarity DESC, same skill, same answer, task UUID;
+`limit` применяется после policy-фильтрации.
+
+SQL-область состоит только из неархивных `tasks`, их версии с максимальным
+`version_no` и статусом `draft`, `review` или `approved`; archived-карточки,
+исторические версии и `exclude_task_id` исключаются. Primary skill присоединён
+с условием `is_primary`, поэтому дополнительные skill links не размножают item.
+
+Проверка никогда не блокирует создание, импорт, смену статуса или утверждение.
+Создание выполняет проверку в той же UoW до insert, всё равно атомарно создаёт
+task и ровно один `task_created`, а `TaskResponse` аддитивно возвращает
+`duplicate_warnings` (по умолчанию `[]`) из тех же candidate items. Каждая
+backend-valid preview-строка получает warning `possible_duplicate` с
+`duplicate_candidates`; строка остаётся valid/can_commit и доступна commit.
+Для дубликата внутри файла warning только у более поздней строки содержит
+`duplicate_row_number` более ранней строки. Невалидные строки DB-проверку не
+запускают. Preview остаётся read-only для content entities и lifecycle token не
+меняется. В этой фазе отсутствуют LLM, embeddings, vector DB и внешние сервисы.
+
+Для табличного импорта с header в строке 1 первая data row имеет
+`row_number: 2`. Поэтому пример warning на следующей data row использует
+исходный номер строки, а не индекс массива: `{"code":"possible_duplicate",
+"severity":"warning","duplicate_candidates":[],"duplicate_row_number":2}`.
 
 ### 2.10B Табличный frontend-импорт
 
