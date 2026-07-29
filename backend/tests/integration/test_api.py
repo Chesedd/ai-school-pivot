@@ -114,6 +114,19 @@ async def test_catalog_returns_seed_data(catalog):
     assert response.status_code == 200
     subjects = {item["id"]: item for item in response.json()["items"]}
     assert subjects[str(catalog["subject"])]["name"] == "Subject"
+    assert subjects[str(catalog["subject"])]["code"] == "s"
+
+
+async def test_catalog_exposes_codes_numbers_and_existing_parent_fields(catalog):
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        responses = {name: (await client.get(f"/api/content-bank/catalog/{name}")).json()["items"] for name in ("grades", "topics", "subtopics", "skills")}
+    assert responses["grades"][0]["number"] == 7
+    topic = next(x for x in responses["topics"] if x["id"] == str(catalog["topic"]))
+    assert topic["code"] == "t" and topic["subject_id"] == str(catalog["subject"]) and topic["grade_id"] == str(catalog["grade"])
+    subtopic = next(x for x in responses["subtopics"] if x["id"] == str(catalog["subtopic"]))
+    assert subtopic["code"] == "st" and subtopic["topic_id"] == str(catalog["topic"])
+    skill = next(x for x in responses["skills"] if x["id"] == str(catalog["skill"]))
+    assert skill["code"] == "sk" and skill["subtopic_id"] == str(catalog["subtopic"])
 
 
 async def _insert_archived_task(catalog) -> str:

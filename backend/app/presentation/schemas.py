@@ -249,6 +249,8 @@ class CatalogItemResponse(BaseModel):
     grade_id: UUID | None = None
     topic_id: UUID | None = None
     subtopic_id: UUID | None = None
+    code: str | None = None
+    number: int | None = None
 
 
 class CatalogResponse(BaseModel):
