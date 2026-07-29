@@ -5,13 +5,19 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
-from app.application.content_bank import AcceptedAnswerInput, ActorContext, ApplicationError, ArchiveTaskService, CreateTaskCommand, CreateTaskService, CreateVersionCommand, CreateVersionService, ExpectedSolutionInput, GetAuditService, GetTaskCardService, HintInput, ImportCommitService, ImportPreviewService, ImportRow, ListTasksService, RubricInput, RubricItemInput, SaveMethodologyCommand, SaveMethodologyService, SkillLinkInput, StatusCycleService, TaskListQuery, TypicalErrorInput, ValidationDetail, VersionContentInput
+from app.application.content_bank import AcceptedAnswerInput, ActorContext, ApplicationError, ArchiveTaskService, CreateTaskCommand, CreateTaskService, CreateVersionCommand, CreateVersionService, DuplicateCheckService, DuplicateQuery, ExpectedSolutionInput, GetAuditService, GetTaskCardService, HintInput, ImportCommitService, ImportPreviewService, ImportRow, ListTasksService, RubricInput, RubricItemInput, SaveMethodologyCommand, SaveMethodologyService, SkillLinkInput, StatusCycleService, TaskListQuery, TypicalErrorInput, ValidationDetail, VersionContentInput
 from app.config import Settings, get_settings
 from app.db.session import async_session_factory
 from app.infrastructure.repository import SQLAlchemyContentBankRepository, SQLAlchemyUnitOfWork
-from app.presentation.schemas import AuditPageResponse, ArchiveRequest, ArchiveResponse, CatalogResponse, CreatedVersionResponse, CreateVersionRequest, EmptyRequest, ImportCommitRequest, ImportCommitResponse, ImportPreviewRequest, ImportPreviewResponse, MethodologyPutRequest, MethodologyResponse, ReturnToDraftRequest, StatusCommandResponse, TaskCardResponse, TaskCreateRequest, TaskListPageResponse, TaskResponse
+from app.presentation.schemas import AuditPageResponse, ArchiveRequest, ArchiveResponse, CatalogResponse, CreatedVersionResponse, CreateVersionRequest, DuplicateCheckRequest, DuplicateCheckResponse, EmptyRequest, ImportCommitRequest, ImportCommitResponse, ImportPreviewRequest, ImportPreviewResponse, MethodologyPutRequest, MethodologyResponse, ReturnToDraftRequest, StatusCommandResponse, TaskCardResponse, TaskCreateRequest, TaskListPageResponse, TaskResponse
 
 router = APIRouter(prefix="/api/content-bank")
+
+@router.post("/task-versions/check-duplicates",response_model=DuplicateCheckResponse)
+async def check_duplicates(payload: DuplicateCheckRequest) -> object:
+    async with async_session_factory() as session:
+        return await DuplicateCheckService(SQLAlchemyContentBankRepository(session)).check(
+            DuplicateQuery(payload.statement,payload.primary_skill_id,payload.final_answer,payload.exclude_task_id,payload.limit))
 
 def _create_command(payload) -> CreateTaskCommand:
     c=payload.initial_version

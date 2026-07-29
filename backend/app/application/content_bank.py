@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from decimal import Decimal
 from types import TracebackType
-from typing import Protocol, Self
+from typing import Literal, Protocol, Self
 from uuid import UUID, uuid4
 
 TASK_TYPES = frozenset({"test", "calculation", "problem", "open_question", "essay"})
@@ -15,6 +15,14 @@ STATUSES = frozenset({"draft", "review", "approved", "archived"})
 AUDIT_ACTIONS = frozenset({"task_created", "methodology_updated", "submitted_for_review", "returned_to_draft", "version_approved", "version_created", "task_archived"})
 SORT_FIELDS = frozenset({"created_at", "updated_at", "title", "difficulty", "status", "version_no", "relevance"})
 SORT_ORDERS = frozenset({"asc", "desc"})
+
+# Phase 2.11A duplicate policy. Candidate retrieval is deliberately broader
+# than the warning policy so filtering and limiting always happen afterwards.
+DUPLICATE_CANDIDATE_THRESHOLD = 0.55
+DUPLICATE_HIGH_SIMILARITY_THRESHOLD = 0.85
+DUPLICATE_SKILL_SIMILARITY_THRESHOLD = 0.70
+DUPLICATE_FINAL_ANSWER_SIMILARITY_THRESHOLD = 0.65
+DuplicateReason = Literal["exact_statement", "high_statement_similarity", "same_primary_skill", "same_final_answer"]
 
 
 @dataclass(frozen=True)
@@ -105,6 +113,37 @@ class TaskDTO:
     created_by: UUID
     created_at: datetime
     initial_version: TaskVersionDTO
+    duplicate_warnings: tuple["DuplicateCandidate", ...] = ()
+
+
+@dataclass(frozen=True)
+class DuplicateQuery:
+    statement: str
+    primary_skill_id: UUID
+    final_answer: str | None = None
+    exclude_task_id: UUID | None = None
+    limit: int = 5
+
+
+@dataclass(frozen=True)
+class DuplicateCandidateRecord:
+    task_id: UUID; task_version_id: UUID; version_no: int; title: str | None
+    status: str; statement: str; statement_similarity: float
+    primary_skill_id: UUID | None; final_answer: str | None
+
+
+@dataclass(frozen=True)
+class DuplicateCandidate:
+    task_id: UUID; task_version_id: UUID; version_no: int; title: str | None
+    status: str; statement: str; statement_similarity: float
+    same_primary_skill: bool; same_final_answer: bool
+    reasons: tuple[DuplicateReason, ...]
+
+
+@dataclass(frozen=True)
+class DuplicateResult:
+    has_likely_duplicates: bool
+    items: tuple[DuplicateCandidate, ...]
 
 
 @dataclass(frozen=True)
@@ -487,6 +526,7 @@ class ContentBankRepository(Protocol):
     async def get_import_preview_for_update(self, token: UUID) -> ImportPreviewRecord | None: ...
     async def mark_import_preview_committed(self, token: UUID, at: datetime) -> None: ...
     async def get_import_catalog_context(self, commands: tuple[CreateTaskCommand, ...]) -> ImportCatalogContext: ...
+    async def find_duplicate_candidates(self, query: DuplicateQuery) -> tuple[DuplicateCandidateRecord, ...]: ...
 
 
 class UnitOfWork(Protocol):
@@ -511,7 +551,11 @@ class CreateTaskService:
 
     async def create_task(self, command: CreateTaskCommand, actor: ActorContext) -> TaskDTO:
         async with self.uow:
+            primary = next((x.skill_id for x in command.initial_version.skills if x.is_primary), None)
+            warnings = () if primary is None else (await DuplicateCheckService(self.uow.repository).check(
+                DuplicateQuery(command.initial_version.statement, primary))).items
             result = await CreateTaskOperation(self.uow.repository).create(command, actor)
+            result = replace(result, duplicate_warnings=warnings)
             await self.uow.commit()
             return result
 
@@ -585,6 +629,64 @@ class CreateTaskOperation:
         return details
 
 
+def normalize_duplicate_text(value: str) -> str:
+    """Unicode case normalization with all whitespace runs collapsed."""
+    return " ".join(value.strip().casefold().split())
+
+
+def application_trigram_similarity(left: str, right: str) -> float:
+    """Deterministic pg_trgm-compatible approximation for in-preview rows."""
+    def trigrams(value: str) -> set[str]:
+        words=normalize_duplicate_text(value).split()
+        return {padded[i:i+3] for word in words for padded in ("  "+word+" ",) for i in range(len(padded)-2)}
+    a,b=trigrams(left),trigrams(right)
+    return 1.0 if a == b else (2.0*len(a & b)/(len(a)+len(b)) if a and b else 0.0)
+
+
+class DuplicatePolicy:
+    """Pure warning policy applied after PostgreSQL's indexed candidate scan."""
+    @staticmethod
+    def evaluate(query: DuplicateQuery, records: tuple[DuplicateCandidateRecord, ...]) -> tuple[DuplicateCandidate, ...]:
+        statement = normalize_duplicate_text(query.statement)
+        answer = normalize_duplicate_text(query.final_answer) if query.final_answer else ""
+        found: list[DuplicateCandidate] = []
+        for row in records:
+            exact = normalize_duplicate_text(row.statement) == statement
+            same_skill = row.primary_skill_id == query.primary_skill_id
+            other_answer = normalize_duplicate_text(row.final_answer) if row.final_answer else ""
+            same_answer = bool(answer and other_answer and answer == other_answer)
+            similarity = max(0.0, min(1.0, row.statement_similarity))
+            likely = (exact or similarity >= DUPLICATE_HIGH_SIMILARITY_THRESHOLD or
+                (similarity >= DUPLICATE_SKILL_SIMILARITY_THRESHOLD and same_skill) or
+                (similarity >= DUPLICATE_FINAL_ANSWER_SIMILARITY_THRESHOLD and same_answer))
+            if not likely:
+                continue
+            reasons: list[DuplicateReason] = []
+            if exact: reasons.append("exact_statement")
+            if similarity >= DUPLICATE_HIGH_SIMILARITY_THRESHOLD: reasons.append("high_statement_similarity")
+            if same_skill: reasons.append("same_primary_skill")
+            if same_answer: reasons.append("same_final_answer")
+            found.append(DuplicateCandidate(row.task_id,row.task_version_id,row.version_no,row.title,row.status,row.statement,
+                round(similarity + 1e-12, 4),same_skill,same_answer,tuple(reasons)))
+        found.sort(key=lambda x: ("exact_statement" not in x.reasons,-x.statement_similarity,
+            not x.same_primary_skill,not x.same_final_answer,str(x.task_id)))
+        return tuple(found[:query.limit])
+
+
+class DuplicateCheckService:
+    def __init__(self, repository: ContentBankRepository) -> None: self.repository = repository
+    async def check(self, query: DuplicateQuery) -> DuplicateResult:
+        statement = normalize_duplicate_text(query.statement)
+        details=[]
+        if not statement: details.append(ValidationDetail("statement","blank","Условие не может быть пустым."))
+        if query.limit < 1 or query.limit > 20: details.append(ValidationDetail("limit","range","Limit должен быть от 1 до 20."))
+        if details: raise ApplicationError(details)
+        normalized = replace(query, statement=statement)
+        records = await self.repository.find_duplicate_candidates(normalized)
+        items = DuplicatePolicy.evaluate(normalized, records)
+        return DuplicateResult(bool(items), items)
+
+
 @dataclass(frozen=True)
 class ImportRow:
     row_number: int
@@ -593,6 +695,8 @@ class ImportRow:
 @dataclass(frozen=True)
 class ImportIssue:
     code: str; field: str; message: str; severity: str = "error"
+    duplicate_candidates: tuple[DuplicateCandidate, ...] = ()
+    duplicate_row_number: int | None = None
 
 @dataclass(frozen=True)
 class ImportPreviewRow:
@@ -617,6 +721,33 @@ class ImportPreviewService:
                 # Catalog validation uses the same operation without writes via a dedicated check.
                 issues += [ImportIssue(x.code, x.field, x.message) for x in self._catalog_issues(catalog, row.command)]
                 checked.append(ImportPreviewRow(row.row_number, "invalid" if issues else "valid", row.command, tuple(issues)))
+            # Invalid rows never incur a duplicate query. Warnings do not alter
+            # row validity or commit eligibility.
+            enriched=[]
+            for current in checked:
+                issues=list(current.issues)
+                if current.status == "valid":
+                    primary=next(x.skill_id for x in current.command.initial_version.skills if x.is_primary)
+                    duplicates=await DuplicateCheckService(self.uow.repository).check(
+                        DuplicateQuery(current.command.initial_version.statement,primary))
+                    if duplicates.items:
+                        issues.append(ImportIssue("possible_duplicate","statement","Найдены возможные дубликаты.","warning",duplicates.items))
+                enriched.append(replace(current,issues=tuple(issues)))
+            # Only the later row points to the earlier row: no symmetric warnings.
+            for index,current in enumerate(enriched):
+                if current.status != "valid": continue
+                for previous in enriched[:index]:
+                    if previous.status != "valid": continue
+                    q=DuplicateQuery(current.command.initial_version.statement,
+                        next(x.skill_id for x in current.command.initial_version.skills if x.is_primary))
+                    p=previous.command
+                    same_statement=normalize_duplicate_text(q.statement)==normalize_duplicate_text(p.initial_version.statement)
+                    same_skill=q.primary_skill_id==next(x.skill_id for x in p.initial_version.skills if x.is_primary)
+                    similarity=application_trigram_similarity(q.statement,p.initial_version.statement)
+                    if same_statement or similarity >= DUPLICATE_HIGH_SIMILARITY_THRESHOLD or (same_skill and similarity >= DUPLICATE_SKILL_SIMILARITY_THRESHOLD):
+                        issue=ImportIssue("possible_duplicate","statement","Возможный дубликат другой строки preview.","warning",(),previous.row_number)
+                        enriched[index]=replace(current,issues=current.issues+(issue,)); current=enriched[index]
+            checked=enriched
             record = ImportPreviewRecord(uuid4(), format, actor.actor_id, tuple(checked), now, now + __import__('datetime').timedelta(minutes=self.ttl_minutes))
             await self.uow.repository.save_import_preview(record); await self.uow.commit(); return record
 

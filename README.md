@@ -78,12 +78,59 @@ Windows PowerShell 5.1 verification must obtain container configuration without
 parsing `.env` and must not print connection strings:
 
 ```powershell
+$ErrorActionPreference = "Stop"
+
+# Build separately so backend build output remains visible.
+docker compose --progress=plain build backend
+docker compose up -d postgres backend
+
 $PgUser = (docker compose exec -T postgres printenv POSTGRES_USER).Trim()
 $DevDatabaseUrl = (docker compose exec -T backend printenv DATABASE_URL).Trim()
-$TestDatabaseUrl = $DevDatabaseUrl -replace '/[^/?]+(\?.*)?$', '/content_bank_test$1'
+$ActorId = (docker compose exec -T backend printenv CONTENT_BANK_DEV_ACTOR_ID).Trim()
+$TestDatabase = "content_bank_test"
+if (-not $TestDatabase.EndsWith("_test")) { throw "Unsafe test database name" }
+$TestDatabaseUrl = $DevDatabaseUrl -replace '/[^/?]+(\?.*)?$', "/$TestDatabase`$1"
+
+# Recreate only the dedicated test database. Do not seed it and do not remove
+# the development database or Docker volumes.
+docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U $PgUser -d postgres `
+  -c "DROP DATABASE IF EXISTS $TestDatabase WITH (FORCE);"
+docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U $PgUser -d postgres `
+  -c "CREATE DATABASE $TestDatabase;"
+
+docker compose exec -T -e "DATABASE_URL=$TestDatabaseUrl" backend alembic upgrade head
+docker compose exec -T -e "DATABASE_URL=$TestDatabaseUrl" backend alembic upgrade head
+docker compose exec -T -e "DATABASE_URL=$TestDatabaseUrl" backend alembic downgrade -1
+docker compose exec -T -e "DATABASE_URL=$TestDatabaseUrl" backend alembic upgrade head
+docker compose exec -T -e "DATABASE_URL=$TestDatabaseUrl" backend alembic current
+docker compose exec -T -e "DATABASE_URL=$TestDatabaseUrl" backend alembic check
+
+docker compose exec -T backend python -m compileall -q app tests
+docker compose exec -T backend pytest -q tests/unit
+docker compose exec -T `
+  -e "DATABASE_URL=$TestDatabaseUrl" `
+  -e "TEST_DATABASE_URL=$TestDatabaseUrl" `
+  -e "CONTENT_BANK_DEV_ACTOR_ID=$ActorId" `
+  backend pytest -q
+
+docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U $PgUser -d $TestDatabase `
+  -c "SELECT extname FROM pg_extension WHERE extname='pg_trgm';"
+docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U $PgUser -d $TestDatabase `
+  -c "SELECT indexname,indexdef FROM pg_indexes WHERE indexname='ix_task_versions_statement_trgm_gin' AND indexdef LIKE '%gin_trgm_ops%';"
+
+git diff --check
 ```
 
 For a mixed preview, first commit its invalid row and assert HTTP 422,
 `import_validation_error`, and NULL `committed_at`; only then commit the valid
 subset with that token. Expiration uses a separate uncommitted token. Repeating
 a successful commit must return `import_token_already_committed`.
+
+`pg_trgm` intentionally remains installed after downgrade because it is a
+shared database capability that may predate this migration. Verify the
+extension and stable trigram index with:
+
+```bash
+docker compose exec postgres psql -U content_bank -d content_bank -c "SELECT extname FROM pg_extension WHERE extname='pg_trgm';"
+docker compose exec postgres psql -U content_bank -d content_bank -c "SELECT indexname,indexdef FROM pg_indexes WHERE indexname='ix_task_versions_statement_trgm_gin' AND indexdef LIKE '%gin_trgm_ops%';"
+```

@@ -12,6 +12,7 @@ class Repo:
  def context(self,commands):
   return ImportCatalogContext({self.subject:CatalogRecord(self.subject,'s')},{self.grade:CatalogRecord(self.grade,'g')},{self.topic:CatalogRecord(self.topic,'t',subject_id=self.subject,grade_id=self.grade)},{self.subtopic:CatalogRecord(self.subtopic,'st',topic_id=self.topic)},{self.skill:CatalogRecord(self.skill,'sk',topic_id=self.topic,subtopic_id=self.subtopic)})
  async def get_import_catalog_context(self,commands): self.bulk_calls+=1; return self.context(commands)
+ async def find_duplicate_candidates(self,query): return ()
  async def get_subject(self,x): return self.context(()).subjects.get(x)
  async def get_grade(self,x): return self.context(()).grades.get(x)
  async def get_topic(self,x): return self.context(()).topics.get(x)
@@ -52,6 +53,24 @@ async def test_preview_row_limits(count,ok):
 async def test_duplicate_row_number_rejected():
  r=Repo()
  with pytest.raises(IssuesError): await preview(r,[ImportRow(2,command(r)),ImportRow(2,command(r))])
+@pytest.mark.parametrize('fmt',['csv','xlsx'])
+async def test_in_file_duplicate_uses_original_nonsequential_row_number_and_commits(fmt):
+ r=Repo(); actor=ActorContext(uuid4())
+ p=await preview(r,[ImportRow(17,command(r,statement='Same statement')),ImportRow(42,command(r,statement='  SAME   statement  '))],actor,fmt)
+ first_warnings=[x for x in p.rows[0].issues if x.code=='possible_duplicate' and x.duplicate_row_number is not None]
+ second_warnings=[x for x in p.rows[1].issues if x.code=='possible_duplicate' and x.duplicate_row_number is not None]
+ assert [x.status for x in p.rows]==['valid','valid']
+ assert not first_warnings
+ assert len(second_warnings)==1 and second_warnings[0].duplicate_row_number==17
+ can_commit=any(x.status=='valid' for x in p.rows)
+ assert can_commit is True
+ committed=await ImportCommitService(Uow(r)).commit(p.import_token,(17,42),actor)
+ assert [row_number for row_number,_ in committed]==[17,42]
+@pytest.mark.parametrize('fmt',['csv','xlsx'])
+async def test_in_file_duplicate_with_header_data_row_numbers(fmt):
+ r=Repo(); p=await preview(r,[ImportRow(2,command(r)),ImportRow(3,command(r))],fmt=fmt)
+ warnings=[x for x in p.rows[1].issues if x.code=='possible_duplicate' and x.duplicate_row_number is not None]
+ assert len(warnings)==1 and warnings[0].duplicate_row_number==2
 async def test_nullable_fields():
  r=Repo(); assert (await preview(r,[ImportRow(1,command(r,subtopic=None,title=None,source=None))])).rows[0].status=='valid'
 @pytest.mark.parametrize('change',[{'subject':uuid4()},{'grade':uuid4()},{'topic':uuid4()},{'subtopic':uuid4()},{'skill':uuid4()}])

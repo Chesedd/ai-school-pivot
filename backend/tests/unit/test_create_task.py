@@ -15,6 +15,7 @@ class Repo:
         self.fail = False
         self.audit_events = []
     async def append_audit(self, event): self.audit_events.append(event)
+    async def find_duplicate_candidates(self, query): return ()
     async def get_subject(self, value): return CatalogRecord(value, "s") if value == self.subject else None
     async def get_grade(self, value): return CatalogRecord(value, "g") if value == self.grade else None
     async def get_topic(self, value): return CatalogRecord(value, "t", subject_id=self.subject, grade_id=self.grade) if value == self.topic else None

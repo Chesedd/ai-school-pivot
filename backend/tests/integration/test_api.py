@@ -80,6 +80,41 @@ def payload(ids):
     return {"subject_id": str(ids["subject"]), "grade_id": str(ids["grade"]), "topic_id": str(ids["topic"]), "subtopic_id": str(ids["subtopic"]), "initial_version": {"title": None, "statement": "Test", "task_type": "calculation", "answer_format": "number", "difficulty": "basic", "source": None, "skills": [{"skill_id": str(ids["skill"]), "weight": "1.0000", "is_primary": True}]}}
 
 
+async def test_duplicate_extension_and_operator_class(catalog):
+    async with async_session_factory() as session:
+        assert await session.scalar(text("SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname='pg_trgm')"))
+        definition=await session.scalar(text("SELECT indexdef FROM pg_indexes WHERE indexname='ix_task_versions_statement_trgm_gin'"))
+        assert definition and "USING gin" in definition and "gin_trgm_ops" in definition
+
+
+async def test_duplicate_endpoint_create_warning_exclude_and_audit(catalog):
+    data=payload(catalog); data["initial_version"]["statement"]="Решите уравнение x + 2 = 5"
+    check={"statement":"  РЕШИТЕ   уравнение x + 2 = 5 ","primary_skill_id":str(catalog["skill"])}
+    async with AsyncClient(transport=ASGITransport(app=app),base_url="http://test") as client:
+        first=await client.post("/api/content-bank/tasks",json=data)
+        found=await client.post("/api/content-bank/task-versions/check-duplicates",json=check)
+        excluded=await client.post("/api/content-bank/task-versions/check-duplicates",json={**check,"exclude_task_id":first.json()["id"]})
+        second=await client.post("/api/content-bank/tasks",json=data)
+    assert found.status_code==200 and found.json()["has_likely_duplicates"] and len(found.json()["items"])==1
+    assert excluded.json()=={"has_likely_duplicates":False,"items":[]}
+    assert len(second.json()["duplicate_warnings"])==1
+    async with async_session_factory() as session:
+        assert await session.scalar(text("SELECT count(*) FROM tasks"))==2
+        assert await session.scalar(text("SELECT count(*) FROM audit_log WHERE action='task_created'"))==2
+
+
+async def test_import_duplicate_warning_stays_valid_and_commits(catalog):
+    data=payload(catalog); data["initial_version"]["statement"]="Unique preview duplicate text"
+    async with AsyncClient(transport=ASGITransport(app=app),base_url="http://test") as client:
+        await client.post("/api/content-bank/tasks",json=data)
+        preview=await client.post("/api/content-bank/imports/preview",json={"format":"csv","rows":[{**data,"row_number":1},{**data,"row_number":2}]})
+        body=preview.json(); committed=await client.post("/api/content-bank/imports/commit",json={"import_token":body["import_token"],"row_numbers":[1,2]})
+    assert body["can_commit"] and all(x["status"]=="valid" for x in body["rows"])
+    assert all(any(i["code"]=="possible_duplicate" for i in x["issues"]) for x in body["rows"])
+    assert any(i["duplicate_row_number"]==1 for i in body["rows"][1]["issues"])
+    assert committed.status_code==201 and committed.json()["imported_count"]==2
+
+
 async def test_create_is_atomic_and_server_owned(catalog):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post("/api/content-bank/tasks", json=payload(catalog))

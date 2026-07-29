@@ -107,7 +107,7 @@ class Task(IdMixin, Base):
 
 class TaskVersion(IdMixin, Base):
     __tablename__ = "task_versions"
-    __table_args__ = (UniqueConstraint("task_id", "version_no", name="uq_task_versions_task_version_no"), CheckConstraint("version_no > 0", name="ck_task_versions_version_no_positive"), CheckConstraint("(approved_at IS NULL) = (approved_by IS NULL)", name="ck_task_versions_approval_pair"), Index("ix_task_versions_task_id_status", "task_id", "status"), Index("ix_task_versions_status", "status"), Index("ix_task_versions_search_vector_gin", "search_vector", postgresql_using="gin"), Index("uq_task_versions_one_approved_per_task", "task_id", unique=True, postgresql_where=text("status = 'approved'")))
+    __table_args__ = (UniqueConstraint("task_id", "version_no", name="uq_task_versions_task_version_no"), CheckConstraint("version_no > 0", name="ck_task_versions_version_no_positive"), CheckConstraint("(approved_at IS NULL) = (approved_by IS NULL)", name="ck_task_versions_approval_pair"), Index("ix_task_versions_task_id_status", "task_id", "status"), Index("ix_task_versions_status", "status"), Index("ix_task_versions_search_vector_gin", "search_vector", postgresql_using="gin"), Index("ix_task_versions_statement_trgm_gin", "statement", postgresql_using="gin", postgresql_ops={"statement":"gin_trgm_ops"}), Index("uq_task_versions_one_approved_per_task", "task_id", unique=True, postgresql_where=text("status = 'approved'")))
     task_id: Mapped[UUID] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE", name="fk_task_versions_task_id_tasks"))
     version_no: Mapped[int] = mapped_column(Integer)
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
