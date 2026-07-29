@@ -5,6 +5,8 @@ a transactionally atomic, read-only audit history API,
 a filterable React/Vite task table and creation form, and PostgreSQL 17.
 Alembic remains the schema owner.
 
+[Финальная техническая приёмка Content Bank MVP (фаза 2.14)](docs/content-bank-stage2-acceptance.md)
+
 ## Local launch
 
 1. Copy the environment template: `cp .env.example .env`.
