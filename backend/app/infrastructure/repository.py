@@ -147,10 +147,14 @@ class SQLAlchemyContentBankRepository:
             base = base.where(Task.archived_at.is_not(None))
         else:
             base = base.where(Task.archived_at.is_(None))
-        filters = ((Task.subject_id, query.subject_id), (Task.grade_id, query.grade_id), (Task.topic_id, query.topic_id), (Task.subtopic_id, query.subtopic_id), (latest.c.task_type, query.task_type), (latest.c.difficulty, query.difficulty), (latest.c.status, query.status))
+        filters = ((Task.subject_id, query.subject_id), (Task.grade_id, query.grade_id), (Task.topic_id, query.topic_id), (Task.subtopic_id, query.subtopic_id), (latest.c.task_type, query.task_type), (latest.c.status, query.status))
         for column, value in filters:
             if value is not None:
                 base = base.where(column == value)
+        if query.difficulty_min is not None:
+            base = base.where(latest.c.difficulty >= query.difficulty_min)
+        if query.difficulty_max is not None:
+            base = base.where(latest.c.difficulty <= query.difficulty_max)
         if query.skill_id is not None:
             skill_match = select(TaskSkillLink.id).where(TaskSkillLink.task_version_id == latest.c.id, TaskSkillLink.skill_id == query.skill_id).exists()
             base = base.where(skill_match)

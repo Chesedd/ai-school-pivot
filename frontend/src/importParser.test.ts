@@ -3,7 +3,7 @@ import {createXlsxTemplate} from "./ImportPage";
 import {parseAdditionalSkills,parseImportFile} from "./importParser";
 import {IMPORT_HEADERS,MAX_FILE_SIZE} from "./importTypes";
 const csv=(line:string,name="tasks.csv")=>new File(["\uFEFF"+IMPORT_HEADERS.join(",")+"\n"+line],name,{type:"text/csv"});
-const valid='math,7,motion,,"Title, quoted","Line 1\nLine 2",problem,number,basic,,speed,1.0,';
+const valid='math,7,motion,,"Title, quoted","Line 1\nLine 2",problem,number,25,,speed,1.0,';
 describe("import parsers",()=>{
  it("delegates CSV quoting and logical rows to PapaParse",async()=>{const p=await parseImportFile(csv(valid));expect(p.issues).toEqual([]);expect(p.rows[0].values.title).toBe("Title, quoted");expect(p.rows[0].values.statement).toBe("Line 1\nLine 2");expect(p.rows[0].row_number).toBe(2)});
  it("supports semicolon CSV",async()=>{const p=await parseImportFile(new File([IMPORT_HEADERS.join(";")+"\n"+valid.replaceAll(",",";")],"x.csv"));expect(p.rows).toHaveLength(1)});

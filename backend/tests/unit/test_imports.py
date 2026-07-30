@@ -36,7 +36,7 @@ class Uow:
 
 def command(r,**kw):
  skills=kw.get('skills',(SkillLinkInput(kw.get('skill',r.skill),kw.get('weight',Decimal('1.0000')),kw.get('primary',True)),))
- return CreateTaskCommand(kw.get('subject',r.subject),kw.get('grade',r.grade),kw.get('topic',r.topic),kw.get('subtopic',r.subtopic),VersionContentInput(kw.get('title'),kw.get('statement','text'),kw.get('task_type','calculation'),kw.get('answer_format','number'),kw.get('difficulty','basic'),kw.get('source'),skills))
+ return CreateTaskCommand(kw.get('subject',r.subject),kw.get('grade',r.grade),kw.get('topic',r.topic),kw.get('subtopic',r.subtopic),VersionContentInput(kw.get('title'),kw.get('statement','text'),kw.get('task_type','calculation'),kw.get('answer_format','number'),kw.get('difficulty',25),kw.get('source'),skills))
 async def preview(r,rows=None,actor=None,fmt='csv',ttl=30): return await ImportPreviewService(Uow(r),ttl).preview(fmt,tuple(rows or [ImportRow(2,command(r))]),actor or ActorContext(uuid4()))
 
 @pytest.mark.parametrize('fmt',['csv','xlsx'])

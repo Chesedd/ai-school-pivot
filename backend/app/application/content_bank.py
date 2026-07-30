@@ -10,7 +10,6 @@ from typing import Literal, Protocol, Self
 from uuid import UUID, uuid4
 
 TASK_TYPES = frozenset({"test", "calculation", "problem", "open_question", "essay"})
-DIFFICULTIES = frozenset({"basic", "standard", "advanced"})
 STATUSES = frozenset({"draft", "review", "approved", "archived"})
 AUDIT_ACTIONS = frozenset({"task_created", "methodology_updated", "submitted_for_review", "returned_to_draft", "version_approved", "version_created", "task_archived"})
 SORT_FIELDS = frozenset({"created_at", "updated_at", "title", "difficulty", "status", "version_no", "relevance"})
@@ -44,7 +43,7 @@ class VersionContentInput:
     statement: str
     task_type: str
     answer_format: str
-    difficulty: str
+    difficulty: int
     source: str | None
     skills: tuple[SkillLinkInput, ...]
 
@@ -95,7 +94,7 @@ class TaskVersionDTO:
     statement: str
     task_type: str
     answer_format: str
-    difficulty: str
+    difficulty: int
     source: str | None
     status: str
     created_by: UUID
@@ -154,7 +153,8 @@ class TaskListQuery:
     subtopic_id: UUID | None = None
     skill_id: UUID | None = None
     task_type: str | None = None
-    difficulty: str | None = None
+    difficulty_min: int | None = None
+    difficulty_max: int | None = None
     status: str | None = None
     offset: int = 0
     limit: int = 20
@@ -180,7 +180,7 @@ class TaskListItem:
     statement: str
     task_type: str
     answer_format: str
-    difficulty: str
+    difficulty: int
     status: str
     primary_skill_id: UUID | None
     primary_skill_name: str | None
@@ -220,7 +220,7 @@ class TaskCardVersion:
     statement: str
     task_type: str
     answer_format: str
-    difficulty: str
+    difficulty: int
     source: str | None
     status: str
     skills: tuple[SkillLinkDTO, ...]
@@ -797,9 +797,14 @@ class ListTasksService:
             details.append(ValidationDetail("offset", "range", "Offset должен быть не меньше 0."))
         if query.limit < 1 or query.limit > 100:
             details.append(ValidationDetail("limit", "range", "Limit должен быть от 1 до 100."))
-        for field, value, allowed in (("task_type", query.task_type, TASK_TYPES), ("difficulty", query.difficulty, DIFFICULTIES), ("status", query.status, STATUSES)):
+        for field, value, allowed in (("task_type", query.task_type, TASK_TYPES), ("status", query.status, STATUSES)):
             if value is not None and value not in allowed:
                 details.append(ValidationDetail(field, "enum", "Недопустимое значение."))
+        for field, value in (("difficulty_min", query.difficulty_min), ("difficulty_max", query.difficulty_max)):
+            if value is not None and not 1 <= value <= 100:
+                details.append(ValidationDetail(field, "range", "Сложность должна быть от 1 до 100."))
+        if query.difficulty_min is not None and query.difficulty_max is not None and query.difficulty_min > query.difficulty_max:
+            details.append(ValidationDetail("difficulty_min", "range", "Минимальная сложность не может превышать максимальную."))
         normalized_q = query.q.strip() if query.q else None
         normalized_q = normalized_q or None
         if normalized_q is not None and len(normalized_q) > 200:
