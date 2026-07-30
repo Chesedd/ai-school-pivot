@@ -77,7 +77,7 @@ async def catalog():
 
 
 def payload(ids):
-    return {"subject_id": str(ids["subject"]), "grade_id": str(ids["grade"]), "topic_id": str(ids["topic"]), "subtopic_id": str(ids["subtopic"]), "initial_version": {"title": None, "statement": "Test", "task_type": "calculation", "answer_format": "number", "difficulty": "basic", "source": None, "skills": [{"skill_id": str(ids["skill"]), "weight": "1.0000", "is_primary": True}]}}
+    return {"subject_id": str(ids["subject"]), "grade_id": str(ids["grade"]), "topic_id": str(ids["topic"]), "subtopic_id": str(ids["subtopic"]), "initial_version": {"title": None, "statement": "Test", "task_type": "calculation", "answer_format": "number", "difficulty": 25, "source": None, "skills": [{"skill_id": str(ids["skill"]), "weight": "1.0000", "is_primary": True}]}}
 
 
 async def test_duplicate_extension_and_operator_class(catalog):
@@ -179,7 +179,7 @@ async def _insert_archived_task(catalog) -> str:
             await session.execute(
                 text(
                     "INSERT INTO task_versions(id,task_id,version_no,title,statement,task_type,answer_format,difficulty,status,created_by) "
-                    "VALUES (:id,:task,1,'Archived','Archived statement','calculation','number','basic','archived',:actor)"
+                    "VALUES (:id,:task,1,'Archived','Archived statement','calculation','number',25,'archived',:actor)"
                 ),
                 {"id": version_id, "task": task_id, "actor": uuid4()},
             )
@@ -261,7 +261,7 @@ async def test_latest_and_historical_approved_versions(catalog):
         async with session.begin():
             await _assert_test_database(session)
             await session.execute(text("INSERT INTO tasks(id,subject_id,grade_id,topic_id,subtopic_id,created_by) VALUES (:id,:s,:g,:t,:st,:a)"), {"id":task_id,"s":catalog["subject"],"g":catalog["grade"],"t":catalog["topic"],"st":catalog["subtopic"],"a":actor})
-            await session.execute(text("INSERT INTO task_versions(id,task_id,version_no,title,statement,task_type,answer_format,difficulty,status,created_by,approved_by,approved_at) VALUES (:v1,:task,1,'Old','Approved','calculation','number','basic','archived',:a,:a,CURRENT_TIMESTAMP - interval '1 day'),(:v2,:task,2,'New','Draft','calculation','number','advanced','draft',:a,NULL,NULL)"), {"v1":v1,"v2":v2,"task":task_id,"a":actor})
+            await session.execute(text("INSERT INTO task_versions(id,task_id,version_no,title,statement,task_type,answer_format,difficulty,status,created_by,approved_by,approved_at) VALUES (:v1,:task,1,'Old','Approved','calculation','number',25,'archived',:a,:a,CURRENT_TIMESTAMP - interval '1 day'),(:v2,:task,2,'New','Draft','calculation','number',75,'draft',:a,NULL,NULL)"), {"v1":v1,"v2":v2,"task":task_id,"a":actor})
             await session.execute(text("INSERT INTO task_skill_links(task_version_id,skill_id,weight,is_primary) VALUES (:v2,:skill,1.0000,true)"), {"v2":v2,"skill":catalog["skill"]})
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get(f"/api/content-bank/tasks/{task_id}")

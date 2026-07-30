@@ -2,10 +2,13 @@
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+
+
+Difficulty = Annotated[int, Field(strict=True, ge=1, le=100)]
 
 
 class StrictRequest(BaseModel):
@@ -23,7 +26,7 @@ class InitialVersionCreate(StrictRequest):
     statement: str
     task_type: Literal["test", "calculation", "problem", "open_question", "essay"]
     answer_format: Literal["single_choice", "multiple_choice", "short_text", "number", "expression", "long_text"]
-    difficulty: Literal["basic", "standard", "advanced"]
+    difficulty: Difficulty
     source: str | None = None
     skills: list[SkillLinkCreate] = Field(min_length=1)
 
@@ -51,7 +54,7 @@ class TaskVersionResponse(BaseModel):
     statement: str
     task_type: str
     answer_format: str
-    difficulty: str
+    difficulty: int
     source: str | None
     status: str
     created_by: UUID
@@ -104,7 +107,7 @@ class TaskListItemResponse(BaseModel):
     statement: str
     task_type: str
     answer_format: str
-    difficulty: str
+    difficulty: int
     status: str
     primary_skill_id: UUID | None
     primary_skill_name: str | None
@@ -140,7 +143,7 @@ class TaskCardVersionResponse(BaseModel):
     statement: str
     task_type: str
     answer_format: str
-    difficulty: str
+    difficulty: int
     source: str | None
     status: str
     skills: list[SkillLinkResponse]

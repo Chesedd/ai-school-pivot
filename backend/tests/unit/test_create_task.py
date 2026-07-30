@@ -25,7 +25,7 @@ class Repo:
         if self.fail: raise RuntimeError("database failure")
         now, task_id, version_id, link_id = datetime.now(UTC), uuid4(), uuid4(), uuid4()
         link = command.initial_version.skills[0]
-        version = TaskVersionDTO(version_id, 1, None, "text", "calculation", "number", "basic", None, "draft", actor.actor_id, now, (SkillLinkDTO(link_id, link.skill_id, "skill", link.weight, link.is_primary),))
+        version = TaskVersionDTO(version_id, 1, None, "text", "calculation", "number", 25, None, "draft", actor.actor_id, now, (SkillLinkDTO(link_id, link.skill_id, "skill", link.weight, link.is_primary),))
         return TaskDTO(task_id, command.subject_id, command.grade_id, command.topic_id, command.subtopic_id, actor.actor_id, now, version)
 
 
@@ -38,7 +38,7 @@ class Uow:
 
 def command(repo, links=None, task_type="calculation", answer_format="number", **ids):
     links = links if links is not None else (SkillLinkInput(repo.skill, Decimal("1.0000"), True),)
-    return CreateTaskCommand(ids.get("subject", repo.subject), ids.get("grade", repo.grade), ids.get("topic", repo.topic), ids.get("subtopic", repo.subtopic), VersionContentInput(None, "text", task_type, answer_format, "basic", None, tuple(links)))
+    return CreateTaskCommand(ids.get("subject", repo.subject), ids.get("grade", repo.grade), ids.get("topic", repo.topic), ids.get("subtopic", repo.subtopic), VersionContentInput(None, "text", task_type, answer_format, 25, None, tuple(links)))
 
 
 async def test_success():

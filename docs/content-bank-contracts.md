@@ -40,7 +40,7 @@ Content Bank хранит и предоставляет учебные зада�
 | `task_version_status` | `draft`, `review`, `approved`, `archived` | `task_versions.status`; NOT NULL, server default `draft` |
 | `task_type` | `test`, `calculation`, `problem`, `open_question`, `essay` | `task_versions.task_type`; NOT NULL, без default |
 | `answer_format` | `single_choice`, `multiple_choice`, `short_text`, `number`, `expression`, `long_text` | `task_versions.answer_format`; NOT NULL, без default |
-| `difficulty_level` | `basic`, `standard`, `advanced` | `task_versions.difficulty`; NOT NULL, без default |
+| числовая сложность | `SMALLINT`, 1–100 | `task_versions.difficulty`; NOT NULL, constraint `ck_task_versions_difficulty_range` |
 
 Матрица `task_type`/`answer_format` проверяется application-слоем, без сложного DB CHECK: `test` — `single_choice`, `multiple_choice`; `calculation` — `short_text`, `number`, `expression`; `problem` — `number`, `expression`, `long_text`; `open_question` — `short_text`, `long_text`; `essay` — `long_text`.
 
@@ -317,7 +317,7 @@ AuditEvent содержит `id`, `task_id`, nullable `task_version_id`, nullabl
     "statement": "Решите уравнение (x - 1) / 2 = 3.",
     "task_type": "calculation",
     "answer_format": "number",
-    "difficulty": "basic",
+    "difficulty": 25,
     "source": null,
     "skills": [
     { "skill_id": "a0dda428-f222-4b1a-9a7e-17e324947943", "weight": 0.7000, "is_primary": true },
@@ -356,7 +356,7 @@ AuditEvent содержит `id`, `task_id`, nullable `task_version_id`, nullabl
     "statement": "Решите уравнение (x - 1) / 2 = 3 и запишите ответ.",
     "task_type": "calculation",
     "answer_format": "number",
-    "difficulty": "basic",
+    "difficulty": 25,
     "source": null,
     "created_at": "2026-07-19T10:15:00Z",
     "created_by": { "id": "4a86fe9d-6c1f-4a68-b81e-f1838e44b01c", "display_name": "Автор" },
@@ -420,7 +420,7 @@ Backend не получает файлы: в 2.10B frontend разбирает C
 `is_primary`). UUID и actor задания серверные; импорт всегда создаёт draft v1.
 
 ```json
-{"format":"csv","rows":[{"row_number":2,"subject_id":"uuid","grade_id":"uuid","topic_id":"uuid","subtopic_id":"uuid","initial_version":{"title":"Циклы","statement":"Решите задачу","task_type":"problem","answer_format":"number","difficulty":"basic","source":null,"skills":[{"skill_id":"uuid","weight":"1.0000","is_primary":true}]}}]}
+{"format":"csv","rows":[{"row_number":2,"subject_id":"uuid","grade_id":"uuid","topic_id":"uuid","subtopic_id":"uuid","initial_version":{"title":"Циклы","statement":"Решите задачу","task_type":"problem","answer_format":"number","difficulty":25,"source":null,"skills":[{"skill_id":"uuid","weight":"1.0000","is_primary":true}]}}]}
 ```
 
 `POST /api/content-bank/imports/preview` сохраняет только preview и возвращает
@@ -691,3 +691,10 @@ GET /api/content-bank/tasks?q=%D0%B4%D0%B2%D0%B8%D0%B6%D0%B5%D0%BD%D0%B8%D0%B5&s
 ```json
 {"updated_at":"2026-07-27T12:05:00Z","latest_version":{"updated_at":"2026-07-27T12:05:00Z"}}
 ```
+
+
+## Числовая сложность (revision 20260730_01)
+
+`difficulty` — обязательное строгое целое число 1–100 и свойство версии задания. API списка принимает необязательные `difficulty_min` и `difficulty_max` (1–100); минимум не может превышать максимум. Сортировка `sort_by=difficulty` числовая.
+CSV/XLSX сохраняет колонку `difficulty`, но принимает только целые 1–100; пустые, дробные, текстовые и прежние enum-значения отклоняются. Допустимые примеры: 1, 25, 50, 75, 100.
+Миграция переводит `basic`→25, `standard`→50, `advanced`→75; downgrade группирует 1–33/34–66/67–100 обратно.
