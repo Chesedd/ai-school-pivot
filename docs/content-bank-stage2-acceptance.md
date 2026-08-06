@@ -477,3 +477,15 @@ try {
 - [ ] `difficulty_min`/`difficulty_max` фильтруют диапазон и отклоняют min > max.
 - [ ] CSV/XLSX preview и commit принимают 1, 25, 50, 75, 100 и отклоняют прежние enum-значения.
 - [ ] Свежая БД, upgrade существующей БД, downgrade и повторный upgrade проходят.
+
+## Будущая приёмка иерархии папок (ещё не реализовано)
+
+Этот раздел не входит в приёмку уже реализованного Stage 2. Полный выбранный
+контракт и матрица unit/integration/frontend/manual проверок находятся в
+[контракте иерархии папок](content-bank-folder-hierarchy-contract.md#10-acceptance-criteria-будущей-реализации).
+После backend- и frontend-фаз необходимо отдельно подтвердить: Subject как
+виртуальный root; создание, rename, move и удаление только пустых folders;
+глубину 8 и запрет уровня 9; sibling name uniqueness без учёта регистра;
+same-subject placement одного task; direct contents и recursive subtree search;
+совместимость с `difficulty_min`/`difficulty_max`; root-only import; прямые URL,
+breadcrumb и четыре empty states; task/folder audit и конкурентные конфликты.
