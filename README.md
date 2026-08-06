@@ -8,6 +8,11 @@ PostgreSQL 17 и React/Vite. Alembic остаётся владельцем сх�
 архивирование, audit history, CSV/XLSX preview и commit, а также
 warning-only проверка возможных дубликатов.
 
+Иерархия папок заданий пока не реализована. Её contract-first архитектура
+зафиксирована в
+[отдельном документе](docs/content-bank-folder-hierarchy-contract.md) для
+следующих backend- и frontend-фаз; текущий интерфейс остаётся плоским.
+
 Не реализованы Assessment Core, работы и назначения, ученики и ответы,
 Checking Engine, AI/LLM-проверка, аналитика, OCR, генерация заданий и
 полноценная авторизация. Demo/dev seed не является реальным методически
