@@ -6,7 +6,7 @@ from datetime import datetime
 from types import TracebackType
 from uuid import UUID
 
-from sqlalchemy import and_, delete, func, select, update, text
+from sqlalchemy import String, and_, bindparam, delete, func, select, update, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
@@ -409,7 +409,8 @@ class SQLAlchemyContentBankRepository:
 
     async def lock_subject_tree(self, subject_id: UUID) -> None:
         # First 64 bits of SHA-256 UUID text, interpreted as signed bigint.
-        await self.session.execute(text("SELECT pg_advisory_xact_lock(('x'||substr(encode(digest(CAST(:id AS text),'sha256'),'hex'),1,16))::bit(64)::bigint)"), {"id":subject_id})
+        statement = text("SELECT pg_advisory_xact_lock(('x'||substr(encode(digest(CAST(:id AS text),'sha256'),'hex'),1,16))::bit(64)::bigint)").bindparams(bindparam("id", type_=String()))
+        await self.session.execute(statement, {"id": str(subject_id)})
     async def subject_exists(self, subject_id): return bool(await self.session.scalar(select(Subject.id).where(Subject.id==subject_id)))
     async def _folder_dto(self, m):
         depth=int(await self.session.scalar(text("WITH RECURSIVE a AS (SELECT id,parent_id,1 d FROM task_folders WHERE id=:id UNION ALL SELECT f.id,f.parent_id,a.d+1 FROM task_folders f JOIN a ON f.id=a.parent_id) SELECT max(d) FROM a"),{"id":m.id}) or 1)
