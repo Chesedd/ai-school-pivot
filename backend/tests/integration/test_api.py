@@ -24,6 +24,7 @@ os.environ.setdefault("CONTENT_BANK_DEV_ACTOR_ID", "00000000-0000-4000-8000-0000
 
 from app.db.session import async_session_factory, engine  # noqa: E402
 from app.main import app  # noqa: E402
+from app.infrastructure.repository import SQLAlchemyContentBankRepository  # noqa: E402
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
@@ -78,6 +79,30 @@ async def catalog():
 
 def payload(ids):
     return {"subject_id": str(ids["subject"]), "grade_id": str(ids["grade"]), "topic_id": str(ids["topic"]), "subtopic_id": str(ids["subtopic"]), "initial_version": {"title": None, "statement": "Test", "task_type": "calculation", "answer_format": "number", "difficulty": 25, "source": None, "skills": [{"skill_id": str(ids["skill"]), "weight": "1.0000", "is_primary": True}]}}
+
+
+async def test_folder_contents_default_sort_and_create_smoke(catalog):
+    subject_id = catalog["subject"]
+    async with async_session_factory() as session:
+        async with session.begin():
+            await SQLAlchemyContentBankRepository(session).lock_subject_tree(subject_id)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        tree = await client.get(f"/api/content-bank/subjects/{subject_id}/folders/tree")
+        before = await client.get(f"/api/content-bank/subjects/{subject_id}/contents", params={"offset": 0, "limit": 20})
+        created = await client.post(f"/api/content-bank/subjects/{subject_id}/folders", json={"name": "Regression", "parent_id": None})
+        after = await client.get(f"/api/content-bank/subjects/{subject_id}/contents", params={"offset": 0, "limit": 20})
+        nested = await client.get(f"/api/content-bank/folders/{created.json()['id']}/contents", params={"offset": 0, "limit": 20})
+        renamed = await client.patch(f"/api/content-bank/folders/{created.json()['id']}", json={"name": "Regression renamed", "expected_updated_at": created.json()["updated_at"]})
+    assert tree.status_code == before.status_code == after.status_code == nested.status_code == 200
+    assert created.status_code == 201
+    assert renamed.status_code == 200 and renamed.json()["name"] == "Regression renamed"
+    assert before.json()["tasks"]["items"] == []
+    assert any(item["id"] == created.json()["id"] for item in after.json()["folders"])
+    async with async_session_factory() as session:
+        assert await session.scalar(text("SELECT count(*) FROM task_folders WHERE id=:id"), {"id": UUID(created.json()["id"])}) == 1
+        actions = (await session.execute(text("SELECT action, details FROM folder_audit_log WHERE folder_id=:id ORDER BY occurred_at"), {"id": UUID(created.json()["id"])})).all()
+    assert [row.action for row in actions] == ["folder_created", "folder_renamed"]
+    assert actions[0].details["after"]["name"] == "Regression"
 
 
 async def test_duplicate_extension_and_operator_class(catalog):
