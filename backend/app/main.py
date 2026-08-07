@@ -5,6 +5,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.application.folders import FolderDomainError
 from app.application.content_bank import ApplicationError, ConflictError, GoneError, IssuesError, NotFoundError
 from app.config import get_settings
 from app.presentation.routes import router
@@ -12,13 +13,18 @@ from app.presentation.routes import router
 
 app = FastAPI()
 settings = get_settings()
-app.add_middleware(CORSMiddleware, allow_origins=[x.strip() for x in settings.cors_origins.split(",") if x.strip()], allow_credentials=False, allow_methods=["GET", "POST", "PUT"], allow_headers=["Content-Type"])
+app.add_middleware(CORSMiddleware, allow_origins=[x.strip() for x in settings.cors_origins.split(",") if x.strip()], allow_credentials=False, allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"], allow_headers=["Content-Type", "Authorization"])
 app.include_router(router)
 
 
 def error_response(code: str, message: str, details: list[dict[str, str]], status: int) -> JSONResponse:
     return JSONResponse(status_code=status, content={"error": {"code": code, "message": message, "details": details, "request_id": str(uuid4())}})
 
+
+
+@app.exception_handler(FolderDomainError)
+async def folder_domain_error(_: Request, exc: FolderDomainError) -> JSONResponse:
+    return JSONResponse(status_code=exc.status, content={"error":{"code":exc.code,"message":str(exc),"details":exc.details,"request_id":str(uuid4())}})
 
 @app.exception_handler(ApplicationError)
 async def application_error(_: Request, exc: ApplicationError) -> JSONResponse:

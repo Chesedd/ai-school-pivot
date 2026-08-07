@@ -6,12 +6,13 @@ from datetime import datetime
 from types import TracebackType
 from uuid import UUID
 
-from sqlalchemy import and_, delete, func, select, update
+from sqlalchemy import and_, delete, func, select, update, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from app.application.content_bank import AcceptedAnswerDTO, ActorContext, ArchiveResult, AuditEventDTO, AuditEventRecord, AuditPage, CatalogRecord, CatalogRef, ConflictError, CreateTaskCommand, DUPLICATE_CANDIDATE_THRESHOLD, DuplicateCandidate, DuplicateCandidateRecord, DuplicateQuery, EMPTY_METHODOLOGY, ExpectedSolutionDTO, HintDTO, LockedVersion, MethodologyDTO, RubricDTO, RubricItemDTO, SaveMethodologyCommand, SkillLinkDTO, TaskCard, TaskCardVersion, TaskDTO, TaskListItem, TaskListPage, TaskListQuery, TaskVersionDTO, TaskVersionSummary, TypicalErrorDTO, VersionState
-from app.infrastructure.models import AcceptedAnswer, AuditLog, ExpectedSolution, Grade, Hint, ImportPreview, Rubric, RubricItem, Skill, Subject, Subtopic, Task, TaskErrorLink, TaskSkillLink, TaskVersion, Topic, TypicalError
+from app.infrastructure.models import AcceptedAnswer, AuditLog, FolderAuditLog, TaskFolder, ExpectedSolution, Grade, Hint, ImportPreview, Rubric, RubricItem, Skill, Subject, Subtopic, Task, TaskErrorLink, TaskSkillLink, TaskVersion, Topic, TypicalError
+from app.application.folders import FolderSummaryDTO, FolderTreeNodeDTO, TaskLocationDTO
 from app.application.content_bank import ImportCatalogContext, ImportIssue, ImportPreviewRecord, ImportPreviewRow, SkillLinkInput, VersionContentInput
 
 
@@ -108,7 +109,7 @@ class SQLAlchemyContentBankRepository:
         return {row.id: CatalogRecord(row.id, row.name, topic_id=row.subtopic.topic_id, subtopic_id=row.subtopic_id) for row in result.scalars()}
 
     async def create_task_with_initial_version(self, command: CreateTaskCommand, actor: ActorContext) -> TaskDTO:
-        task = Task(subject_id=command.subject_id, grade_id=command.grade_id, topic_id=command.topic_id, subtopic_id=command.subtopic_id, created_by=actor.actor_id)
+        task = Task(subject_id=command.subject_id, folder_id=command.folder_id, grade_id=command.grade_id, topic_id=command.topic_id, subtopic_id=command.subtopic_id, created_by=actor.actor_id)
         self.session.add(task)
         await self.session.flush()
         content = command.initial_version
@@ -121,7 +122,7 @@ class SQLAlchemyContentBankRepository:
         await self.session.flush()
         await self.session.refresh(task)
         await self.session.refresh(version)
-        return TaskDTO(task.id, task.subject_id, task.grade_id, task.topic_id, task.subtopic_id, task.created_by, task.created_at, TaskVersionDTO(version.id, 1, version.title, version.statement, version.task_type, version.answer_format, version.difficulty, version.source, version.status, version.created_by, version.created_at, tuple(SkillLinkDTO(link.id, link.skill_id, skill_rows[link.skill_id].name, link.weight, link.is_primary) for link in links)))
+        return TaskDTO(task.id, task.subject_id, task.grade_id, task.topic_id, task.subtopic_id, task.created_by, task.created_at, TaskVersionDTO(version.id, 1, version.title, version.statement, version.task_type, version.answer_format, version.difficulty, version.source, version.status, version.created_by, version.created_at, tuple(SkillLinkDTO(link.id, link.skill_id, skill_rows[link.skill_id].name, link.weight, link.is_primary) for link in links)), folder_id=task.folder_id)
 
     async def list_tasks(self, query: TaskListQuery) -> TaskListPage:
         latest_numbers = select(TaskVersion.task_id, func.max(TaskVersion.version_no).label("version_no")).group_by(TaskVersion.task_id).subquery()
@@ -134,15 +135,23 @@ class SQLAlchemyContentBankRepository:
             latest.c.id, latest.c.version_no, latest.c.title, latest.c.statement,
             latest.c.task_type, latest.c.answer_format, latest.c.difficulty,
             latest.c.status, primary_skill.c.id, primary_skill.c.name,
-            Task.created_at, Task.archived_at, Task.updated_at,
+            Task.created_at, Task.archived_at, Task.updated_at, Task.folder_id, TaskFolder.name,
         )
         base = (select(*columns).join(Subject, Subject.id == Task.subject_id)
             .join(Grade, Grade.id == Task.grade_id).join(Topic, Topic.id == Task.topic_id)
             .outerjoin(Subtopic, Subtopic.id == Task.subtopic_id)
+            .outerjoin(TaskFolder, TaskFolder.id == Task.folder_id)
             .join(latest_numbers, latest_numbers.c.task_id == Task.id)
             .join(latest, and_(latest.c.task_id == Task.id, latest.c.version_no == latest_numbers.c.version_no))
             .outerjoin(primary_link, and_(primary_link.c.task_version_id == latest.c.id, primary_link.c.is_primary.is_(True)))
             .outerjoin(primary_skill, primary_skill.c.id == primary_link.c.skill_id))
+        if query.root_only:
+            base=base.where(Task.folder_id.is_(None))
+        if query.folder_id is not None:
+            if query.folder_scope == "subtree":
+                scope=text("WITH RECURSIVE s AS (SELECT id FROM task_folders WHERE id=:folder_id UNION ALL SELECT f.id FROM task_folders f JOIN s ON f.parent_id=s.id) SELECT id FROM s")
+                base=base.where(Task.folder_id.in_(scope)).params(folder_id=query.folder_id)
+            else: base=base.where(Task.folder_id==query.folder_id)
         if query.status == "archived":
             base = base.where(Task.archived_at.is_not(None))
         else:
@@ -397,6 +406,67 @@ class SQLAlchemyContentBankRepository:
         rows = (await self.session.execute(select(Skill).options(selectinload(Skill.subtopic)).order_by(Skill.name))).scalars()
         return [CatalogRecord(x.id, x.name, topic_id=x.subtopic.topic_id, subtopic_id=x.subtopic_id, code=x.code) for x in rows]
 
+
+    async def lock_subject_tree(self, subject_id: UUID) -> None:
+        # First 64 bits of SHA-256 UUID text, interpreted as signed bigint.
+        await self.session.execute(text("SELECT pg_advisory_xact_lock(('x'||substr(encode(digest(CAST(:id AS text),'sha256'),'hex'),1,16))::bit(64)::bigint)"), {"id":subject_id})
+    async def subject_exists(self, subject_id): return bool(await self.session.scalar(select(Subject.id).where(Subject.id==subject_id)))
+    async def _folder_dto(self, m):
+        depth=int(await self.session.scalar(text("WITH RECURSIVE a AS (SELECT id,parent_id,1 d FROM task_folders WHERE id=:id UNION ALL SELECT f.id,f.parent_id,a.d+1 FROM task_folders f JOIN a ON f.id=a.parent_id) SELECT max(d) FROM a"),{"id":m.id}) or 1)
+        return FolderSummaryDTO(m.id,m.subject_id,m.parent_id,m.name,depth,m.created_at,m.updated_at)
+    async def get_folder(self,id):
+        if id is None:return None
+        m=await self.session.get(TaskFolder,id); return await self._folder_dto(m) if m else None
+    async def get_folder_for_update(self,id):
+        if id is None:return None
+        m=await self.session.scalar(select(TaskFolder).where(TaskFolder.id==id).with_for_update()); return await self._folder_dto(m) if m else None
+    async def get_folder_subtree_for_update(self,id):
+        ids=(await self.session.execute(text("WITH RECURSIVE s AS (SELECT id FROM task_folders WHERE id=:id UNION ALL SELECT f.id FROM task_folders f JOIN s ON f.parent_id=s.id) SELECT id FROM s FOR UPDATE"),{"id":id})).scalars().all()
+        return tuple([x for x in [await self.get_folder_for_update(i) for i in ids] if x])
+    async def sibling_name_exists(self,subject_id,parent_id,name,exclude_id):
+        q=select(TaskFolder.id).where(TaskFolder.subject_id==subject_id,func.lower(TaskFolder.name)==name.lower())
+        q=q.where(TaskFolder.parent_id.is_(None) if parent_id is None else TaskFolder.parent_id==parent_id)
+        if exclude_id:q=q.where(TaskFolder.id!=exclude_id)
+        return bool(await self.session.scalar(q.limit(1)))
+    async def create_folder(self,c,name,depth):
+        m=TaskFolder(subject_id=c.subject_id,parent_id=c.parent_id,name=name,created_by=c.actor_id,updated_by=c.actor_id);self.session.add(m);await self.session.flush();await self.session.refresh(m);return await self._folder_dto(m)
+    async def _mutate_folder(self,current,actor_id,**values):
+        values.update(updated_by=actor_id,updated_at=func.clock_timestamp());await self.session.execute(update(TaskFolder).where(TaskFolder.id==current.id).values(**values));await self.session.flush();return await self.get_folder_for_update(current.id)
+    async def rename_folder(self,current,name,actor_id):return await self._mutate_folder(current,actor_id,name=name)
+    async def move_folder(self,current,parent_id,actor_id):return await self._mutate_folder(current,actor_id,parent_id=parent_id)
+    async def folder_nonempty(self,id):
+        return bool(await self.session.scalar(select(TaskFolder.id).where(TaskFolder.parent_id==id).limit(1))),bool(await self.session.scalar(select(Task.id).where(Task.folder_id==id).limit(1)))
+    async def delete_empty_folder(self,id):await self.session.execute(delete(TaskFolder).where(TaskFolder.id==id))
+    @staticmethod
+    def _snapshot(x): return None if x is None else {"id":str(x.id),"subject_id":str(x.subject_id),"parent_id":str(x.parent_id) if x.parent_id else None,"name":x.name}
+    async def append_folder_audit(self,result,action,actor_id,before,deleted=False):
+        self.session.add(FolderAuditLog(folder_id=result.id,subject_id=result.subject_id,action=action,actor_id=actor_id,details={"before":self._snapshot(before),"after":None if deleted else self._snapshot(result)}));await self.session.flush()
+    async def lock_task(self,id):return await self.session.scalar(select(Task).where(Task.id==id).with_for_update())
+    async def set_task_folder(self,task,folder_id):
+        previous=task.folder_id;task.folder_id=folder_id;task.updated_at=func.clock_timestamp();await self.session.flush();await self.session.refresh(task);return TaskLocationDTO(task.id,task.subject_id,task.folder_id,previous,task.updated_at)
+    async def task_location(self,task,previous):return TaskLocationDTO(task.id,task.subject_id,task.folder_id,previous,task.updated_at)
+    async def append_task_move_audit(self,task,result,old,new,actor_id):
+        self.session.add(AuditLog(task_id=task.id,action="task_folder_moved",actor_id=actor_id,details={"before":{"folder_id":str(old.id) if old else None,"folder_name":old.name if old else None},"after":{"folder_id":str(new.id) if new else None,"folder_name":new.name if new else None}}));await self.session.flush()
+    async def get_level_contents(self,subject_id,folder_id,query):
+        subject=await self.get_subject(subject_id)
+        if not subject:return None
+        folder=await self.get_folder(folder_id) if folder_id else None
+        if folder_id and (not folder or folder.subject_id!=subject_id):return None
+        models=(await self.session.scalars(select(TaskFolder).where(TaskFolder.subject_id==subject_id, TaskFolder.parent_id.is_(None) if folder_id is None else TaskFolder.parent_id==folder_id).order_by(func.lower(TaskFolder.name),TaskFolder.name,TaskFolder.id))).all()
+        folders=tuple([await self._folder_dto(x) for x in models])
+        ancestors=[]; cursor=folder
+        while cursor: ancestors.append(cursor);cursor=await self.get_folder(cursor.parent_id)
+        direct=await self.list_tasks(__import__('dataclasses').replace(query,subject_id=subject_id,folder_id=folder_id,folder_scope="direct",root_only=folder_id is None))
+        subject_total=await self.session.scalar(select(func.count(Task.id)).where(Task.subject_id==subject_id))
+        return {"subject":subject,"folder":folder,"breadcrumb":list(reversed(ancestors)),"folders":folders,"tasks":direct,"level_task_total":direct.total,"subject_task_total":int(subject_total or 0)}
+
+    async def list_folder_tree(self,subject_id):
+        rows=(await self.session.execute(text("WITH RECURSIVE t AS (SELECT *,1 depth FROM task_folders WHERE subject_id=:s AND parent_id IS NULL UNION ALL SELECT f.*,t.depth+1 FROM task_folders f JOIN t ON f.parent_id=t.id) SELECT id,subject_id,parent_id,name,depth FROM t ORDER BY depth,lower(name),name,id"),{"s":subject_id})).mappings().all()
+        children={r.id:[] for r in rows}; roots=[]
+        for r in reversed(rows):
+            node=FolderTreeNodeDTO(r.id,r.subject_id,r.parent_id,r.name,r.depth,tuple(children[r.id])); (children[r.parent_id] if r.parent_id else roots).insert(0,node)
+        def ordered(xs): return tuple(sorted(xs,key=lambda x:(x.name.lower(),x.name,str(x.id))))
+        return ordered(roots)
 
 class SQLAlchemyUnitOfWork:
     def __init__(self, factory: async_sessionmaker[AsyncSession]) -> None:

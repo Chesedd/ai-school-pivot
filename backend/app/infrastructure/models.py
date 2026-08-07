@@ -6,7 +6,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import Boolean, CheckConstraint, Computed, DateTime, ForeignKey, Index, Integer, Numeric, SmallInteger, String, Text, UniqueConstraint, text
+from sqlalchemy import Boolean, CheckConstraint, Computed, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, Numeric, PrimaryKeyConstraint, SmallInteger, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import ENUM, JSONB, TSVECTOR, UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -21,7 +21,7 @@ task_type_enum = ENUM("test", "calculation", "problem", "open_question", "essay"
 answer_format_enum = ENUM("single_choice", "multiple_choice", "short_text", "number", "expression", "long_text", name="answer_format", create_type=False)
 grading_mode_enum = ENUM("points", name="grading_mode", create_type=False)
 severity_enum = ENUM("low", "medium", "high", name="typical_error_severity", create_type=False)
-audit_action_enum = ENUM("task_created", "methodology_updated", "submitted_for_review", "returned_to_draft", "version_approved", "version_created", "task_archived", name="audit_action", create_type=False)
+audit_action_enum = ENUM("task_created", "methodology_updated", "submitted_for_review", "returned_to_draft", "version_approved", "version_created", "task_archived", "task_folder_moved", "folder_created", "folder_renamed", "folder_moved", "folder_deleted", name="audit_action", create_type=False)
 
 
 class IdMixin:
@@ -36,6 +36,33 @@ class Subject(IdMixin, Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
     topics: Mapped[list[Topic]] = relationship(back_populates="subject")
     tasks: Mapped[list[Task]] = relationship(back_populates="subject")
+    folders: Mapped[list[TaskFolder]] = relationship(back_populates="subject")
+
+
+class TaskFolder(IdMixin, Base):
+    __tablename__ = "task_folders"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_task_folders"),
+        ForeignKeyConstraint(["subject_id"], ["subjects.id"], name="fk_task_folders_subject_id_subjects", ondelete="RESTRICT"),
+        UniqueConstraint("id", "subject_id", name="uq_task_folders_id_subject_id"),
+        ForeignKeyConstraint(["parent_id", "subject_id"], ["task_folders.id", "task_folders.subject_id"], name="fk_task_folders_parent_subject", ondelete="RESTRICT"),
+        CheckConstraint("parent_id IS NULL OR parent_id <> id", name="ck_task_folders_parent_not_self"),
+        CheckConstraint("name = btrim(name) AND char_length(name) BETWEEN 1 AND 120 AND name NOT IN ('.', '..') AND strpos(name, '/') = 0 AND strpos(name, chr(92)) = 0", name="ck_task_folders_name_valid"),
+        Index("uq_task_folders_root_subject_name_ci", "subject_id", text("lower(name)"), unique=True, postgresql_where=text("parent_id IS NULL")),
+        Index("uq_task_folders_parent_name_ci", "parent_id", text("lower(name)"), unique=True, postgresql_where=text("parent_id IS NOT NULL")),
+        Index("ix_task_folders_subject_parent", "subject_id", "parent_id"), Index("ix_task_folders_parent_id", "parent_id"),
+        Index("ix_task_folders_subject_name", "subject_id", text("lower(name)"), "id"),)
+    subject_id: Mapped[UUID] = mapped_column(uuid_type)
+    parent_id: Mapped[UUID | None] = mapped_column(uuid_type, nullable=True)
+    name: Mapped[str] = mapped_column(String(120))
+    created_by: Mapped[UUID] = mapped_column(uuid_type)
+    updated_by: Mapped[UUID] = mapped_column(uuid_type)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+    subject: Mapped[Subject] = relationship(back_populates="folders")
+    parent: Mapped[TaskFolder | None] = relationship(remote_side="TaskFolder.id", back_populates="children", foreign_keys=[parent_id])
+    children: Mapped[list[TaskFolder]] = relationship(back_populates="parent", foreign_keys=[parent_id], order_by="TaskFolder.name")
+    tasks: Mapped[list[Task]] = relationship(back_populates="folder", foreign_keys="Task.folder_id")
 
 
 class Grade(IdMixin, Base):
@@ -88,8 +115,9 @@ class Skill(IdMixin, Base):
 
 class Task(IdMixin, Base):
     __tablename__ = "tasks"
-    __table_args__ = (Index("ix_tasks_subject_id", "subject_id"), Index("ix_tasks_grade_id", "grade_id"), Index("ix_tasks_topic_id", "topic_id"), Index("ix_tasks_subtopic_id", "subtopic_id"), Index("ix_tasks_subject_grade_topic_subtopic", "subject_id", "grade_id", "topic_id", "subtopic_id"), Index("ix_tasks_created_at", "created_at"), Index("ix_tasks_updated_at", "updated_at"), Index("ix_tasks_archived_at", "archived_at"))
+    __table_args__ = (ForeignKeyConstraint(["folder_id", "subject_id"], ["task_folders.id", "task_folders.subject_id"], name="fk_tasks_folder_subject", ondelete="RESTRICT"), Index("ix_tasks_subject_folder", "subject_id", "folder_id"), Index("ix_tasks_subject_id", "subject_id"), Index("ix_tasks_grade_id", "grade_id"), Index("ix_tasks_topic_id", "topic_id"), Index("ix_tasks_subtopic_id", "subtopic_id"), Index("ix_tasks_subject_grade_topic_subtopic", "subject_id", "grade_id", "topic_id", "subtopic_id"), Index("ix_tasks_created_at", "created_at"), Index("ix_tasks_updated_at", "updated_at"), Index("ix_tasks_archived_at", "archived_at"))
     subject_id: Mapped[UUID] = mapped_column(ForeignKey("subjects.id", ondelete="RESTRICT", name="fk_tasks_subject_id_subjects"))
+    folder_id: Mapped[UUID | None] = mapped_column(uuid_type, nullable=True)
     grade_id: Mapped[UUID] = mapped_column(ForeignKey("grades.id", ondelete="RESTRICT", name="fk_tasks_grade_id_grades"))
     topic_id: Mapped[UUID] = mapped_column(ForeignKey("topics.id", ondelete="RESTRICT", name="fk_tasks_topic_id_topics"))
     subtopic_id: Mapped[UUID | None] = mapped_column(ForeignKey("subtopics.id", ondelete="RESTRICT", name="fk_tasks_subtopic_id_subtopics"), nullable=True)
@@ -98,6 +126,7 @@ class Task(IdMixin, Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     subject: Mapped[Subject] = relationship(back_populates="tasks")
+    folder: Mapped[TaskFolder | None] = relationship(back_populates="tasks", foreign_keys=[folder_id])
     grade: Mapped[Grade] = relationship(back_populates="tasks")
     topic: Mapped[Topic] = relationship(back_populates="tasks")
     subtopic: Mapped[Subtopic | None] = relationship(back_populates="tasks")
@@ -250,3 +279,14 @@ class ImportPreview(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     committed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class FolderAuditLog(IdMixin, Base):
+    __tablename__ = "folder_audit_log"
+    __table_args__ = (Index("ix_folder_audit_folder_occurred_at", "folder_id", "occurred_at"), Index("ix_folder_audit_subject_occurred_at", "subject_id", "occurred_at"))
+    folder_id: Mapped[UUID | None] = mapped_column(uuid_type, nullable=True)
+    subject_id: Mapped[UUID] = mapped_column(uuid_type)
+    action: Mapped[str] = mapped_column(audit_action_enum)
+    actor_id: Mapped[UUID] = mapped_column(uuid_type)
+    details: Mapped[dict[str, object]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))

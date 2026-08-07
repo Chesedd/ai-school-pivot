@@ -36,6 +36,7 @@ class TaskCreateRequest(StrictRequest):
     grade_id: UUID
     topic_id: UUID
     subtopic_id: UUID | None = None
+    folder_id: UUID | None = None
     initial_version: InitialVersionCreate
 
 
@@ -71,6 +72,7 @@ class TaskResponse(BaseModel):
     created_by: UUID
     created_at: datetime
     initial_version: TaskVersionResponse
+    folder_id: UUID | None = None
     duplicate_warnings: list["DuplicateCandidateResponse"] = Field(default_factory=list)
 
 
@@ -114,6 +116,8 @@ class TaskListItemResponse(BaseModel):
     created_at: datetime
     archived_at: datetime | None
     updated_at: datetime
+    folder_id: UUID | None = None
+    folder_name: str | None = None
 
 
 class TaskListPageResponse(BaseModel):
@@ -379,3 +383,24 @@ class ImportCommitItemResponse(BaseModel):
     row_number: int; task_id: UUID; task_version_id: UUID; version_no: int; status: str
 class ImportCommitResponse(BaseModel):
     imported_count: int; items: list[ImportCommitItemResponse]
+
+class FolderCreateRequest(StrictRequest):
+    name: str
+    parent_id: UUID | None = None
+class FolderRenameRequest(StrictRequest):
+    name: str
+    expected_updated_at: datetime
+class FolderMoveRequest(StrictRequest):
+    parent_id: UUID | None = None
+    expected_updated_at: datetime
+class TaskLocationRequest(StrictRequest):
+    folder_id: UUID | None = None
+    expected_folder_id: UUID | None = None
+class FolderSummaryResponse(BaseModel):
+    id: UUID; subject_id: UUID; parent_id: UUID | None; name: str; depth: int; created_at: datetime; updated_at: datetime
+class FolderTreeNodeResponse(BaseModel):
+    id: UUID; subject_id: UUID; parent_id: UUID | None; name: str; depth: int; children: list["FolderTreeNodeResponse"]
+class FolderTreeResponse(BaseModel):
+    subject: CatalogRefResponse; folders: list[FolderTreeNodeResponse]
+class TaskLocationResponse(BaseModel):
+    task_id: UUID; subject_id: UUID; folder_id: UUID | None; previous_folder_id: UUID | None; updated_at: datetime

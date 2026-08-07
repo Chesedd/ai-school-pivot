@@ -55,6 +55,7 @@ class CreateTaskCommand:
     topic_id: UUID
     subtopic_id: UUID | None
     initial_version: VersionContentInput
+    folder_id: UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -113,6 +114,7 @@ class TaskDTO:
     created_at: datetime
     initial_version: TaskVersionDTO
     duplicate_warnings: tuple["DuplicateCandidate", ...] = ()
+    folder_id: UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -161,6 +163,9 @@ class TaskListQuery:
     sort_by: str | None = None
     sort_order: str = "desc"
     q: str | None = None
+    folder_id: UUID | None = None
+    folder_scope: Literal["direct", "subtree"] | None = None
+    root_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -187,6 +192,8 @@ class TaskListItem:
     created_at: datetime
     archived_at: datetime | None
     updated_at: datetime
+    folder_id: UUID | None = None
+    folder_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -582,6 +589,14 @@ class CreateTaskOperation:
                 topic = catalog.topics.get(command.topic_id)
                 subtopic = catalog.subtopics.get(command.subtopic_id) if command.subtopic_id else None
                 skills = catalog.skills
+            if command.folder_id is not None and catalog is None:
+                folder = await repository.get_folder(command.folder_id)
+                if folder is None:
+                    from app.application.folders import FolderDomainError
+                    raise FolderDomainError("folder_not_found", "Папка не найдена.", {"folder_id":str(command.folder_id)}, 404)
+                if folder.subject_id != command.subject_id:
+                    from app.application.folders import FolderDomainError
+                    raise FolderDomainError("task_folder_subject_mismatch", "Предмет задания и папки не совпадает.", {"task_id":None,"task_subject_id":str(command.subject_id),"folder_id":str(folder.id),"folder_subject_id":str(folder.subject_id)})
             if subject is None:
                 details.append(ValidationDetail("subject_id", "not_found", "Предмет не найден."))
             if grade is None:
@@ -805,6 +820,10 @@ class ListTasksService:
                 details.append(ValidationDetail(field, "range", "Сложность должна быть от 1 до 100."))
         if query.difficulty_min is not None and query.difficulty_max is not None and query.difficulty_min > query.difficulty_max:
             details.append(ValidationDetail("difficulty_min", "range", "Минимальная сложность не может превышать максимальную."))
+        if query.folder_scope is not None and query.folder_id is None:
+            details.append(ValidationDetail("folder_scope", "requires_folder_id", "folder_scope требует folder_id."))
+        if query.folder_id is not None and query.subject_id is None:
+            details.append(ValidationDetail("folder_id", "requires_subject_id", "folder_id требует subject_id."))
         normalized_q = query.q.strip() if query.q else None
         normalized_q = normalized_q or None
         if normalized_q is not None and len(normalized_q) > 200:
