@@ -775,3 +775,21 @@ async def test_import_schema_constraints_and_index(catalog):
         constraints=(await session.execute(text("SELECT conname FROM pg_constraint WHERE conrelid='import_previews'::regclass"))).scalars().all()
     assert columns['rows'].data_type=='jsonb' and columns['committed_at'].is_nullable=='YES' and 'ix_import_previews_expires_at' in indexes
     assert {'ck_import_previews_format','ck_import_previews_expiry','ck_import_previews_committed_at'}<=set(constraints)
+
+async def test_direct_contents_filters_sort_total_and_pagination(catalog):
+    """Exercise the real asyncpg contents path, including enforced direct scope."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        folder = await client.post(f"/api/content-bank/subjects/{catalog['subject']}/folders", json={"name": "Filtered child", "parent_id": None})
+        root_low = payload(catalog); root_low["initial_version"].update({"title": "Root low", "difficulty": 10})
+        root_high = payload(catalog); root_high["initial_version"].update({"title": "Root high", "difficulty": 80, "task_type": "problem", "answer_format": "number"})
+        nested = payload(catalog); nested["folder_id"] = folder.json()["id"]; nested["initial_version"].update({"title": "Nested", "difficulty": 60})
+        for data in (root_low, root_high, nested):
+            assert (await client.post("/api/content-bank/tasks", json=data)).status_code == 201
+        root = await client.get(f"/api/content-bank/subjects/{catalog['subject']}/contents", params={"difficulty_min": 20, "sort_by": "difficulty", "sort_order": "desc", "limit": 1})
+        child = await client.get(f"/api/content-bank/folders/{folder.json()['id']}/contents", params={"difficulty_min": 20, "sort_by": "difficulty", "sort_order": "asc"})
+        no_tasks = await client.get(f"/api/content-bank/subjects/{catalog['subject']}/contents", params={"difficulty_min": 100})
+    assert root.status_code == child.status_code == no_tasks.status_code == 200
+    assert root.json()["tasks"]["total"] == 1 and [x["title"] for x in root.json()["tasks"]["items"]] == ["Root high"]
+    assert child.json()["tasks"]["total"] == 1 and [x["title"] for x in child.json()["tasks"]["items"]] == ["Nested"]
+    assert no_tasks.json()["tasks"]["total"] == 0
+    assert [x["name"] for x in no_tasks.json()["folders"]] == ["Filtered child"]

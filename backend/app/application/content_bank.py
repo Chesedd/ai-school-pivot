@@ -806,7 +806,8 @@ class ListTasksService:
     def __init__(self, repository: ContentBankRepository) -> None:
         self.repository = repository
 
-    async def list_tasks(self, query: TaskListQuery) -> TaskListPage:
+    @staticmethod
+    def normalize_query(query: TaskListQuery) -> TaskListQuery:
         details: list[ValidationDetail] = []
         if query.offset < 0:
             details.append(ValidationDetail("offset", "range", "Offset должен быть не меньше 0."))
@@ -837,7 +838,10 @@ class ListTasksService:
             details.append(ValidationDetail("sort_order", "enum", "Недопустимое направление сортировки."))
         if details:
             raise ApplicationError(details)
-        return await self.repository.list_tasks(replace(query, q=normalized_q, sort_by=effective_sort))
+        return replace(query, q=normalized_q, sort_by=effective_sort)
+
+    async def list_tasks(self, query: TaskListQuery) -> TaskListPage:
+        return await self.repository.list_tasks(self.normalize_query(query))
 
 
 class GetTaskCardService:
