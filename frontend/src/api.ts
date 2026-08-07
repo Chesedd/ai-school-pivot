@@ -6,9 +6,11 @@ async function request(path:string,init?:RequestInit){const response=await fetch
 export type Folder={id:string;subject_id:string;parent_id:string|null;name:string;depth:number;created_at:string;updated_at:string};
 export type FolderNode=Folder&{children:FolderNode[]};
 export type SubjectRoot={id:string;name:string};
+export type CatalogItem={id:string;name:string;subject_id?:string;grade_id?:string;topic_id?:string;subtopic_id?:string};
 export type LevelContents={subject:SubjectRoot;folder:Folder|null;breadcrumb:Folder[];folders:Folder[];tasks:{items:any[];total:number;offset:number;limit:number};level_task_total:number;subject_task_total:number};
 const enc=encodeURIComponent;
 export const getSubjectRoots=(signal?:AbortSignal):Promise<{items:SubjectRoot[]}>=>(request("/api/content-bank/catalog/subjects",{signal}));
+export const getCatalog=(name:"grades"|"topics"|"subtopics"|"skills",signal?:AbortSignal):Promise<{items:CatalogItem[]}>=>(request(`/api/content-bank/catalog/${name}`,{signal}));
 export const getFolderTree=(subjectId:string,signal?:AbortSignal):Promise<{subject:SubjectRoot;folders:FolderNode[]}>=>(request(`/api/content-bank/subjects/${enc(subjectId)}/folders/tree`,{signal}));
 export const getLevelContents=(subjectId:string,folderId:string|null,params:URLSearchParams,signal?:AbortSignal):Promise<LevelContents>=>request(`${folderId?`/api/content-bank/folders/${enc(folderId)}/contents`:`/api/content-bank/subjects/${enc(subjectId)}/contents`}?${params}`,{signal});
 export const createFolder=(subjectId:string,body:{name:string;parent_id:string|null}):Promise<Folder>=>request(`/api/content-bank/subjects/${enc(subjectId)}/folders`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});

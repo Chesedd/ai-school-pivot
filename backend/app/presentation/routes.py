@@ -158,12 +158,9 @@ async def delete_folder(folder_id:UUID,expected_updated_at:datetime,settings:Set
 async def move_task(task_id:UUID,payload:TaskLocationRequest,settings:Settings=Depends(get_settings)):
     return await FolderService(SQLAlchemyUnitOfWork(async_session_factory)).move_task(MoveTaskCommand(task_id,payload.folder_id,payload.expected_folder_id,settings.content_bank_dev_actor_id))
 
-async def _contents(subject_id:UUID,folder_id:UUID|None,offset:int,limit:int,q:str|None,difficulty_min:int|None,difficulty_max:int|None):
-    # Level contents delegates straight to the repository rather than through
-    # ListTasksService, so resolve the same public-list defaults at this boundary.
-    normalized_q = q.strip() if q else None
-    normalized_q = normalized_q or None
-    query=TaskListQuery(subject_id=subject_id,offset=offset,limit=limit,q=normalized_q,difficulty_min=difficulty_min,difficulty_max=difficulty_max,sort_by="relevance" if normalized_q else "created_at",sort_order="desc")
+async def _contents(subject_id:UUID,folder_id:UUID|None,query:TaskListQuery):
+    # The path owns subject and location; query parameters can only filter tasks.
+    query=ListTasksService.normalize_query(__import__('dataclasses').replace(query,subject_id=subject_id,folder_id=None,folder_scope=None,root_only=False))
     async with async_session_factory() as session:
         repo=SQLAlchemyContentBankRepository(session); result=await repo.get_level_contents(subject_id,folder_id,query)
         if result is None:
@@ -171,14 +168,34 @@ async def _contents(subject_id:UUID,folder_id:UUID|None,offset:int,limit:int,q:s
             if folder_id: raise FolderDomainError("folder_not_found","Папка не найдена.",{"folder_id":str(folder_id)},404)
             raise FolderDomainError("subject_not_found","Предмет не найден.",{"subject_id":str(subject_id)},404)
         return result
+
+def _contents_task_query(
+    grade_id: UUID | None = None, topic_id: UUID | None = None,
+    subtopic_id: UUID | None = None, skill_id: UUID | None = None,
+    task_type: Literal["test", "calculation", "problem", "open_question", "essay"] | None = None,
+    difficulty_min: Annotated[int | None, Query(ge=1, le=100)] = None,
+    difficulty_max: Annotated[int | None, Query(ge=1, le=100)] = None,
+    status: Literal["draft", "review", "approved", "archived"] | None = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    sort_by: Literal["created_at", "updated_at", "title", "difficulty", "status", "version_no", "relevance"] | None = None,
+    sort_order: Literal["asc", "desc"] = "desc", q: str | None = None,
+) -> TaskListQuery:
+    """Build the safe public subset shared by both direct-contents routes."""
+    return TaskListQuery(grade_id=grade_id, topic_id=topic_id, subtopic_id=subtopic_id,
+                         skill_id=skill_id, task_type=task_type,
+                         difficulty_min=difficulty_min, difficulty_max=difficulty_max,
+                         status=status, offset=offset, limit=limit, sort_by=sort_by,
+                         sort_order=sort_order, q=q)
+
 @router.get("/subjects/{subject_id}/contents")
-async def subject_contents(subject_id:UUID,offset:Annotated[int,Query(ge=0)]=0,limit:Annotated[int,Query(ge=1,le=100)]=20,q:str|None=None,difficulty_min:Annotated[int|None,Query(ge=1,le=100)]=None,difficulty_max:Annotated[int|None,Query(ge=1,le=100)]=None):
-    return await _contents(subject_id,None,offset,limit,q,difficulty_min,difficulty_max)
+async def subject_contents(subject_id:UUID,query:Annotated[TaskListQuery,Depends(_contents_task_query)]):
+    return await _contents(subject_id,None,query)
 @router.get("/folders/{folder_id}/contents")
-async def folder_contents(folder_id:UUID,offset:Annotated[int,Query(ge=0)]=0,limit:Annotated[int,Query(ge=1,le=100)]=20,q:str|None=None,difficulty_min:Annotated[int|None,Query(ge=1,le=100)]=None,difficulty_max:Annotated[int|None,Query(ge=1,le=100)]=None):
+async def folder_contents(folder_id:UUID,query:Annotated[TaskListQuery,Depends(_contents_task_query)]):
     async with async_session_factory() as session:
         folder=await SQLAlchemyContentBankRepository(session).get_folder(folder_id)
     if not folder:
         from app.application.folders import FolderDomainError
         raise FolderDomainError("folder_not_found","Папка не найдена.",{"folder_id":str(folder_id)},404)
-    return await _contents(folder.subject_id,folder_id,offset,limit,q,difficulty_min,difficulty_max)
+    return await _contents(folder.subject_id,folder_id,query)
