@@ -159,7 +159,11 @@ async def move_task(task_id:UUID,payload:TaskLocationRequest,settings:Settings=D
     return await FolderService(SQLAlchemyUnitOfWork(async_session_factory)).move_task(MoveTaskCommand(task_id,payload.folder_id,payload.expected_folder_id,settings.content_bank_dev_actor_id))
 
 async def _contents(subject_id:UUID,folder_id:UUID|None,offset:int,limit:int,q:str|None,difficulty_min:int|None,difficulty_max:int|None):
-    query=TaskListQuery(subject_id=subject_id,offset=offset,limit=limit,q=q,difficulty_min=difficulty_min,difficulty_max=difficulty_max)
+    # Level contents delegates straight to the repository rather than through
+    # ListTasksService, so resolve the same public-list defaults at this boundary.
+    normalized_q = q.strip() if q else None
+    normalized_q = normalized_q or None
+    query=TaskListQuery(subject_id=subject_id,offset=offset,limit=limit,q=normalized_q,difficulty_min=difficulty_min,difficulty_max=difficulty_max,sort_by="relevance" if normalized_q else "created_at",sort_order="desc")
     async with async_session_factory() as session:
         repo=SQLAlchemyContentBankRepository(session); result=await repo.get_level_contents(subject_id,folder_id,query)
         if result is None:
