@@ -15,6 +15,32 @@ class StrictRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class TagCreateRequest(StrictRequest):
+    category_code: str
+    subject_id: UUID | None = None
+    name: str
+
+
+class TagPatchRequest(StrictRequest):
+    name: str | None = None
+    category_code: str | None = None
+    subject_id: UUID | None = None
+    replacement_tag_id: UUID | None = None
+    expected_updated_at: datetime
+
+
+class TagDeprecateRequest(StrictRequest):
+    replacement_tag_id: UUID | None = None
+    expected_updated_at: datetime
+
+
+class TagResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID; category: dict; subject: dict | None; name: str; normalized_name: str
+    status: Literal["active","deprecated"]; replacement: dict | None
+    created_at: datetime; created_by: UUID; updated_at: datetime; updated_by: UUID
+
+
 class SkillLinkCreate(StrictRequest):
     skill_id: UUID
     weight: Decimal

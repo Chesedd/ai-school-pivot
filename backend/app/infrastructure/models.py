@@ -21,7 +21,9 @@ task_type_enum = ENUM("test", "calculation", "problem", "open_question", "essay"
 answer_format_enum = ENUM("single_choice", "multiple_choice", "short_text", "number", "expression", "long_text", name="answer_format", create_type=False)
 grading_mode_enum = ENUM("points", name="grading_mode", create_type=False)
 severity_enum = ENUM("low", "medium", "high", name="typical_error_severity", create_type=False)
-audit_action_enum = ENUM("task_created", "methodology_updated", "submitted_for_review", "returned_to_draft", "version_approved", "version_created", "task_archived", "task_folder_moved", "folder_created", "folder_renamed", "folder_moved", "folder_deleted", name="audit_action", create_type=False)
+audit_action_enum = ENUM("task_created", "methodology_updated", "submitted_for_review", "returned_to_draft", "version_approved", "version_created", "task_archived", "task_folder_moved", "folder_created", "folder_renamed", "folder_moved", "folder_deleted", "tag_added_to_version", "tag_removed_from_version", name="audit_action", create_type=False)
+tag_status_enum = ENUM("active", "deprecated", name="tag_status", create_type=False)
+tag_audit_action_enum = ENUM("tag_created", "tag_renamed", "tag_scope_changed", "tag_deprecated", "tag_replacement_changed", name="tag_audit_action", create_type=False)
 
 
 class IdMixin:
@@ -37,6 +39,7 @@ class Subject(IdMixin, Base):
     topics: Mapped[list[Topic]] = relationship(back_populates="subject")
     tasks: Mapped[list[Task]] = relationship(back_populates="subject")
     folders: Mapped[list[TaskFolder]] = relationship(back_populates="subject")
+    tags: Mapped[list[Tag]] = relationship(back_populates="subject")
 
 
 class TaskFolder(IdMixin, Base):
@@ -158,6 +161,7 @@ class TaskVersion(IdMixin, Base):
     accepted_answers: Mapped[list[AcceptedAnswer]] = relationship(back_populates="task_version", cascade="all, delete-orphan")
     error_links: Mapped[list[TaskErrorLink]] = relationship(back_populates="task_version", cascade="all, delete-orphan")
     hints: Mapped[list[Hint]] = relationship(back_populates="task_version", cascade="all, delete-orphan")
+    tag_links: Mapped[list[TaskVersionTag]] = relationship(back_populates="task_version", cascade="all, delete-orphan")
 
 
 class TaskSkillLink(IdMixin, Base):
@@ -290,3 +294,52 @@ class FolderAuditLog(IdMixin, Base):
     actor_id: Mapped[UUID] = mapped_column(uuid_type)
     details: Mapped[dict[str, object]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+
+
+class TagCategory(Base):
+    __tablename__ = "tag_categories"
+    __table_args__ = (UniqueConstraint("sort_order", name="uq_tag_categories_sort_order"), CheckConstraint("code ~ '^[a-z][a-z0-9_]*$'", name="ck_tag_categories_code"), CheckConstraint("sort_order >= 0", name="ck_tag_categories_sort_order_nonnegative"))
+    code: Mapped[str] = mapped_column(String(32), primary_key=True)
+    display_name: Mapped[str] = mapped_column(String(80))
+    sort_order: Mapped[int] = mapped_column(SmallInteger)
+    tags: Mapped[list[Tag]] = relationship(back_populates="category")
+
+
+class Tag(IdMixin, Base):
+    __tablename__ = "tags"
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="pk_tags"), UniqueConstraint("normalized_name", name="uq_tags_normalized_name"),
+        CheckConstraint("char_length(name) BETWEEN 1 AND 80", name="ck_tags_name_length"), CheckConstraint("char_length(normalized_name) BETWEEN 1 AND 80", name="ck_tags_normalized_name_length"),
+        CheckConstraint("replacement_tag_id IS NULL OR replacement_tag_id <> id", name="ck_tags_replacement_not_self"), CheckConstraint("status = 'deprecated' OR replacement_tag_id IS NULL", name="ck_tags_active_without_replacement"),
+        Index("ix_tags_catalog_order", "category_code", "normalized_name", "id"), Index("ix_tags_subject_catalog", "subject_id", "category_code", "normalized_name", "id"),
+        Index("ix_tags_status", "status"), Index("ix_tags_replacement_tag_id", "replacement_tag_id"), Index("ix_tags_normalized_name_trgm", "normalized_name", postgresql_using="gin", postgresql_ops={"normalized_name":"gin_trgm_ops"}))
+    category_code: Mapped[str] = mapped_column(String(32), ForeignKey("tag_categories.code", name="fk_tags_category_code_tag_categories", ondelete="RESTRICT", onupdate="RESTRICT"))
+    subject_id: Mapped[UUID | None] = mapped_column(ForeignKey("subjects.id", name="fk_tags_subject_id_subjects", ondelete="RESTRICT"), nullable=True)
+    name: Mapped[str] = mapped_column(String(80)); normalized_name: Mapped[str] = mapped_column(String(80))
+    status: Mapped[str] = mapped_column(tag_status_enum, server_default=text("'active'::tag_status"))
+    replacement_tag_id: Mapped[UUID | None] = mapped_column(ForeignKey("tags.id", name="fk_tags_replacement_tag_id_tags", ondelete="RESTRICT"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("clock_timestamp()")); created_by: Mapped[UUID] = mapped_column(uuid_type)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("clock_timestamp()")); updated_by: Mapped[UUID] = mapped_column(uuid_type)
+    category: Mapped[TagCategory] = relationship(back_populates="tags"); subject: Mapped[Subject | None] = relationship(back_populates="tags")
+    replacement: Mapped[Tag | None] = relationship(remote_side="Tag.id", foreign_keys=[replacement_tag_id])
+    version_links: Mapped[list[TaskVersionTag]] = relationship(back_populates="tag")
+    audit_events: Mapped[list[TagAuditLog]] = relationship(back_populates="tag")
+
+
+class TaskVersionTag(Base):
+    __tablename__ = "task_version_tags"
+    __table_args__ = (PrimaryKeyConstraint("task_version_id", "tag_id", name="pk_task_version_tags"), Index("ix_task_version_tags_tag_version", "tag_id", "task_version_id"))
+    task_version_id: Mapped[UUID] = mapped_column(ForeignKey("task_versions.id", name="fk_task_version_tags_task_version_id_task_versions", ondelete="CASCADE"))
+    tag_id: Mapped[UUID] = mapped_column(ForeignKey("tags.id", name="fk_task_version_tags_tag_id_tags", ondelete="RESTRICT"))
+    attached_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("clock_timestamp()")); attached_by: Mapped[UUID] = mapped_column(uuid_type)
+    task_version: Mapped[TaskVersion] = relationship(back_populates="tag_links"); tag: Mapped[Tag] = relationship(back_populates="version_links")
+
+
+class TagAuditLog(IdMixin, Base):
+    __tablename__ = "tag_audit_log"
+    __table_args__ = (PrimaryKeyConstraint("id", name="pk_tag_audit_log"), CheckConstraint("before_snapshot IS NOT NULL OR after_snapshot IS NOT NULL", name="ck_tag_audit_log_snapshot_present"), Index("ix_tag_audit_log_tag_occurred", "tag_id", text("occurred_at DESC"), text("id DESC")))
+    tag_id: Mapped[UUID] = mapped_column(ForeignKey("tags.id", name="fk_tag_audit_log_tag_id_tags", ondelete="RESTRICT"))
+    action: Mapped[str] = mapped_column(tag_audit_action_enum); actor_id: Mapped[UUID] = mapped_column(uuid_type)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("clock_timestamp()"))
+    before_snapshot: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True); after_snapshot: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
+    tag: Mapped[Tag] = relationship(back_populates="audit_events")
