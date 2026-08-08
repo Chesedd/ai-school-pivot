@@ -8,14 +8,21 @@ from fastapi.responses import JSONResponse
 from app.application.folders import FolderDomainError
 from app.application.content_bank import ApplicationError, ConflictError, GoneError, IssuesError, NotFoundError
 from app.application.managed_tags import TagError
+from app.application.assessments import AssessmentError
 from app.config import get_settings
 from app.presentation.routes import router
+from app.presentation.assessment_routes import router as assessment_router
 
 
 app = FastAPI()
 settings = get_settings()
 app.add_middleware(CORSMiddleware, allow_origins=[x.strip() for x in settings.cors_origins.split(",") if x.strip()], allow_credentials=False, allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"], allow_headers=["Content-Type", "Authorization"])
 app.include_router(router)
+app.include_router(assessment_router)
+
+@app.exception_handler(AssessmentError)
+async def assessment_error(_: Request, exc: AssessmentError) -> JSONResponse:
+    return error_response(exc.code, str(exc), [], exc.status)
 
 @app.exception_handler(TagError)
 async def tag_error(_: Request, exc: TagError) -> JSONResponse:

@@ -1,0 +1,87 @@
+"""Strict HTTP schemas for Prompt 3 Assessment Core endpoints."""
+from datetime import datetime
+from decimal import Decimal
+from typing import Literal
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+class StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+
+
+class AssessmentCreateRequest(StrictModel):
+    title: str = Field(min_length=1, max_length=200, pattern=r"^\S(?:.*\S)?$")
+    description: str | None = Field(default=None, max_length=4000)
+
+
+class AssessmentPatchRequest(StrictModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200, pattern=r"^\S(?:.*\S)?$")
+    description: str | None = Field(default=None, max_length=4000)
+    expected_updated_at: datetime
+
+    @field_validator("expected_updated_at")
+    @classmethod
+    def timestamp_has_offset(cls, value: datetime):
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("expected_updated_at должен содержать UTC offset.")
+        return value
+
+    @model_validator(mode="after")
+    def has_change(self):
+        if not (self.model_fields_set - {"expected_updated_at"}):
+            raise ValueError("Должно быть передано хотя бы одно изменяемое поле.")
+        if "title" in self.model_fields_set and self.title is None:
+            raise ValueError("title не может быть null.")
+        return self
+
+
+class VariantCreateRequest(StrictModel):
+    name: str = Field(min_length=1, max_length=80, pattern=r"^\S(?:.*\S)?$")
+
+
+class AssessmentItemResponse(StrictModel):
+    id: UUID
+    task_version_id: UUID
+    position: int
+    points: Decimal
+
+
+class VariantResponse(StrictModel):
+    id: UUID
+    name: str
+    position: int
+    items: list[AssessmentItemResponse] = []
+    total_points: Decimal = Decimal("0.00")
+
+
+class AssessmentResponse(StrictModel):
+    id: UUID
+    title: str
+    description: str | None
+    status: Literal["draft", "published"]
+    variants: list[VariantResponse]
+    created_at: datetime
+    updated_at: datetime
+    published_at: datetime | None
+    published_by: UUID | None
+
+
+class AssessmentListItem(StrictModel):
+    id: UUID
+    title: str
+    description: str | None
+    status: Literal["draft", "published"]
+    variant_count: int
+    created_at: datetime
+    updated_at: datetime
+    published_at: datetime | None
+    published_by: UUID | None
+
+
+class AssessmentListPage(StrictModel):
+    items: list[AssessmentListItem]
+    total: int
+    offset: int
+    limit: int
