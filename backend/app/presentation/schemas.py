@@ -403,6 +403,7 @@ class AuditPageResponse(BaseModel):
 
 class ImportRowRequest(TaskCreateRequest):
     row_number: int = Field(gt=0)
+    tags: list[str] = Field(default_factory=list, max_length=100)
 
 class ImportPreviewRequest(StrictRequest):
     format: Literal["csv", "xlsx"]
@@ -412,8 +413,14 @@ class ImportIssueResponse(BaseModel):
     code: str; field: str; message: str; severity: str
     duplicate_candidates: list[DuplicateCandidateResponse] = Field(default_factory=list)
     duplicate_row_number: int | None = None
+    value: str | None = None
+class ImportResolvedTagResponse(BaseModel):
+    input: str; tag_id: UUID; name: str; category_code: str; subject_id: UUID | None
+    status: str; replacement: dict | None = None
 class ImportPreviewRowResponse(BaseModel):
     row_number: int; status: str; issues: list[ImportIssueResponse]
+    raw_tag_names: list[str] = Field(default_factory=list)
+    resolved_tags: list[ImportResolvedTagResponse] = Field(default_factory=list)
 class ImportSummaryResponse(BaseModel):
     rows_total: int; rows_valid: int; rows_invalid: int
 class ImportPreviewResponse(BaseModel):

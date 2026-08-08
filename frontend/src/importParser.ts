@@ -1,5 +1,5 @@
 import Papa from "papaparse";
-import {IMPORT_HEADERS,MAX_FILE_SIZE,MAX_ROWS,type ImportHeader,type ImportIssue,type ParsedImport,type ParsedImportRow} from "./importTypes";
+import {IMPORT_HEADERS,REQUIRED_IMPORT_HEADERS,MAX_FILE_SIZE,MAX_ROWS,type ImportHeader,type ImportIssue,type ParsedImport,type ParsedImportRow} from "./importTypes";
 
 const issue=(code:string,message:string,row_number?:number,field?:string):ImportIssue=>({severity:"error",code,message,row_number,field,source:"local"});
 const blank=(row:unknown[])=>row.every(x=>String(x??"").trim()==="");
@@ -7,7 +7,7 @@ function table(format:"csv"|"xlsx",data:unknown[][],rowNumbers?:number[]):Parsed
  const raw=(data[0]??[]).map(x=>String(x??"").trim());if(raw[0])raw[0]=raw[0].replace(/^\uFEFF/,"");
  const issues:ImportIssue[]=[];const seen=new Set<string>();
  raw.forEach(h=>{if(seen.has(h))issues.push(issue("duplicate_header",`Заголовок «${h}» повторяется.`,1,h));seen.add(h);if(h&&!IMPORT_HEADERS.includes(h as ImportHeader))issues.push(issue("unknown_header",`Неизвестный заголовок «${h}».`,1,h))});
- IMPORT_HEADERS.forEach(h=>{if(!raw.includes(h))issues.push(issue("missing_header",`Отсутствует заголовок «${h}».`,1,h))});
+ REQUIRED_IMPORT_HEADERS.forEach(h=>{if(!raw.includes(h))issues.push(issue("missing_header",`Отсутствует заголовок «${h}».`,1,h))});
  if(issues.length)return {format,rows:[],issues};
  const rows:ParsedImportRow[]=[];
  data.slice(1).forEach((cells,index)=>{if(blank(cells))return;const values=Object.fromEntries(IMPORT_HEADERS.map(h=>[h,String(cells[raw.indexOf(h)]??"").trim()])) as Record<ImportHeader,string>;rows.push({row_number:rowNumbers?.[index]??index+2,values,issues:[]})});
@@ -31,3 +31,5 @@ export async function parseImportFile(file:File):Promise<ParsedImport>{
 }
 export function parseAdditionalSkills(value:string,primary:string,row:number){const result:{code:string;weight:string}[]=[],issues:ImportIssue[]=[];if(!value.trim())return {result,issues};const codes=new Set([primary]);for(const part of value.split("|")){const bits=part.split(":");if(bits.length!==2||!bits[0].trim()||!bits[1].trim()){issues.push(issue("invalid_skills_syntax","Используйте формат code:weight|code:weight.",row,"additional_skills"));continue}const code=bits[0].trim(),weight=bits[1].trim();if(codes.has(code))issues.push(issue("duplicate_skill",`Навык «${code}» повторяется.`,row,"additional_skills"));codes.add(code);if(!validWeight(weight))issues.push(issue("invalid_weight",`Некорректный вес навыка «${code}».`,row,"additional_skills"));result.push({code,weight})}return {result,issues}}
 export const validWeight=(value:string)=>/^(?:(?:0?\.\d+)|1(?:\.0+)?|0)$/.test(value)&&Number(value)>0&&Number(value)<=1;
+
+export function parseTags(value:string,row:number){const issues:ImportIssue[]=[];if(!value.trim())return {result:[] as string[],issues};const result=value.split(";").map(x=>x.trim());result.forEach(x=>{if(!x)issues.push(issue("tag_name_invalid","Пустой элемент в списке тегов.",row,"tags"))});if(result.length>8)issues.push(issue("tag_limit_exceeded","Допустимо не более восьми тегов.",row,"tags"));return {result,issues}}

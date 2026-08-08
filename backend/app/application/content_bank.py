@@ -88,6 +88,19 @@ class ImportCatalogContext:
     subtopics: dict[UUID, CatalogRecord]
     skills: dict[UUID, CatalogRecord]
 
+@dataclass(frozen=True)
+class ImportTagRecord:
+    id: UUID; name: str; normalized_name: str; category_code: str
+    category_sort_order: int; subject_id: UUID | None; status: str
+    replacement: dict | None; updated_at: datetime
+
+    @property
+    def fingerprint(self) -> dict[str, object]:
+        return {"id":str(self.id),"updated_at":self.updated_at.isoformat(),"status":self.status,
+            "subject_id":str(self.subject_id) if self.subject_id else None,
+            "normalized_name":self.normalized_name,
+            "replacement_tag_id":str(self.replacement["id"]) if self.replacement else None}
+
 
 @dataclass(frozen=True)
 class SkillLinkDTO:
@@ -550,6 +563,8 @@ class ContentBankRepository(Protocol):
     async def mark_import_preview_committed(self, token: UUID, at: datetime) -> None: ...
     async def get_import_catalog_context(self, commands: tuple[CreateTaskCommand, ...]) -> ImportCatalogContext: ...
     async def find_duplicate_candidates(self, query: DuplicateQuery) -> tuple[DuplicateCandidateRecord, ...]: ...
+    async def get_import_tags_by_names(self, names: set[str]) -> dict[str, ImportTagRecord]: ...
+    async def lock_import_tags(self, ids: tuple[UUID, ...]) -> dict[UUID, ImportTagRecord]: ...
 
 
 class UnitOfWork(Protocol):
@@ -722,16 +737,25 @@ class DuplicateCheckService:
 class ImportRow:
     row_number: int
     command: CreateTaskCommand
+    tag_names: tuple[str, ...] = ()
 
 @dataclass(frozen=True)
 class ImportIssue:
     code: str; field: str; message: str; severity: str = "error"
     duplicate_candidates: tuple[DuplicateCandidate, ...] = ()
     duplicate_row_number: int | None = None
+    value: str | None = None
+
+@dataclass(frozen=True)
+class ImportResolvedTag:
+    input: str; tag_id: UUID; name: str; category_code: str; subject_id: UUID | None
+    status: str; replacement: dict | None; fingerprint: dict[str, object]
 
 @dataclass(frozen=True)
 class ImportPreviewRow:
     row_number: int; status: str; command: CreateTaskCommand; issues: tuple[ImportIssue, ...]
+    raw_tag_names: tuple[str, ...] = ()
+    resolved_tags: tuple[ImportResolvedTag, ...] = ()
 
 @dataclass(frozen=True)
 class ImportPreviewRecord:
@@ -747,11 +771,40 @@ class ImportPreviewService:
         async with self.uow:
             op = CreateTaskOperation(self.uow.repository)
             catalog = await self.uow.repository.get_import_catalog_context(tuple(r.command for r in rows))
+            from app.application.managed_tags import TagError, normalize_tag_name
+            normalized_by_row: dict[int,list[tuple[str,str]]] = {}
+            unique_names: set[str] = set()
+            for row in rows:
+                values=[]
+                for raw in row.tag_names:
+                    try: normalized=normalize_tag_name(raw)
+                    except TagError: normalized=""
+                    values.append((raw,normalized))
+                    if normalized: unique_names.add(normalized)
+                normalized_by_row[row.row_number]=values
+            tag_catalog=await self.uow.repository.get_import_tags_by_names(unique_names) if unique_names else {}
             for row in rows:
                 issues = [ImportIssue(x.code, x.field, x.message) for x in op.validate_values(row.command)]
                 # Catalog validation uses the same operation without writes via a dedicated check.
                 issues += [ImportIssue(x.code, x.field, x.message) for x in self._catalog_issues(catalog, row.command)]
-                checked.append(ImportPreviewRow(row.row_number, "invalid" if issues else "valid", row.command, tuple(issues)))
+                resolved=[]; seen=set()
+                for raw,normalized in normalized_by_row[row.row_number]:
+                    if not normalized:
+                        issues.append(ImportIssue("tag_name_invalid","tags","Имя тега некорректно.",value=raw)); continue
+                    if normalized in seen:
+                        issues.append(ImportIssue("duplicate_import_tag","tags","Тег повторяется и учтён один раз.","warning",value=raw)); continue
+                    seen.add(normalized); tag=tag_catalog.get(normalized)
+                    if not tag:
+                        issues.append(ImportIssue("unknown_import_tag","tags","Тег не найден.",value=raw)); continue
+                    item=ImportResolvedTag(raw,tag.id,tag.name,tag.category_code,tag.subject_id,tag.status,tag.replacement,tag.fingerprint)
+                    resolved.append((tag,item))
+                    if tag.status!="active": issues.append(ImportIssue("deprecated_import_tag","tags","Тег устарел.",value=raw))
+                    if tag.subject_id not in (None,row.command.subject_id): issues.append(ImportIssue("tag_subject_mismatch","tags","Тег относится к другому предмету.",value=raw))
+                if len(seen)>8: issues.append(ImportIssue("tag_limit_exceeded","tags","Можно указать не более восьми тегов."))
+                resolved.sort(key=lambda x:(0 if x[0].subject_id==row.command.subject_id else 1,x[0].category_sort_order,x[0].normalized_name,str(x[0].id)))
+                command=replace(row.command,tag_ids=tuple(x[0].id for x in resolved))
+                fatal=any(x.severity=="error" for x in issues)
+                checked.append(ImportPreviewRow(row.row_number,"invalid" if fatal else "valid",command,tuple(issues),row.tag_names,tuple(x[1] for x in resolved)))
             # Invalid rows never incur a duplicate query. Warnings do not alter
             # row validity or commit eligibility.
             enriched=[]
@@ -812,6 +865,13 @@ class ImportCommitService:
                 r=by_no.get(n)
                 if not r or r.status!="valid": raise IssuesError("import_validation_error","Некорректный выбор строк.",[ValidationDetail("row_numbers","invalid","Выбрана отсутствующая или невалидная строка.")])
                 selected.append(r)
+            referenced=tuple(sorted({tag_id for r in selected for tag_id in r.command.tag_ids},key=str))
+            locked=await self.uow.repository.lock_import_tags(referenced) if referenced else {}
+            for r in selected:
+                for resolved in r.resolved_tags:
+                    current=locked.get(resolved.tag_id)
+                    if current is None or current.fingerprint!=resolved.fingerprint or current.status!="active" or current.subject_id not in (None,r.command.subject_id):
+                        raise ConflictError("Каталог тегов изменился. Выполните preview повторно.","tag_catalog_changed")
             result=[]; op=CreateTaskOperation(self.uow.repository)
             catalog=await self.uow.repository.get_import_catalog_context(tuple(r.command for r in selected))
             for r in selected: result.append((r.row_number,await op.create(r.command,actor,catalog)))

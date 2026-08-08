@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 from app.application.content_bank import AcceptedAnswerDTO, ActorContext, ArchiveResult, AuditEventDTO, AuditEventRecord, AuditPage, CatalogRecord, CatalogRef, ConflictError, CreateTaskCommand, DUPLICATE_CANDIDATE_THRESHOLD, DuplicateCandidate, DuplicateCandidateRecord, DuplicateQuery, EMPTY_METHODOLOGY, ExpectedSolutionDTO, HintDTO, LockedVersion, MethodologyDTO, RubricDTO, RubricItemDTO, SaveMethodologyCommand, SkillLinkDTO, TagRefDTO, TaskCard, TaskCardVersion, TaskDTO, TaskListItem, TaskListPage, TaskListQuery, TaskVersionDTO, TaskVersionSummary, TypicalErrorDTO, VersionState
 from app.infrastructure.models import AcceptedAnswer, AuditLog, FolderAuditLog, TaskFolder, ExpectedSolution, Grade, Hint, ImportPreview, Rubric, RubricItem, Skill, Subject, Subtopic, Tag, TagCategory, Task, TaskErrorLink, TaskSkillLink, TaskVersion, TaskVersionTag, Topic, TypicalError
 from app.application.folders import FolderSummaryDTO, FolderTreeNodeDTO, TaskLocationDTO
-from app.application.content_bank import ImportCatalogContext, ImportIssue, ImportPreviewRecord, ImportPreviewRow, SkillLinkInput, VersionContentInput
+from app.application.content_bank import ImportCatalogContext, ImportIssue, ImportPreviewRecord, ImportPreviewRow, ImportResolvedTag, ImportTagRecord, SkillLinkInput, VersionContentInput
 
 
 class SQLAlchemyContentBankRepository:
@@ -43,20 +43,24 @@ class SQLAlchemyContentBankRepository:
     @staticmethod
     def _command_json(c: CreateTaskCommand) -> dict:
         v=c.initial_version
-        return {"subject_id":str(c.subject_id),"grade_id":str(c.grade_id),"topic_id":str(c.topic_id),"subtopic_id":str(c.subtopic_id) if c.subtopic_id else None,"initial_version":{"title":v.title,"statement":v.statement,"task_type":v.task_type,"answer_format":v.answer_format,"difficulty":v.difficulty,"source":v.source,"skills":[{"skill_id":str(x.skill_id),"weight":str(x.weight),"is_primary":x.is_primary} for x in v.skills]}}
+        return {"subject_id":str(c.subject_id),"grade_id":str(c.grade_id),"topic_id":str(c.topic_id),"subtopic_id":str(c.subtopic_id) if c.subtopic_id else None,"tag_ids":[str(x) for x in c.tag_ids],"initial_version":{"title":v.title,"statement":v.statement,"task_type":v.task_type,"answer_format":v.answer_format,"difficulty":v.difficulty,"source":v.source,"skills":[{"skill_id":str(x.skill_id),"weight":str(x.weight),"is_primary":x.is_primary} for x in v.skills]}}
 
     @staticmethod
     def _command_from_json(x: dict) -> CreateTaskCommand:
         from decimal import Decimal
         v=x["initial_version"]
-        return CreateTaskCommand(UUID(x["subject_id"]),UUID(x["grade_id"]),UUID(x["topic_id"]),UUID(x["subtopic_id"]) if x["subtopic_id"] else None,VersionContentInput(v["title"],v["statement"],v["task_type"],v["answer_format"],v["difficulty"],v["source"],tuple(SkillLinkInput(UUID(s["skill_id"]),Decimal(s["weight"]),s["is_primary"]) for s in v["skills"])))
+        return CreateTaskCommand(UUID(x["subject_id"]),UUID(x["grade_id"]),UUID(x["topic_id"]),UUID(x["subtopic_id"]) if x["subtopic_id"] else None,VersionContentInput(v["title"],v["statement"],v["task_type"],v["answer_format"],v["difficulty"],v["source"],tuple(SkillLinkInput(UUID(s["skill_id"]),Decimal(s["weight"]),s["is_primary"]) for s in v["skills"])),tag_ids=tuple(UUID(i) for i in x.get("tag_ids",())))
 
     async def save_import_preview(self, p: ImportPreviewRecord) -> None:
         def issue_json(i):
-            return {"code":i.code,"field":i.field,"message":i.message,"severity":i.severity,
+            return {"code":i.code,"field":i.field,"message":i.message,"severity":i.severity,"value":i.value,
                 "duplicate_row_number":i.duplicate_row_number,
                 "duplicate_candidates":[{**c.__dict__,"task_id":str(c.task_id),"task_version_id":str(c.task_version_id),"reasons":list(c.reasons)} for c in i.duplicate_candidates]}
-        rows=[{"row_number":r.row_number,"status":r.status,"command":self._command_json(r.command),"issues":[issue_json(i) for i in r.issues]} for r in p.rows]
+        def resolved_json(x):
+            replacement={**x.replacement,"id":str(x.replacement["id"])} if x.replacement else None
+            return {"input":x.input,"tag_id":str(x.tag_id),"name":x.name,"category_code":x.category_code,
+                "subject_id":str(x.subject_id) if x.subject_id else None,"status":x.status,"replacement":replacement,"fingerprint":x.fingerprint}
+        rows=[{"row_number":r.row_number,"status":r.status,"command":self._command_json(r.command),"issues":[issue_json(i) for i in r.issues],"raw_tag_names":list(r.raw_tag_names),"resolved_tags":[resolved_json(x) for x in r.resolved_tags]} for r in p.rows]
         self.session.add(ImportPreview(import_token=p.import_token,format=p.format,actor_id=p.actor_id,rows=rows,created_at=p.created_at,expires_at=p.expires_at,committed_at=p.committed_at)); await self.session.flush()
 
     async def get_import_preview_for_update(self, token: UUID) -> ImportPreviewRecord | None:
@@ -65,8 +69,9 @@ class SQLAlchemyContentBankRepository:
         def issue_from_json(i):
             candidates=tuple(DuplicateCandidate(
                 UUID(c["task_id"]),UUID(c["task_version_id"]),c["version_no"],c["title"],c["status"],c["statement"],c["statement_similarity"],c["same_primary_skill"],c["same_final_answer"],tuple(c["reasons"])) for c in i.get("duplicate_candidates",()))
-            return ImportIssue(i["code"],i["field"],i["message"],i.get("severity","error"),candidates,i.get("duplicate_row_number"))
-        rows=tuple(ImportPreviewRow(x["row_number"],x["status"],self._command_from_json(x["command"]),tuple(issue_from_json(i) for i in x["issues"])) for x in m.rows)
+            return ImportIssue(i["code"],i["field"],i["message"],i.get("severity","error"),candidates,i.get("duplicate_row_number"),i.get("value"))
+        def resolved(x): return ImportResolvedTag(x["input"],UUID(x["tag_id"]),x["name"],x["category_code"],UUID(x["subject_id"]) if x.get("subject_id") else None,x["status"],x.get("replacement"),x["fingerprint"])
+        rows=tuple(ImportPreviewRow(x["row_number"],x["status"],self._command_from_json(x["command"]),tuple(issue_from_json(i) for i in x["issues"]),tuple(x.get("raw_tag_names",())),tuple(resolved(t) for t in x.get("resolved_tags",()))) for x in m.rows)
         return ImportPreviewRecord(m.import_token,m.format,m.actor_id,rows,m.created_at,m.expires_at,m.committed_at)
 
     async def mark_import_preview_committed(self, token: UUID, at: datetime) -> None:
@@ -85,6 +90,21 @@ class SQLAlchemyContentBankRepository:
             {x.id:CatalogRecord(x.id,x.name,subject_id=x.subject_id,grade_id=x.grade_id) for x in topics},
             {x.id:CatalogRecord(x.id,x.name,topic_id=x.topic_id) for x in subtopics},
             {x.id:CatalogRecord(x.id,x.name,topic_id=x.subtopic.topic_id,subtopic_id=x.subtopic_id) for x in skills})
+
+    @staticmethod
+    def _import_tag(tag: Tag) -> ImportTagRecord:
+        replacement=({"id":tag.replacement.id,"name":tag.replacement.name,"status":tag.replacement.status} if tag.replacement else None)
+        return ImportTagRecord(tag.id,tag.name,tag.normalized_name,tag.category_code,tag.category.sort_order,tag.subject_id,tag.status,replacement,tag.updated_at)
+
+    async def get_import_tags_by_names(self, names: set[str]) -> dict[str, ImportTagRecord]:
+        if not names:return {}
+        rows=(await self.session.execute(select(Tag).options(selectinload(Tag.category),selectinload(Tag.replacement)).where(Tag.normalized_name.in_(names)))).scalars()
+        return {x.normalized_name:self._import_tag(x) for x in rows}
+
+    async def lock_import_tags(self, ids: tuple[UUID, ...]) -> dict[UUID, ImportTagRecord]:
+        if not ids:return {}
+        rows=(await self.session.execute(select(Tag).options(selectinload(Tag.category),selectinload(Tag.replacement)).where(Tag.id.in_(ids)).order_by(Tag.id).with_for_update(of=Tag))).unique().scalars()
+        return {x.id:self._import_tag(x) for x in rows}
 
     async def get_subject(self, value: UUID) -> CatalogRecord | None:
         row = await self.session.get(Subject, value)

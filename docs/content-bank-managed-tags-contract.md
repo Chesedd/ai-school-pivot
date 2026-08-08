@@ -2,8 +2,7 @@
 
 Статус документа: обязательный технический контракт. Backend-фундамент фазы 1
 (schema, catalog и trusted pilot API) реализован revision `20260808_01`; backend
-assignment/copy/read/AND-filter фазы 2 реализованы без новой migration. CSV/XLSX
-tags, admin frontend и editor/filter frontend остаются последующими фазами.
+assignment/copy/read/AND-filter фазы 2 реализованы без новой migration. CSV/XLSX tags фазы 3 реализованы без новой migration; admin frontend и editor/filter frontend остаются последующими фазами.
 Базовая revision — `20260806_01`.
 
 ## 1. Контекст существующей системы
@@ -688,7 +687,7 @@ chips имеют доступные названия remove buttons, status не
 2. **Version assignment, copy, status protection, audit, search.** Вход: phase 1 и
    текущие version locks/latest query. Готово: atomic PUT, max 8, clone, immutable
    statuses, task DTOs, AND filters/total and audit проходят unit/integration races.
-3. **CSV/XLSX preview and commit.** Вход: phases 1–2 и существующий token workflow.
+3. **CSV/XLSX preview and commit (реализовано).** Вход: phases 1–2 и существующий token workflow.
    Готово: template/parser/preview resolution/fingerprint/atomic commit и catalog-change
    cases покрыты CSV/XLSX/PostgreSQL tests.
 4. **Admin frontend.** Вход: stable admin/catalog APIs. Готово: list/forms/similar/
