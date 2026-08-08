@@ -41,3 +41,19 @@ export type DuplicateReason="exact_statement"|"high_statement_similarity"|"same_
 export type DuplicateCandidate={task_id:string;task_version_id:string;version_no:number;title:string|null;status:"draft"|"review"|"approved";statement:string;statement_similarity:number;same_primary_skill:boolean;same_final_answer:boolean;reasons:DuplicateReason[]};
 export type DuplicateCheckResponse={has_likely_duplicates:boolean;items:DuplicateCandidate[]};
 export function checkTaskDuplicates(payload:{statement:string;primary_skill_id:string;final_answer:string|null;exclude_task_id:string|null;limit:number},signal?:AbortSignal):Promise<DuplicateCheckResponse>{return request("/api/content-bank/task-versions/check-duplicates",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload),signal})}
+
+export type TagCategory={code:string;name:string;sort_order:number};
+export type TagSubject={id:string;code?:string;name:string};
+export type TagRef={id:string;name:string;category_code:string;subject_id:string|null;status:"active"|"deprecated"};
+export type ManagedTag={id:string;category:TagCategory;subject:TagSubject|null;name:string;normalized_name:string;status:"active"|"deprecated";replacement:TagRef|null;created_at:string;created_by:string;updated_at:string;updated_by:string};
+export type TagPage={items:ManagedTag[];total:number;offset:number;limit:number};
+export type TagSimilarity={normalized_query:string;items:{tag:TagRef;similarity:number;exact_match:boolean}[]};
+export type TagUsage={tag_id:string;historical_version_count:number;distinct_task_count:number;latest_version_count:number;status_counts:Record<string,number>;latest_status_counts:Record<string,number>};
+export const getTagCategories=(signal?:AbortSignal):Promise<{items:TagCategory[]}>=>(request("/api/content-bank/tag-categories",{signal}));
+export const getTags=(params:URLSearchParams,signal?:AbortSignal):Promise<TagPage>=>request(`/api/content-bank/tags?${params}`,{signal});
+export const getTag=(id:string,signal?:AbortSignal):Promise<ManagedTag>=>request(`/api/content-bank/tags/${enc(id)}`,{signal});
+export const getSimilarTags=(name:string,excludeId?:string,signal?:AbortSignal):Promise<TagSimilarity>=>{const p=new URLSearchParams({name,limit:"8"});if(excludeId)p.set("exclude_tag_id",excludeId);return request(`/api/content-bank/tags/similar?${p}`,{signal})};
+export const createTag=(body:{name:string;category_code:string;subject_id:string|null}):Promise<ManagedTag>=>request("/api/content-bank/admin/tags",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+export const patchTag=(id:string,body:{expected_updated_at:string;name?:string;category_code?:string;subject_id?:string|null;replacement_tag_id?:string|null}):Promise<ManagedTag>=>request(`/api/content-bank/admin/tags/${enc(id)}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+export const deprecateTag=(id:string,body:{expected_updated_at:string;replacement_tag_id:string|null}):Promise<ManagedTag>=>request(`/api/content-bank/admin/tags/${enc(id)}/deprecate`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+export const getTagUsage=(id:string,signal?:AbortSignal):Promise<TagUsage>=>request(`/api/content-bank/admin/tags/${enc(id)}/usage`,{signal});
