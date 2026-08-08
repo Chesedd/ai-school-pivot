@@ -69,7 +69,7 @@ async def replace_version_tags(version_id:UUID,payload:VersionTagsPutRequest,set
 
 @router.post("/imports/preview",response_model=ImportPreviewResponse)
 async def preview_import(payload: ImportPreviewRequest, settings: Settings=Depends(get_settings)) -> object:
-    p=await ImportPreviewService(SQLAlchemyUnitOfWork(async_session_factory),settings.content_bank_import_preview_ttl_minutes).preview(payload.format,tuple(ImportRow(r.row_number,_create_command(r)) for r in payload.rows),ActorContext(settings.content_bank_dev_actor_id))
+    p=await ImportPreviewService(SQLAlchemyUnitOfWork(async_session_factory),settings.content_bank_import_preview_ttl_minutes).preview(payload.format,tuple(ImportRow(r.row_number,_create_command(r),tuple(r.tags)) for r in payload.rows),ActorContext(settings.content_bank_dev_actor_id))
     valid=sum(r.status=="valid" for r in p.rows)
     return {"import_token":p.import_token,"format":p.format,"expires_at":p.expires_at,"can_commit":valid>0,"summary":{"rows_total":len(p.rows),"rows_valid":valid,"rows_invalid":len(p.rows)-valid},"rows":p.rows}
 
