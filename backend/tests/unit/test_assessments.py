@@ -8,7 +8,9 @@ import pytest
 from decimal import Decimal
 
 from app.application.assessments import (AddAssessmentItemCommand, AssessmentError,
-    AssessmentRecord, AssessmentService, CreateAssessmentCommand, UpdateAssessmentCommand)
+    AssessmentItemRecord, AssessmentRecord, AssessmentService, AssessmentVariantRecord,
+    AssignmentRecord, CreateAssessmentCommand, PublicationRecord, PublishAssessmentCommand,
+    UpdateAssessmentCommand)
 from app.application.content_bank import ActorContext
 from app.presentation.assessment_schemas import AssessmentResponse
 
@@ -137,3 +139,93 @@ async def test_add_item_uses_content_bank_port_and_failed_validation_has_no_audi
     assert error.value.code == "invalid_task_version"
     assert uow.validated == [version_id]
     assert uow.repository.audit == before
+
+
+class PublicationRepository:
+    def __init__(self, *, status="draft", students=None):
+        self.assessment_id = uuid4(); self.group_id = uuid4(); self.actor_id = uuid4()
+        item = AssessmentItemRecord(uuid4(), uuid4(), 1, Decimal("2.00"))
+        self.composition = (AssessmentVariantRecord(uuid4(), "A", 1, (item,)),)
+        self.row = SimpleNamespace(id=self.assessment_id, title="Ready", status=status,
+            created_at=NOW, updated_at=NOW, description=None, published_at=None,
+            published_by=None, variants=self.composition)
+        self.students = tuple(students if students is not None else (uuid4(), uuid4()))
+        self.audit = []; self.assignment = None; self.closed = False
+
+    async def lock(self, value): return self.row if value == self.assessment_id else None
+    async def lock_composition(self, value): return self.composition
+    async def lock_group_students(self, value): return self.students if value == self.group_id else None
+    async def database_clock(self): return NOW
+    async def mark_published(self, value, now, actor_id):
+        self.row.status = "published"; self.row.published_at = now; self.row.published_by = actor_id
+    async def create_assignment(self, command, actor_id, students):
+        self.assignment = AssignmentRecord(uuid4(), command.assessment_id, command.class_group_id,
+            "open", command.start_at, command.due_at, command.max_attempts, NOW, None,
+            len(students), tuple(students))
+        return self.assignment
+    async def get(self, value):
+        return AssessmentRecord(self.row.id, self.row.title, None, self.row.status,
+            self.composition, NOW, NOW, self.row.published_at, self.row.published_by)
+    async def append_audit(self, aggregate_id, event, actor_id, details, aggregate_type="assessment"):
+        self.audit.append((aggregate_type, aggregate_id, event, actor_id, details))
+    async def lock_assignment(self, value):
+        if self.assignment is None or self.assignment.id != value: return None
+        return SimpleNamespace(status="closed" if self.closed else "open")
+    async def close_assignment(self, value, now, actor_id): self.closed = True
+    async def get_assignment(self, value):
+        if self.assignment is None or self.assignment.id != value: return None
+        if not self.closed: return self.assignment
+        return AssignmentRecord(
+            self.assignment.id, self.assignment.assessment_id, self.assignment.class_group_id, "closed",
+            self.assignment.start_at, self.assignment.due_at, self.assignment.max_attempts,
+            self.assignment.created_at, NOW, self.assignment.participant_count, self.assignment.participant_ids)
+
+
+class PublicationUow:
+    def __init__(self, *, status="draft", students=None, eligible=True):
+        self.repository = PublicationRepository(status=status, students=students)
+        self.eligible = eligible; self.validated = []; self.commits = 0
+        self.content_bank = SimpleNamespace(lock_publication_usage=self.lock_publication_usage)
+    async def lock_publication_usage(self, ids): self.validated.append(ids); return self.eligible
+    async def __aenter__(self): return self
+    async def __aexit__(self, *args): pass
+    async def commit(self): self.commits += 1
+
+
+def publication_command(repository):
+    return PublishAssessmentCommand(repository.assessment_id, repository.group_id,
+        datetime(2026, 8, 1, tzinfo=timezone.utc), datetime(2027, 8, 1, tzinfo=timezone.utc), 2)
+
+
+async def test_publish_orchestrates_concrete_revalidation_snapshot_and_audits():
+    uow = PublicationUow(); actor = ActorContext(uow.repository.actor_id)
+    result = await AssessmentService(uow).publish_and_assign(publication_command(uow.repository), actor)
+    concrete = uow.repository.composition[0].items[0].task_version_id
+    assert isinstance(result, PublicationRecord) and result.assessment.status == "published"
+    assert uow.validated == [(concrete,)]
+    assert result.assignment.participant_ids == uow.repository.students
+    assert [entry[2] for entry in uow.repository.audit] == ["assessment_published", "assignment_created"]
+    assert all(entry[3] == actor.actor_id for entry in uow.repository.audit) and uow.commits == 1
+
+
+@pytest.mark.parametrize("status,eligible,students,code", [
+    ("published", True, (uuid4(),), "assessment_immutable"),
+    ("draft", False, (uuid4(),), "invalid_task_version"),
+    ("draft", True, (), "publication_requirements_not_met"),
+])
+async def test_publish_failures_have_no_audit_or_commit(status, eligible, students, code):
+    uow = PublicationUow(status=status, students=students, eligible=eligible)
+    with pytest.raises(AssessmentError) as error:
+        await AssessmentService(uow).publish_and_assign(
+            publication_command(uow.repository), ActorContext(uow.repository.actor_id))
+    assert error.value.code == code and uow.repository.audit == [] and uow.commits == 0
+
+
+async def test_close_open_audits_and_repeated_close_is_rejected():
+    uow = PublicationUow(); actor = ActorContext(uow.repository.actor_id)
+    published = await AssessmentService(uow).publish_and_assign(publication_command(uow.repository), actor)
+    closed = await AssessmentService(uow).close_assignment(published.assignment.id, actor)
+    assert closed.status == "closed" and uow.repository.audit[-1][2] == "assignment_closed"
+    with pytest.raises(AssessmentError) as error:
+        await AssessmentService(uow).close_assignment(published.assignment.id, actor)
+    assert error.value.code == "invalid_status_transition"

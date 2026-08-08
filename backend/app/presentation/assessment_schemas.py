@@ -120,3 +120,42 @@ class AssessmentListPage(StrictModel):
     total: int
     offset: int
     limit: int
+
+
+class PublishAssessmentRequest(StrictModel):
+    class_group_id: UUID
+    start_at: datetime
+    due_at: datetime
+    max_attempts: int = Field(ge=1, le=100)
+
+    _start_offset = field_validator("start_at")(AssessmentPatchRequest.timestamp_has_offset.__func__)
+    _due_offset = field_validator("due_at")(AssessmentPatchRequest.timestamp_has_offset.__func__)
+
+    @model_validator(mode="after")
+    def valid_window(self):
+        if self.start_at >= self.due_at:
+            raise ValueError("start_at должен быть раньше due_at.")
+        return self
+
+
+class EmptyRequest(StrictModel):
+    pass
+
+
+class AssignmentResponse(StrictModel):
+    id: UUID
+    assessment_id: UUID
+    class_group_id: UUID
+    status: Literal["open", "closed"]
+    start_at: datetime
+    due_at: datetime
+    max_attempts: int
+    created_at: datetime
+    closed_at: datetime | None
+    participant_count: int
+    participant_ids: list[UUID]
+
+
+class PublicationResponse(StrictModel):
+    assessment: AssessmentResponse
+    assignment: AssignmentResponse
