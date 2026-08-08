@@ -48,6 +48,41 @@ class AssessmentItemResponse(StrictModel):
     points: Decimal
 
 
+def _validate_points(value: Decimal) -> Decimal:
+    if not value.is_finite() or value <= 0 or value > Decimal("999999.99") or value.as_tuple().exponent < -2:
+        raise ValueError("points должны быть от 0.01 до 999999.99 и содержать не более двух знаков после запятой.")
+    return value
+
+
+class AssessmentItemCreateRequest(StrictModel):
+    task_version_id: UUID
+    points: Decimal
+
+    _points = field_validator("points")(_validate_points)
+
+
+class AssessmentItemPatchRequest(StrictModel):
+    points: Decimal
+    expected_updated_at: datetime
+
+    _points = field_validator("points")(_validate_points)
+    _timestamp = field_validator("expected_updated_at")(AssessmentPatchRequest.timestamp_has_offset.__func__)
+
+
+class AssessmentItemOrderRequest(StrictModel):
+    item_ids: list[UUID]
+    expected_updated_at: datetime
+
+    _timestamp = field_validator("expected_updated_at")(AssessmentPatchRequest.timestamp_has_offset.__func__)
+
+    @field_validator("item_ids")
+    @classmethod
+    def unique_item_ids(cls, value: list[UUID]):
+        if len(value) != len(set(value)):
+            raise ValueError("item_ids не должны повторяться.")
+        return value
+
+
 class VariantResponse(StrictModel):
     id: UUID
     name: str

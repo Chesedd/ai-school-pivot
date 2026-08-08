@@ -5,7 +5,10 @@ from uuid import uuid4
 
 import pytest
 
-from app.application.assessments import AssessmentError, AssessmentRecord, AssessmentService, CreateAssessmentCommand, UpdateAssessmentCommand
+from decimal import Decimal
+
+from app.application.assessments import (AddAssessmentItemCommand, AssessmentError,
+    AssessmentRecord, AssessmentService, CreateAssessmentCommand, UpdateAssessmentCommand)
 from app.application.content_bank import ActorContext
 from app.presentation.assessment_schemas import AssessmentResponse
 
@@ -54,12 +57,21 @@ class FakeRepository:
         del self.variants[variant_id]
         return row.position
 
+    async def get_variant(self, assessment_id, variant_id):
+        row = self.variants.get(variant_id)
+        return row if row is not None and row.assessment_id == assessment_id else None
+
     async def touch(self, assessment_id): pass
     async def append_audit(self, assessment_id, event, actor_id, details): self.audit.append((assessment_id, event, actor_id, details))
 
 
 class FakeUow:
-    def __init__(self): self.repository = FakeRepository(); self.commits = 0
+    def __init__(self):
+        self.repository = FakeRepository(); self.commits = 0
+        self.content_bank = SimpleNamespace(lock_new_usage=self.lock_new_usage)
+        self.eligible = True; self.validated = []
+    async def lock_new_usage(self, version_id):
+        self.validated.append(version_id); return self.eligible
     async def __aenter__(self): return self
     async def __aexit__(self, *args): pass
     async def commit(self): self.commits += 1
@@ -111,3 +123,17 @@ def test_created_assessment_projection_serializes_without_an_orm_session():
     record = AssessmentRecord(uuid4(), "Алгебра", None, "draft", (), NOW, NOW, None, None)
     response = AssessmentResponse.model_validate(record)
     assert response.status == "draft" and response.variants == []
+
+
+async def test_add_item_uses_content_bank_port_and_failed_validation_has_no_audit():
+    uow = FakeUow(); actor = ActorContext(uuid4()); service = AssessmentService(uow)
+    assessment = await service.create(CreateAssessmentCommand("One", None), actor)
+    variant = await service.create_variant(assessment.id, "A", actor)
+    version_id = uuid4(); uow.eligible = False
+    before = list(uow.repository.audit)
+    with pytest.raises(AssessmentError) as error:
+        await service.add_item(AddAssessmentItemCommand(
+            assessment.id, variant.id, version_id, Decimal("2.50")), actor)
+    assert error.value.code == "invalid_task_version"
+    assert uow.validated == [version_id]
+    assert uow.repository.audit == before

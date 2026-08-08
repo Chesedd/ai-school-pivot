@@ -4,12 +4,16 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Response
 
-from app.application.assessments import AssessmentService, CreateAssessmentCommand, UpdateAssessmentCommand
+from app.application.assessments import (AddAssessmentItemCommand, AssessmentService,
+    ChangeAssessmentItemPointsCommand, CreateAssessmentCommand,
+    ReorderAssessmentItemsCommand, UpdateAssessmentCommand)
 from app.application.content_bank import ActorContext
 from app.config import Settings, get_settings
 from app.db.session import async_session_factory
 from app.infrastructure.assessment_repository import SQLAlchemyAssessmentUnitOfWork
-from app.presentation.assessment_schemas import AssessmentCreateRequest, AssessmentListPage, AssessmentPatchRequest, AssessmentResponse, VariantCreateRequest, VariantResponse
+from app.presentation.assessment_schemas import (AssessmentCreateRequest, AssessmentItemCreateRequest,
+    AssessmentItemOrderRequest, AssessmentItemPatchRequest, AssessmentItemResponse,
+    AssessmentListPage, AssessmentPatchRequest, AssessmentResponse, VariantCreateRequest, VariantResponse)
 
 router = APIRouter(prefix="/api/assessment-core")
 
@@ -71,3 +75,37 @@ async def create_variant(assessment_id: UUID, payload: VariantCreateRequest, res
 async def delete_variant(assessment_id: UUID, variant_id: UUID, context: Annotated[ActorContext, Depends(actor)]):
     await service().delete_variant(assessment_id, variant_id, context)
     return Response(status_code=204)
+
+
+@router.post("/assessments/{assessment_id}/variants/{variant_id}/items",
+             response_model=AssessmentItemResponse, status_code=201)
+async def add_item(assessment_id: UUID, variant_id: UUID, payload: AssessmentItemCreateRequest,
+                   response: Response, context: Annotated[ActorContext, Depends(actor)]):
+    result = await service().add_item(AddAssessmentItemCommand(
+        assessment_id, variant_id, payload.task_version_id, payload.points), context)
+    response.headers["Location"] = (
+        f"/api/assessment-core/assessments/{assessment_id}/variants/{variant_id}/items/{result.id}")
+    return result
+
+
+@router.delete("/assessments/{assessment_id}/variants/{variant_id}/items/{item_id}", status_code=204)
+async def delete_item(assessment_id: UUID, variant_id: UUID, item_id: UUID,
+                      context: Annotated[ActorContext, Depends(actor)]):
+    await service().delete_item(assessment_id, variant_id, item_id, context)
+    return Response(status_code=204)
+
+
+@router.put("/assessments/{assessment_id}/variants/{variant_id}/item-order", response_model=VariantResponse)
+async def reorder_items(assessment_id: UUID, variant_id: UUID, payload: AssessmentItemOrderRequest,
+                        context: Annotated[ActorContext, Depends(actor)]):
+    return await service().reorder_items(ReorderAssessmentItemsCommand(
+        assessment_id, variant_id, tuple(payload.item_ids), payload.expected_updated_at), context)
+
+
+@router.patch("/assessments/{assessment_id}/variants/{variant_id}/items/{item_id}",
+              response_model=AssessmentItemResponse)
+async def patch_item(assessment_id: UUID, variant_id: UUID, item_id: UUID,
+                     payload: AssessmentItemPatchRequest,
+                     context: Annotated[ActorContext, Depends(actor)]):
+    return await service().change_item_points(ChangeAssessmentItemPointsCommand(
+        assessment_id, variant_id, item_id, payload.points, payload.expected_updated_at), context)

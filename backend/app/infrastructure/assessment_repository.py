@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from types import TracebackType
 from uuid import UUID
 
@@ -11,7 +12,27 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from app.application.assessments import AssessmentItemRecord, AssessmentRecord, AssessmentVariantRecord, CreateAssessmentCommand
-from app.infrastructure.assessment_models import Assessment, AssessmentAuditLog, AssessmentVariant
+from app.infrastructure.assessment_models import Assessment, AssessmentAuditLog, AssessmentItem, AssessmentVariant
+from app.infrastructure.models import Task, TaskVersion
+
+
+class SQLAlchemyContentBankReadPort:
+    """Content Bank eligibility adapter sharing the Assessment transaction."""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def lock_new_usage(self, version_id: UUID) -> bool:
+        task_id = await self.session.scalar(select(TaskVersion.task_id).where(TaskVersion.id == version_id))
+        if task_id is None:
+            return False
+        task = await self.session.scalar(select(Task).where(Task.id == task_id).with_for_update())
+        if task is None:
+            return False
+        version = await self.session.scalar(
+            select(TaskVersion).where(TaskVersion.id == version_id, TaskVersion.task_id == task.id).with_for_update()
+        )
+        return version is not None and version.status == "approved" and task.archived_at is None
 
 
 class SQLAlchemyAssessmentRepository:
@@ -23,8 +44,13 @@ class SQLAlchemyAssessmentRepository:
         return (selectinload(Assessment.variants).selectinload(AssessmentVariant.items),)
 
     @staticmethod
+    def _item_record(row: AssessmentItem) -> AssessmentItemRecord:
+        return AssessmentItemRecord(row.id, row.task_version_id, row.position,
+                                    row.points.quantize(Decimal("0.01")))
+
+    @staticmethod
     def _variant_record(row: AssessmentVariant) -> AssessmentVariantRecord:
-        items = tuple(AssessmentItemRecord(item.id, item.task_version_id, item.position, item.points)
+        items = tuple(SQLAlchemyAssessmentRepository._item_record(item)
                       for item in sorted(row.items, key=lambda value: (value.position, value.id)))
         return AssessmentVariantRecord(row.id, row.name, row.position, items)
 
@@ -99,6 +125,67 @@ class SQLAlchemyAssessmentRepository:
             await self.session.flush()
         return position
 
+    async def get_variant(self, assessment_id: UUID, variant_id: UUID):
+        return await self.session.scalar(select(AssessmentVariant).where(
+            AssessmentVariant.id == variant_id, AssessmentVariant.assessment_id == assessment_id))
+
+    async def create_item(self, variant_id: UUID, task_version_id: UUID, points):
+        position = (await self.session.scalar(select(func.coalesce(func.max(AssessmentItem.position), 0)).where(
+            AssessmentItem.variant_id == variant_id))) + 1
+        row = AssessmentItem(variant_id=variant_id, task_version_id=task_version_id,
+                             position=position, points=points)
+        try:
+            async with self.session.begin_nested():
+                self.session.add(row)
+                await self.session.flush()
+        except IntegrityError:
+            return None
+        return self._item_record(row)
+
+    async def delete_item(self, variant_id: UUID, item_id: UUID):
+        row = await self.session.scalar(select(AssessmentItem).where(
+            AssessmentItem.id == item_id, AssessmentItem.variant_id == variant_id))
+        if row is None:
+            return None
+        removed_position = row.position
+        await self.session.delete(row)
+        await self.session.flush()
+        later = (await self.session.scalars(select(AssessmentItem).where(
+            AssessmentItem.variant_id == variant_id, AssessmentItem.position > removed_position
+        ).order_by(AssessmentItem.position).with_for_update())).all()
+        for item in later:
+            item.position -= 1
+            await self.session.flush()
+        return removed_position
+
+    async def reorder_items(self, variant_id: UUID, item_ids: tuple[UUID, ...]):
+        rows = (await self.session.scalars(select(AssessmentItem).where(
+            AssessmentItem.variant_id == variant_id).order_by(AssessmentItem.position).with_for_update())).all()
+        current = {row.id: row for row in rows}
+        if len(item_ids) != len(rows) or len(set(item_ids)) != len(item_ids) or set(item_ids) != set(current):
+            return None
+        # Move each row into a disjoint positive range before assigning 1..N;
+        # this works with the immediate unique and positive check constraints.
+        temporary_start = max((row.position for row in rows), default=0) + 1
+        for offset, item_id in enumerate(item_ids):
+            current[item_id].position = temporary_start + offset
+            await self.session.flush()
+        for position, item_id in enumerate(item_ids, 1):
+            current[item_id].position = position
+            await self.session.flush()
+        variant = await self.session.scalar(select(AssessmentVariant).options(
+            selectinload(AssessmentVariant.items)).where(AssessmentVariant.id == variant_id))
+        return self._variant_record(variant)
+
+    async def update_item_points(self, variant_id: UUID, item_id: UUID, points):
+        row = await self.session.scalar(select(AssessmentItem).where(
+            AssessmentItem.id == item_id, AssessmentItem.variant_id == variant_id))
+        if row is None:
+            return None
+        row.points = points
+        await self.session.flush()
+        return self._item_record(row)
+
     async def touch(self, assessment_id: UUID):
         await self.session.execute(update(Assessment).where(Assessment.id == assessment_id).values(updated_at=func.clock_timestamp()))
 
@@ -114,6 +201,7 @@ class SQLAlchemyAssessmentUnitOfWork:
     async def __aenter__(self):
         self.session = self.factory()
         self.repository = SQLAlchemyAssessmentRepository(self.session)
+        self.content_bank = SQLAlchemyContentBankReadPort(self.session)
         return self
 
     async def __aexit__(self, exc_type: type[BaseException] | None, exc: BaseException | None, tb: TracebackType | None):
