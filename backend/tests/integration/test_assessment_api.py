@@ -1,8 +1,9 @@
 """Real PostgreSQL API, atomicity, CAS, and locking regression tests."""
 import asyncio
 import os
+from datetime import datetime
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
@@ -17,9 +18,11 @@ if not URL.rsplit("/", 1)[-1].split("?", 1)[0].endswith("_test"):
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.application.assessments import AddAssessmentItemCommand, AssessmentError, AssessmentService
+from app.application.assessments import (AddAssessmentItemCommand, AssessmentError, AssessmentService,
+    ChangeAssessmentItemPointsCommand, PublishAssessmentCommand)
 from app.application.content_bank import ActorContext, ArchiveTaskService
-from app.infrastructure.assessment_models import Assessment, AssessmentAuditLog, AssessmentVariant
+from app.infrastructure.assessment_models import (Assignment, AssignmentParticipant, Assessment,
+    AssessmentAuditLog, AssessmentVariant, ClassGroup, Student)
 from app.infrastructure.assessment_repository import SQLAlchemyAssessmentUnitOfWork, SQLAlchemyContentBankReadPort
 from app.infrastructure.repository import SQLAlchemyUnitOfWork
 from app.main import app
@@ -77,6 +80,116 @@ async def content_version(engine, status="approved", archived=False):
     return values
 
 
+async def test_publish_assignment_snapshot_get_close_and_no_partial_failures(client, database):
+    engine, factory = database
+    assessment = await create(client, "Публикация")
+    variant = (await client.post(
+        f"/api/assessment-core/assessments/{assessment['id']}/variants", json={"name": "A"})).json()
+    version = await content_version(engine)
+    assert (await client.post(
+        f"/api/assessment-core/assessments/{assessment['id']}/variants/{variant['id']}/items",
+        json={"task_version_id": str(version["version"]), "points": "2.00"})).status_code == 201
+    actor_id = uuid4()
+    async with factory() as session:
+        group = ClassGroup(name="9А", created_by=actor_id)
+        session.add(group); await session.flush()
+        active = Student(class_group_id=group.id, display_name="Active A")
+        second_active = Student(class_group_id=group.id, display_name="Active B")
+        archived = Student(class_group_id=group.id, display_name="Archived", archived_at=await session.scalar(text("SELECT clock_timestamp()")))
+        session.add_all([active, second_active, archived]); await session.commit()
+        group_id, active_id, second_active_id = group.id, active.id, second_active.id
+    payload = {"class_group_id": str(group_id), "start_at": "2026-08-01T09:00:00Z",
+               "due_at": "2099-09-01T10:00:00Z", "max_attempts": 2}
+    published = await client.post(
+        f"/api/assessment-core/assessments/{assessment['id']}/publish-and-assign", json=payload)
+    assert published.status_code == 201
+    body = published.json(); assignment_id = body["assignment"]["id"]
+    assert published.headers["location"] == f"/api/assessment-core/assignments/{assignment_id}"
+    assert body["assessment"]["status"] == "published"
+    assert body["assignment"]["participant_count"] == 2
+    assert body["assignment"]["participant_ids"] == sorted([str(active_id), str(second_active_id)])
+    async with factory() as session:
+        participant = await session.scalar(select(AssignmentParticipant).where(
+            AssignmentParticipant.assignment_id == UUID(assignment_id)))
+        assert participant.assigned_variant_id is None and participant.variant_assigned_at is None
+        active_row = await session.get(Student, active_id)
+        active_row.archived_at = await session.scalar(text("SELECT clock_timestamp()"))
+        session.add(Student(class_group_id=group_id, display_name="Later")); await session.commit()
+    summary = await client.get(f"/api/assessment-core/assignments/{assignment_id}")
+    assert summary.status_code == 200
+    assert summary.json()["participant_ids"] == sorted([str(active_id), str(second_active_id)])
+    duplicate = await client.post(
+        f"/api/assessment-core/assessments/{assessment['id']}/publish-and-assign", json=payload)
+    assert duplicate.status_code == 409 and duplicate.json()["error"]["code"] == "assessment_immutable"
+    closed = await client.post(f"/api/assessment-core/assignments/{assignment_id}/close", json={})
+    assert closed.status_code == 200 and closed.json()["status"] == "closed"
+    repeated = await client.post(f"/api/assessment-core/assignments/{assignment_id}/close", json={})
+    assert repeated.status_code == 409 and repeated.json()["error"]["code"] == "invalid_status_transition"
+    async with engine.connect() as connection:
+        events = (await connection.execute(text(
+            "SELECT event_type FROM assessment_audit_log WHERE event_type IN "
+            "('assessment_published','assignment_created','assignment_closed') ORDER BY occurred_at,id"))).scalars().all()
+        assert events == ["assessment_published", "assignment_created", "assignment_closed"]
+
+
+async def test_publication_readiness_and_strict_time_validation(client, database):
+    engine, factory = database
+    assessment = await create(client)
+    payload = {"class_group_id": str(uuid4()), "start_at": "2026-08-01T09:00:00Z",
+               "due_at": "2099-09-01T10:00:00Z", "max_attempts": 1}
+    response = await client.post(
+        f"/api/assessment-core/assessments/{assessment['id']}/publish-and-assign", json=payload)
+    assert response.status_code == 422 and response.json()["error"]["details"][0]["code"] == "no_variants"
+    for changes in ({"start_at": "2026-08-01T09:00:00"}, {"due_at": "2099-09-01T10:00:00"},
+                    {"max_attempts": 0}, {"max_attempts": 101},
+                    {"start_at": "2099-09-02T09:00:00Z"}):
+        invalid = await client.post(
+            f"/api/assessment-core/assessments/{assessment['id']}/publish-and-assign",
+            json={**payload, **changes})
+        assert invalid.status_code == 422 and invalid.json()["error"]["code"] == "validation_error"
+    empty = await create(client, "Empty variant")
+    await client.post(f"/api/assessment-core/assessments/{empty['id']}/variants", json={"name": "A"})
+    empty_result = await client.post(
+        f"/api/assessment-core/assessments/{empty['id']}/publish-and-assign", json=payload)
+    assert empty_result.status_code == 422
+    assert empty_result.json()["error"]["details"][0]["code"] == "empty_variant"
+
+    async with factory() as session:
+        archived_group = ClassGroup(name="Archived group", created_by=uuid4(),
+            archived_at=await session.scalar(text("SELECT clock_timestamp()")))
+        empty_group = ClassGroup(name="Empty group", created_by=uuid4())
+        session.add_all([archived_group, empty_group]); await session.commit()
+        archived_group_id, empty_group_id = archived_group.id, empty_group.id
+    for group_id, expected in ((archived_group_id, "inactive_or_missing_group"),
+                               (empty_group_id, "no_active_students")):
+        actor, _, ready_id, _, _, _ = await publication_fixture(engine, factory)
+        result = await client.post(f"/api/assessment-core/assessments/{ready_id}/publish-and-assign",
+            json={**payload, "class_group_id": str(group_id)})
+        assert result.status_code == 422 and result.json()["error"]["details"][0]["code"] == expected
+    actor, _, ready_id, _, ready_group, _ = await publication_fixture(engine, factory)
+    passed = await client.post(f"/api/assessment-core/assessments/{ready_id}/publish-and-assign",
+        json={**payload, "class_group_id": str(ready_group), "due_at": "2026-08-01T10:00:00Z"})
+    assert passed.status_code == 422 and passed.json()["error"]["details"][0]["code"] == "due_at_not_future"
+
+
+@pytest.mark.parametrize("archive_task", [False, True], ids=["version_archived_after_add", "task_archived_after_add"])
+async def test_publication_rejects_content_archived_after_composition(database, archive_task):
+    engine, factory = database
+    actor, content, assessment_id, _, group_id, _ = await publication_fixture(engine, factory)
+    async with engine.begin() as connection:
+        if archive_task:
+            await connection.execute(text("UPDATE tasks SET archived_at=clock_timestamp() WHERE id=:id"), {"id": content["task"]})
+        else:
+            await connection.execute(text("UPDATE task_versions SET status='archived' WHERE id=:id"), {"id": content["version"]})
+    with pytest.raises(AssessmentError) as error:
+        await AssessmentService(SQLAlchemyAssessmentUnitOfWork(factory)).publish_and_assign(
+            publish_command(assessment_id, group_id), actor)
+    assert error.value.code == "invalid_task_version"
+    async with engine.connect() as connection:
+        assert await connection.scalar(text("SELECT status='draft' FROM assessments WHERE id=:id"), {"id": assessment_id})
+        assert await connection.scalar(text("SELECT count(*) FROM assignments WHERE assessment_id=:id"), {"id": assessment_id}) == 0
+
+
 async def assert_postgres_lock_wait(engine, pid):
     """Observe a real server-side lock wait without timing sleeps."""
     for _ in range(200):
@@ -130,6 +243,219 @@ class PausingAddUnitOfWork(SQLAlchemyAssessmentUnitOfWork):
                 return result
         self.content_bank = PortProxy()
         return self
+
+
+class PausingAssessmentUnitOfWork(SQLAlchemyAssessmentUnitOfWork):
+    """Pause immediately after a production Assessment FOR UPDATE succeeds."""
+    def __init__(self, factory, acquired=None, release=None, started=None):
+        super().__init__(factory); self.acquired = acquired; self.release = release; self.started = started
+
+    async def __aenter__(self):
+        await super().__aenter__()
+        delegate = self.repository
+        owner = self
+        class RepositoryProxy:
+            def __getattr__(self, name): return getattr(delegate, name)
+            async def lock(self, assessment_id):
+                owner.pid = await owner.session.scalar(text("SELECT pg_backend_pid()"))
+                if owner.started is not None: owner.started.set()
+                result = await delegate.lock(assessment_id)
+                if owner.acquired is not None: owner.acquired.set()
+                if owner.release is not None: await owner.release.wait()
+                return result
+        self.repository = RepositoryProxy()
+        return self
+
+
+class PausingPublicationUnitOfWork(SQLAlchemyAssessmentUnitOfWork):
+    """Pause around the production batch Content Bank lock/revalidation call."""
+    def __init__(self, factory, locked=None, release=None, started=None):
+        super().__init__(factory); self.locked = locked; self.release = release; self.started = started
+
+    async def __aenter__(self):
+        await super().__aenter__()
+        delegate = SQLAlchemyContentBankReadPort(self.session)
+        owner = self
+        class PortProxy:
+            async def lock_publication_usage(self, version_ids):
+                owner.pid = await owner.session.scalar(text("SELECT pg_backend_pid()"))
+                if owner.started is not None: owner.started.set()
+                result = await delegate.lock_publication_usage(version_ids)
+                if owner.locked is not None: owner.locked.set()
+                if owner.release is not None: await owner.release.wait()
+                return result
+            async def lock_new_usage(self, version_id):
+                return await delegate.lock_new_usage(version_id)
+        self.content_bank = PortProxy()
+        return self
+
+
+async def publication_fixture(engine, factory, *, students=2):
+    actor = ActorContext(uuid4()); content = await content_version(engine)
+    async with factory() as session:
+        assessment = Assessment(title="Controlled publication", created_by=actor.actor_id)
+        session.add(assessment); await session.flush()
+        variant = AssessmentVariant(assessment_id=assessment.id, name="A", position=1)
+        session.add(variant); await session.flush()
+        from app.infrastructure.assessment_models import AssessmentItem
+        session.add(AssessmentItem(variant_id=variant.id, task_version_id=content["version"],
+                                   position=1, points=Decimal("1.00")))
+        group = ClassGroup(name=f"Group {uuid4()}", created_by=actor.actor_id)
+        session.add(group); await session.flush()
+        pupils = [Student(class_group_id=group.id, display_name=f"Student {index}")
+                  for index in range(students)]
+        session.add_all(pupils); await session.commit()
+        return actor, content, assessment.id, variant.id, group.id, tuple(student.id for student in pupils)
+
+
+def publish_command(assessment_id, group_id):
+    return PublishAssessmentCommand(assessment_id, group_id,
+        datetime.fromisoformat("2026-08-01T09:00:00+00:00"),
+        datetime.fromisoformat("2099-09-01T10:00:00+00:00"), 1)
+
+
+async def test_concurrent_publish_serializes_single_assignment(database):
+    engine, factory = database
+    actor, _, assessment_id, _, group_id, students = await publication_fixture(engine, factory)
+    winner_locked = asyncio.Event(); release_winner = asyncio.Event()
+    winner_uow = PausingAssessmentUnitOfWork(factory, acquired=winner_locked, release=release_winner)
+    winner = asyncio.create_task(AssessmentService(winner_uow).publish_and_assign(
+        publish_command(assessment_id, group_id), actor))
+    await asyncio.wait_for(winner_locked.wait(), timeout=5)
+    loser_started = asyncio.Event()
+    loser_uow = PausingAssessmentUnitOfWork(factory, started=loser_started)
+    loser = asyncio.create_task(AssessmentService(loser_uow).publish_and_assign(
+        publish_command(assessment_id, group_id), actor))
+    await asyncio.wait_for(loser_started.wait(), timeout=5)
+    await assert_postgres_lock_wait(engine, loser_uow.pid)
+    release_winner.set()
+    result = await asyncio.wait_for(winner, timeout=5)
+    with pytest.raises(AssessmentError) as error:
+        await asyncio.wait_for(loser, timeout=5)
+    assert error.value.code == "assessment_immutable"
+    async with engine.connect() as connection:
+        assert await connection.scalar(text("SELECT status='published' FROM assessments WHERE id=:id"), {"id": assessment_id})
+        assignment_ids = (await connection.execute(text(
+            "SELECT id FROM assignments WHERE assessment_id=:id"), {"id": assessment_id})).scalars().all()
+        assert assignment_ids == [result.assignment.id]
+        assert await connection.scalar(text(
+            "SELECT count(*) FROM assignment_participants WHERE assignment_id=:id"), {"id": result.assignment.id}) == len(students)
+        assert await connection.scalar(text(
+            "SELECT count(*) FROM assignment_participants p LEFT JOIN assignments a ON a.id=p.assignment_id "
+            "WHERE a.assessment_id=:id AND a.id IS NULL"), {"id": assessment_id}) == 0
+        for event in ("assessment_published", "assignment_created"):
+            assert await connection.scalar(text(
+                "SELECT count(*) FROM assessment_audit_log WHERE event_type=:event AND "
+                "(aggregate_id=:assessment OR aggregate_id=:assignment)"),
+                {"event": event, "assessment": assessment_id, "assignment": result.assignment.id}) == 1
+
+
+async def test_composition_wins_publish_freezes_revised_state(database):
+    engine, factory = database
+    actor, _, assessment_id, variant_id, group_id, _ = await publication_fixture(engine, factory)
+    async with factory() as session:
+        assessment = await session.get(Assessment, assessment_id)
+        item_id = await session.scalar(text("SELECT id FROM assessment_items WHERE variant_id=:id"), {"id": variant_id})
+        token = assessment.updated_at
+    mutation_locked = asyncio.Event(); release_mutation = asyncio.Event()
+    mutation_uow = PausingAssessmentUnitOfWork(factory, acquired=mutation_locked, release=release_mutation)
+    mutation = asyncio.create_task(AssessmentService(mutation_uow).change_item_points(
+        ChangeAssessmentItemPointsCommand(assessment_id, variant_id, item_id, Decimal("7.00"), token), actor))
+    await asyncio.wait_for(mutation_locked.wait(), timeout=5)
+    publish_started = asyncio.Event(); publish_uow = PausingAssessmentUnitOfWork(factory, started=publish_started)
+    publish = asyncio.create_task(AssessmentService(publish_uow).publish_and_assign(
+        publish_command(assessment_id, group_id), actor))
+    await asyncio.wait_for(publish_started.wait(), timeout=5)
+    await assert_postgres_lock_wait(engine, publish_uow.pid)
+    release_mutation.set()
+    await asyncio.wait_for(mutation, timeout=5)
+    await asyncio.wait_for(publish, timeout=5)
+    async with engine.connect() as connection:
+        assert await connection.scalar(text("SELECT points=7 FROM assessment_items WHERE id=:id"), {"id": item_id})
+        events = (await connection.execute(text(
+            "SELECT event_type FROM assessment_audit_log WHERE aggregate_id=:id"), {"id": assessment_id})).scalars().all()
+        assert events.count("item_points_changed") == 1 and events.count("assessment_published") == 1
+
+
+async def test_publish_wins_composition_becomes_immutable(database):
+    engine, factory = database
+    actor, _, assessment_id, variant_id, group_id, _ = await publication_fixture(engine, factory)
+    async with factory() as session:
+        assessment = await session.get(Assessment, assessment_id)
+        item_id = await session.scalar(text("SELECT id FROM assessment_items WHERE variant_id=:id"), {"id": variant_id})
+        token = assessment.updated_at
+    publish_locked = asyncio.Event(); release_publish = asyncio.Event()
+    publish_uow = PausingAssessmentUnitOfWork(factory, acquired=publish_locked, release=release_publish)
+    publish = asyncio.create_task(AssessmentService(publish_uow).publish_and_assign(
+        publish_command(assessment_id, group_id), actor))
+    await asyncio.wait_for(publish_locked.wait(), timeout=5)
+    mutation_started = asyncio.Event(); mutation_uow = PausingAssessmentUnitOfWork(factory, started=mutation_started)
+    mutation = asyncio.create_task(AssessmentService(mutation_uow).change_item_points(
+        ChangeAssessmentItemPointsCommand(assessment_id, variant_id, item_id, Decimal("9.00"), token), actor))
+    await asyncio.wait_for(mutation_started.wait(), timeout=5)
+    await assert_postgres_lock_wait(engine, mutation_uow.pid)
+    release_publish.set(); await asyncio.wait_for(publish, timeout=5)
+    with pytest.raises(AssessmentError) as error:
+        await asyncio.wait_for(mutation, timeout=5)
+    assert error.value.code == "assessment_immutable"
+    async with engine.connect() as connection:
+        assert await connection.scalar(text("SELECT points=1 FROM assessment_items WHERE id=:id"), {"id": item_id})
+        assert await connection.scalar(text(
+            "SELECT count(*) FROM assessment_audit_log WHERE aggregate_id=:id AND event_type='item_points_changed'"), {"id": assessment_id}) == 0
+
+
+async def test_archive_wins_publication_revalidates_without_partial_state(database):
+    engine, factory = database
+    actor, content, assessment_id, _, group_id, _ = await publication_fixture(engine, factory)
+    archive_locked = asyncio.Event(); release_archive = asyncio.Event()
+    archive_uow = PausingArchiveUnitOfWork(factory, archive_locked, release_archive)
+    archive = asyncio.create_task(ArchiveTaskService(archive_uow).archive(content["task"], actor))
+    await asyncio.wait_for(archive_locked.wait(), timeout=5)
+    publication_started = asyncio.Event()
+    publication_uow = PausingPublicationUnitOfWork(factory, started=publication_started)
+    publication = asyncio.create_task(AssessmentService(publication_uow).publish_and_assign(
+        publish_command(assessment_id, group_id), actor))
+    await asyncio.wait_for(publication_started.wait(), timeout=5)
+    await assert_postgres_lock_wait(engine, publication_uow.pid)
+    release_archive.set(); await asyncio.wait_for(archive, timeout=5)
+    with pytest.raises(AssessmentError) as error:
+        await asyncio.wait_for(publication, timeout=5)
+    assert error.value.code == "invalid_task_version"
+    async with engine.connect() as connection:
+        state = (await connection.execute(text(
+            "SELECT status,published_at,published_by FROM assessments WHERE id=:id"), {"id": assessment_id})).one()
+        assert tuple(state) == ("draft", None, None)
+        assert await connection.scalar(text("SELECT count(*) FROM assignments WHERE assessment_id=:id"), {"id": assessment_id}) == 0
+        assert await connection.scalar(text(
+            "SELECT count(*) FROM assessment_audit_log WHERE event_type IN ('assessment_published','assignment_created') "
+            "AND (aggregate_id=:id OR details->>'assessment_id'=:sid)"), {"id": assessment_id, "sid": str(assessment_id)}) == 0
+
+
+async def test_publication_wins_archive_waits_and_history_survives(database):
+    engine, factory = database
+    actor, content, assessment_id, _, group_id, students = await publication_fixture(engine, factory)
+    publication_locked = asyncio.Event(); release_publication = asyncio.Event()
+    publication_uow = PausingPublicationUnitOfWork(factory, locked=publication_locked, release=release_publication)
+    publication = asyncio.create_task(AssessmentService(publication_uow).publish_and_assign(
+        publish_command(assessment_id, group_id), actor))
+    await asyncio.wait_for(publication_locked.wait(), timeout=5)
+    archive_started = asyncio.Event(); archive_after_locks = asyncio.Event(); release_archive = asyncio.Event()
+    archive_uow = PausingArchiveUnitOfWork(factory, archive_after_locks, release_archive, started=archive_started)
+    archive = asyncio.create_task(ArchiveTaskService(archive_uow).archive(content["task"], actor))
+    await asyncio.wait_for(archive_started.wait(), timeout=5)
+    await assert_postgres_lock_wait(engine, archive_uow.pid)
+    release_publication.set(); published = await asyncio.wait_for(publication, timeout=5)
+    await asyncio.wait_for(archive_after_locks.wait(), timeout=5)
+    release_archive.set(); await asyncio.wait_for(archive, timeout=5)
+    summary = await AssessmentService(SQLAlchemyAssessmentUnitOfWork(factory)).get_assignment(
+        published.assignment.id, actor)
+    assert summary.participant_count == len(students)
+    async with engine.connect() as connection:
+        assert await connection.scalar(text("SELECT status='published' FROM assessments WHERE id=:id"), {"id": assessment_id})
+        assert await connection.scalar(text("SELECT archived_at IS NOT NULL FROM tasks WHERE id=:id"), {"id": content["task"]})
+        assert await connection.scalar(text("SELECT status='archived' FROM task_versions WHERE id=:id"), {"id": content["version"]})
+        assert await connection.scalar(text(
+            "SELECT count(*) FROM assessment_items WHERE task_version_id=:id"), {"id": content["version"]}) == 1
 
 
 async def test_assessment_api_lifecycle_ownership_immutability_and_audit(client, database):

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query, Response
 
 from app.application.assessments import (AddAssessmentItemCommand, AssessmentService,
     ChangeAssessmentItemPointsCommand, CreateAssessmentCommand,
-    ReorderAssessmentItemsCommand, UpdateAssessmentCommand)
+    PublishAssessmentCommand, ReorderAssessmentItemsCommand, UpdateAssessmentCommand)
 from app.application.content_bank import ActorContext
 from app.config import Settings, get_settings
 from app.db.session import async_session_factory
@@ -14,6 +14,8 @@ from app.infrastructure.assessment_repository import SQLAlchemyAssessmentUnitOfW
 from app.presentation.assessment_schemas import (AssessmentCreateRequest, AssessmentItemCreateRequest,
     AssessmentItemOrderRequest, AssessmentItemPatchRequest, AssessmentItemResponse,
     AssessmentListPage, AssessmentPatchRequest, AssessmentResponse, VariantCreateRequest, VariantResponse)
+from app.presentation.assessment_schemas import (AssignmentResponse, EmptyRequest,
+    PublicationResponse, PublishAssessmentRequest)
 
 router = APIRouter(prefix="/api/assessment-core")
 
@@ -109,3 +111,23 @@ async def patch_item(assessment_id: UUID, variant_id: UUID, item_id: UUID,
                      context: Annotated[ActorContext, Depends(actor)]):
     return await service().change_item_points(ChangeAssessmentItemPointsCommand(
         assessment_id, variant_id, item_id, payload.points, payload.expected_updated_at), context)
+
+
+@router.post("/assessments/{assessment_id}/publish-and-assign", response_model=PublicationResponse, status_code=201)
+async def publish_and_assign(assessment_id: UUID, payload: PublishAssessmentRequest, response: Response,
+                             context: Annotated[ActorContext, Depends(actor)]):
+    result = await service().publish_and_assign(PublishAssessmentCommand(
+        assessment_id, payload.class_group_id, payload.start_at, payload.due_at, payload.max_attempts), context)
+    response.headers["Location"] = f"/api/assessment-core/assignments/{result.assignment.id}"
+    return {"assessment": assessment_view(result.assessment), "assignment": result.assignment}
+
+
+@router.get("/assignments/{assignment_id}", response_model=AssignmentResponse)
+async def get_assignment(assignment_id: UUID, context: Annotated[ActorContext, Depends(actor)]):
+    return await service().get_assignment(assignment_id, context)
+
+
+@router.post("/assignments/{assignment_id}/close", response_model=AssignmentResponse)
+async def close_assignment(assignment_id: UUID, payload: EmptyRequest,
+                           context: Annotated[ActorContext, Depends(actor)]):
+    return await service().close_assignment(assignment_id, context)

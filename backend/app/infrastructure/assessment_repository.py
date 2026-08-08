@@ -11,8 +11,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
-from app.application.assessments import AssessmentItemRecord, AssessmentRecord, AssessmentVariantRecord, CreateAssessmentCommand
-from app.infrastructure.assessment_models import Assessment, AssessmentAuditLog, AssessmentItem, AssessmentVariant
+from app.application.assessments import AssignmentRecord, AssessmentItemRecord, AssessmentRecord, AssessmentVariantRecord, CreateAssessmentCommand
+from app.infrastructure.assessment_models import (Assignment, AssignmentParticipant, Assessment, AssessmentAuditLog,
+    AssessmentItem, AssessmentVariant, ClassGroup, Student)
 from app.infrastructure.models import Task, TaskVersion
 
 
@@ -33,6 +34,19 @@ class SQLAlchemyContentBankReadPort:
             select(TaskVersion).where(TaskVersion.id == version_id, TaskVersion.task_id == task.id).with_for_update()
         )
         return version is not None and version.status == "approved" and task.archived_at is None
+
+    async def lock_publication_usage(self, version_ids: tuple[UUID, ...]) -> bool:
+        wanted = sorted(set(version_ids))
+        pairs = (await self.session.execute(select(TaskVersion.id, TaskVersion.task_id).where(TaskVersion.id.in_(wanted)))).all()
+        if len(pairs) != len(wanted):
+            return False
+        task_ids = sorted({pair.task_id for pair in pairs})
+        tasks = (await self.session.scalars(select(Task).where(Task.id.in_(task_ids)).order_by(Task.id).with_for_update())).all()
+        versions = (await self.session.scalars(select(TaskVersion).where(TaskVersion.id.in_(wanted)).order_by(TaskVersion.task_id, TaskVersion.id).with_for_update())).all()
+        ownership = {pair.id: pair.task_id for pair in pairs}
+        return (len(tasks) == len(task_ids) and len(versions) == len(wanted)
+                and all(task.archived_at is None for task in tasks)
+                and all(version.status == "approved" and ownership.get(version.id) == version.task_id for version in versions))
 
 
 class SQLAlchemyAssessmentRepository:
@@ -85,6 +99,59 @@ class SQLAlchemyAssessmentRepository:
 
     async def lock(self, assessment_id: UUID):
         return await self.session.scalar(select(Assessment).where(Assessment.id == assessment_id).with_for_update())
+
+    async def lock_composition(self, assessment_id: UUID):
+        variants = (await self.session.scalars(select(AssessmentVariant).where(
+            AssessmentVariant.assessment_id == assessment_id).order_by(AssessmentVariant.position, AssessmentVariant.id).with_for_update())).all()
+        result = []
+        for variant in variants:
+            items = (await self.session.scalars(select(AssessmentItem).where(AssessmentItem.variant_id == variant.id)
+                .order_by(AssessmentItem.position, AssessmentItem.id).with_for_update())).all()
+            result.append(AssessmentVariantRecord(variant.id, variant.name, variant.position,
+                tuple(self._item_record(item) for item in items)))
+        return tuple(result)
+
+    async def lock_group_students(self, group_id: UUID):
+        group = await self.session.scalar(select(ClassGroup).where(
+            ClassGroup.id == group_id, ClassGroup.archived_at.is_(None)).with_for_update())
+        if group is None: return None
+        return tuple((await self.session.scalars(select(Student.id).where(
+            Student.class_group_id == group_id, Student.archived_at.is_(None)).order_by(Student.id).with_for_update())).all())
+
+    async def database_clock(self):
+        return await self.session.scalar(select(func.clock_timestamp()))
+
+    async def mark_published(self, assessment_id: UUID, now: datetime, actor_id: UUID):
+        await self.session.execute(update(Assessment).where(Assessment.id == assessment_id).values(
+            status="published", published_at=now, published_by=actor_id, updated_at=now))
+
+    async def create_assignment(self, command, actor_id: UUID, student_ids: tuple[UUID, ...]):
+        row = Assignment(assessment_id=command.assessment_id, class_group_id=command.class_group_id,
+            start_at=command.start_at, due_at=command.due_at, max_attempts=command.max_attempts, created_by=actor_id)
+        self.session.add(row); await self.session.flush()
+        self.session.add_all([AssignmentParticipant(assignment_id=row.id, student_id=value,
+            assigned_variant_id=None, variant_assigned_at=None) for value in student_ids])
+        await self.session.flush(); await self.session.refresh(row)
+        return self._assignment_record(row, student_ids)
+
+    @staticmethod
+    def _assignment_record(row: Assignment, student_ids=()) -> AssignmentRecord:
+        return AssignmentRecord(row.id, row.assessment_id, row.class_group_id, row.status, row.start_at,
+            row.due_at, row.max_attempts, row.created_at, row.closed_at, len(student_ids), tuple(student_ids))
+
+    async def get_assignment(self, assignment_id: UUID):
+        row = await self.session.get(Assignment, assignment_id)
+        if row is None: return None
+        ids = tuple((await self.session.scalars(select(AssignmentParticipant.student_id).where(
+            AssignmentParticipant.assignment_id == assignment_id).order_by(AssignmentParticipant.student_id))).all())
+        return self._assignment_record(row, ids)
+
+    async def lock_assignment(self, assignment_id: UUID):
+        return await self.session.scalar(select(Assignment).where(Assignment.id == assignment_id).with_for_update())
+
+    async def close_assignment(self, assignment_id: UUID, now: datetime, actor_id: UUID):
+        await self.session.execute(update(Assignment).where(Assignment.id == assignment_id).values(
+            status="closed", closed_at=now, closed_by=actor_id))
 
     async def update_metadata_cas(self, assessment_id: UUID, expected: datetime, values: dict[str, object]):
         statement = (update(Assessment).where(Assessment.id == assessment_id, Assessment.updated_at == expected)
@@ -189,8 +256,8 @@ class SQLAlchemyAssessmentRepository:
     async def touch(self, assessment_id: UUID):
         await self.session.execute(update(Assessment).where(Assessment.id == assessment_id).values(updated_at=func.clock_timestamp()))
 
-    async def append_audit(self, assessment_id: UUID, event: str, actor_id: UUID, details: dict[str, object]):
-        self.session.add(AssessmentAuditLog(aggregate_type="assessment", aggregate_id=assessment_id, event_type=event, actor_type="teacher", actor_id=actor_id, details=details))
+    async def append_audit(self, assessment_id: UUID, event: str, actor_id: UUID, details: dict[str, object], aggregate_type: str = "assessment"):
+        self.session.add(AssessmentAuditLog(aggregate_type=aggregate_type, aggregate_id=assessment_id, event_type=event, actor_type="teacher", actor_id=actor_id, details=details))
         await self.session.flush()
 
 

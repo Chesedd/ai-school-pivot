@@ -49,6 +49,15 @@ class ChangeAssessmentItemPointsCommand:
 
 
 @dataclass(frozen=True)
+class PublishAssessmentCommand:
+    assessment_id: UUID
+    class_group_id: UUID
+    start_at: datetime
+    due_at: datetime
+    max_attempts: int
+
+
+@dataclass(frozen=True)
 class AssessmentItemRecord:
     id: UUID
     task_version_id: UUID
@@ -75,6 +84,27 @@ class AssessmentRecord:
     updated_at: datetime
     published_at: datetime | None
     published_by: UUID | None
+
+
+@dataclass(frozen=True)
+class AssignmentRecord:
+    id: UUID
+    assessment_id: UUID
+    class_group_id: UUID
+    status: str
+    start_at: datetime
+    due_at: datetime
+    max_attempts: int
+    created_at: datetime
+    closed_at: datetime | None
+    participant_count: int
+    participant_ids: tuple[UUID, ...]
+
+
+@dataclass(frozen=True)
+class PublicationRecord:
+    assessment: AssessmentRecord
+    assignment: AssignmentRecord
 
 
 class AssessmentError(Exception):
@@ -115,6 +145,7 @@ class ContentBankReadPort(Protocol):
     """Minimal same-transaction boundary for new Assessment usage."""
 
     async def lock_new_usage(self, version_id: UUID) -> bool: ...
+    async def lock_publication_usage(self, version_ids: tuple[UUID, ...]) -> bool: ...
 
 
 def _require_draft(row) -> None:
@@ -270,3 +301,88 @@ class AssessmentService:
                 {"variant_id": str(command.variant_id), "item_id": str(command.item_id), "changed_fields": ["points"]})
             await self.uow.commit()
             return item
+
+    async def publish_and_assign(self, command: PublishAssessmentCommand, actor: ActorContext):
+        async with self.uow:
+            assessment = await self.uow.repository.lock(command.assessment_id)
+            if assessment is None:
+                raise AssessmentError("assessment_not_found", "Работа не найдена.", 404)
+            _require_draft(assessment)
+            composition = await self.uow.repository.lock_composition(command.assessment_id)
+            problems = _readiness_problems(assessment, composition)
+            if problems:
+                raise AssessmentError("publication_requirements_not_met", "Работа не готова к публикации.", 422, problems)
+            version_ids = tuple(item.task_version_id for variant in composition for item in variant.items)
+            if not await self.uow.content_bank.lock_publication_usage(version_ids):
+                raise AssessmentError("invalid_task_version", "Сохранённая версия задания больше недоступна для публикации.")
+            students = await self.uow.repository.lock_group_students(command.class_group_id)
+            if students is None:
+                raise AssessmentError("publication_requirements_not_met", "Группа недоступна для публикации.", 422,
+                                      [{"field": "class_group_id", "code": "inactive_or_missing_group", "message": "Требуется существующая активная группа."}])
+            if not students:
+                raise AssessmentError("publication_requirements_not_met", "В группе нет активных учеников.", 422,
+                                      [{"field": "class_group_id", "code": "no_active_students", "message": "Добавьте хотя бы одного активного ученика."}])
+            now = await self.uow.repository.database_clock()
+            if command.due_at <= now:
+                raise AssessmentError("publication_requirements_not_met", "Срок выполнения уже истёк.", 422,
+                                      [{"field": "due_at", "code": "due_at_not_future", "message": "due_at должен быть позже текущего времени базы данных."}])
+            await self.uow.repository.mark_published(command.assessment_id, now, actor.actor_id)
+            assignment = await self.uow.repository.create_assignment(command, actor.actor_id, students)
+            details = {"assignment_id": str(assignment.id), "class_group_id": str(command.class_group_id),
+                       "variant_count": len(composition), "participant_count": len(students)}
+            await self.uow.repository.append_audit(command.assessment_id, "assessment_published", actor.actor_id, details)
+            await self.uow.repository.append_audit(assignment.id, "assignment_created", actor.actor_id,
+                {"assessment_id": str(command.assessment_id), "class_group_id": str(command.class_group_id),
+                 "start_at": command.start_at.isoformat(), "due_at": command.due_at.isoformat(),
+                 "max_attempts": command.max_attempts, "participant_count": len(students)}, "assignment")
+            result = PublicationRecord(await self.uow.repository.get(command.assessment_id), assignment)
+            await self.uow.commit()
+            return result
+
+    async def get_assignment(self, assignment_id: UUID, actor: ActorContext):
+        async with self.uow:
+            row = await self.uow.repository.get_assignment(assignment_id)
+            if row is None:
+                raise AssessmentError("assignment_not_found", "Назначение не найдено.", 404)
+            return row
+
+    async def close_assignment(self, assignment_id: UUID, actor: ActorContext):
+        async with self.uow:
+            row = await self.uow.repository.lock_assignment(assignment_id)
+            if row is None:
+                raise AssessmentError("assignment_not_found", "Назначение не найдено.", 404)
+            if row.status != "open":
+                raise AssessmentError("invalid_status_transition", "Закрытое назначение нельзя закрыть повторно.")
+            now = await self.uow.repository.database_clock()
+            await self.uow.repository.close_assignment(assignment_id, now, actor.actor_id)
+            await self.uow.repository.append_audit(assignment_id, "assignment_closed", actor.actor_id,
+                {"old_status": "open", "new_status": "closed"}, "assignment")
+            result = await self.uow.repository.get_assignment(assignment_id)
+            await self.uow.commit()
+            return result
+
+
+def _readiness_problems(assessment, variants) -> list[dict[str, str]]:
+    problems: list[dict[str, str]] = []
+    def add(field: str, code: str, message: str):
+        problems.append({"field": field, "code": code, "message": message})
+    if not assessment.title.strip():
+        add("title", "blank_title", "Название не должно быть пустым.")
+    if not variants:
+        add("variants", "no_variants", "Добавьте хотя бы один вариант.")
+    if [v.position for v in variants] != list(range(1, len(variants) + 1)):
+        add("variants", "invalid_variant_order", "Позиции вариантов должны быть непрерывными.")
+    for variant in variants:
+        field = f"variants.{variant.id}.items"
+        if not variant.items:
+            add(field, "empty_variant", "Вариант должен содержать хотя бы один элемент.")
+        if [i.position for i in variant.items] != list(range(1, len(variant.items) + 1)):
+            add(field, "invalid_item_order", "Позиции элементов должны быть непрерывными.")
+        ids = [i.task_version_id for i in variant.items]
+        if len(ids) != len(set(ids)):
+            add(field, "duplicate_task_version", "Версии заданий не должны повторяться.")
+        if any(i.points <= 0 for i in variant.items):
+            add(field, "invalid_points", "Баллы должны быть положительными.")
+        if sum((i.points for i in variant.items), Decimal("0")) <= 0:
+            add(field, "invalid_total_points", "Сумма баллов должна быть положительной.")
+    return problems
