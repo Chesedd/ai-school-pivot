@@ -3,6 +3,9 @@
 - [Пользовательский гайд Content Bank](content-bank-user-guide.md) —
   возможности интерфейса, ограничения, локальный запуск и безопасная проверка.
 - [Контракты Content Bank](content-bank-contracts.md).
+- [Контракт Assessment Core](assessment-core-contracts.md) — Phase 3.0:
+  схема, состояния, API, конкурентность, идемпотентность и исторические гарантии
+  до начала production-реализации.
 - [Контракт управляемых тегов Content Bank](content-bank-managed-tags-contract.md) —
   схема, API, импорт, поиск, аудит и границы pilot-доступа.
 - [Финальная техническая приёмка Content Bank](content-bank-stage2-acceptance.md).
