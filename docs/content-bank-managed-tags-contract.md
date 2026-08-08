@@ -2,7 +2,7 @@
 
 Статус документа: обязательный технический контракт. Backend-фундамент фазы 1
 (schema, catalog и trusted pilot API) реализован revision `20260808_01`; backend
-assignment/copy/read/AND-filter фазы 2 реализованы без новой migration. CSV/XLSX tags фазы 3 реализованы без новой migration; trusted pilot admin frontend фазы 4 реализован. Editor/task-card/compact-filter frontend остаётся последующей фазой.
+assignment/copy/read/AND-filter фазы 2 реализованы без новой migration. CSV/XLSX tags фазы 3 реализованы без новой migration; trusted pilot admin frontend фазы 4 реализован. Финальный пользовательский frontend реализован: выбор при создании и в latest draft, read-only/card/list отображение, локализация истории и compact AND-фильтр с repeated `tag_id`, URL restoration и Back/Forward.
 Базовая revision — `20260806_01`.
 
 ## 1. Контекст существующей системы
