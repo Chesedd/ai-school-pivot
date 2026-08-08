@@ -11,7 +11,7 @@ from uuid import UUID, uuid4
 
 TASK_TYPES = frozenset({"test", "calculation", "problem", "open_question", "essay"})
 STATUSES = frozenset({"draft", "review", "approved", "archived"})
-AUDIT_ACTIONS = frozenset({"task_created", "methodology_updated", "submitted_for_review", "returned_to_draft", "version_approved", "version_created", "task_archived"})
+AUDIT_ACTIONS = frozenset({"task_created", "methodology_updated", "submitted_for_review", "returned_to_draft", "version_approved", "version_created", "task_archived", "tag_added_to_version", "tag_removed_from_version"})
 SORT_FIELDS = frozenset({"created_at", "updated_at", "title", "difficulty", "status", "version_no", "relevance"})
 SORT_ORDERS = frozenset({"asc", "desc"})
 
@@ -56,6 +56,17 @@ class CreateTaskCommand:
     subtopic_id: UUID | None
     initial_version: VersionContentInput
     folder_id: UUID | None = None
+    tag_ids: tuple[UUID, ...] = ()
+
+
+@dataclass(frozen=True)
+class TagRefDTO:
+    id: UUID
+    name: str
+    category_code: str
+    subject_id: UUID | None
+    status: str
+    replacement: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -101,6 +112,7 @@ class TaskVersionDTO:
     created_by: UUID
     created_at: datetime
     skills: tuple[SkillLinkDTO, ...]
+    tags: tuple[TagRefDTO, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -166,6 +178,7 @@ class TaskListQuery:
     folder_id: UUID | None = None
     folder_scope: Literal["direct", "subtree"] | None = None
     root_only: bool = False
+    tag_ids: tuple[UUID, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -194,6 +207,7 @@ class TaskListItem:
     updated_at: datetime
     folder_id: UUID | None = None
     folder_name: str | None = None
+    tags: tuple[TagRefDTO, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -217,6 +231,7 @@ class TaskVersionSummary:
     status: str
     created_at: datetime
     approved_at: datetime | None
+    tags: tuple[TagRefDTO, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -237,6 +252,7 @@ class TaskCardVersion:
     approved_at: datetime | None
     methodology: MethodologyDTO
     updated_at: datetime
+    tags: tuple[TagRefDTO, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1031,7 +1047,7 @@ class CreateVersionService:
             if source.status != "approved" or not source.is_latest:
                 raise ConflictError("Исходная версия не является последней утверждённой.", "invalid_source_version")
             result = await self.uow.repository.clone_version(command.task_id, command.source_version_no, actor)
-            await AuditWriter(self.uow.repository).write(AuditEventRecord(command.task_id, result.task_version_id, result.version_no, "version_created", actor.actor_id, details={"source_version_no": command.source_version_no}))
+            await AuditWriter(self.uow.repository).write(AuditEventRecord(command.task_id, result.task_version_id, result.version_no, "version_created", actor.actor_id, details={"source_version_no": command.source_version_no, "source_version_id": str(source.task_version_id)}))
             await self.uow.commit()
             return result
 

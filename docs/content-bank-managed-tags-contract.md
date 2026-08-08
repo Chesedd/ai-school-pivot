@@ -1,8 +1,10 @@
 # Content Bank: контракт управляемых тегов
 
 Статус документа: обязательный технический контракт. Backend-фундамент фазы 1
-(schema, catalog и trusted pilot API) реализован revision `20260808_01`; assignment,
-import и frontend остаются последующими фазами. Базовая revision — `20260806_01`.
+(schema, catalog и trusted pilot API) реализован revision `20260808_01`; backend
+assignment/copy/read/AND-filter фазы 2 реализованы без новой migration. CSV/XLSX
+tags, admin frontend и editor/filter frontend остаются последующими фазами.
+Базовая revision — `20260806_01`.
 
 ## 1. Контекст существующей системы
 

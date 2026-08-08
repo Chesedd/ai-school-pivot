@@ -13,7 +13,7 @@ from app.db.session import async_session_factory
 from app.infrastructure.repository import SQLAlchemyContentBankRepository, SQLAlchemyUnitOfWork
 from app.presentation.schemas import FolderCreateRequest, FolderRenameRequest, FolderMoveRequest, TaskLocationRequest, FolderSummaryResponse, FolderTreeResponse, TaskLocationResponse
 from app.presentation.schemas import AuditPageResponse, ArchiveRequest, ArchiveResponse, CatalogResponse, CreatedVersionResponse, CreateVersionRequest, DuplicateCheckRequest, DuplicateCheckResponse, EmptyRequest, ImportCommitRequest, ImportCommitResponse, ImportPreviewRequest, ImportPreviewResponse, MethodologyPutRequest, MethodologyResponse, ReturnToDraftRequest, StatusCommandResponse, TaskCardResponse, TaskCreateRequest, TaskListPageResponse, TaskResponse
-from app.presentation.schemas import TagCreateRequest, TagPatchRequest, TagDeprecateRequest, TagResponse
+from app.presentation.schemas import TagCreateRequest, TagPatchRequest, TagDeprecateRequest, TagResponse, VersionTagsPutRequest, VersionTagsResponse
 from app.application.managed_tags import ManagedTagService
 
 router = APIRouter(prefix="/api/content-bank")
@@ -60,7 +60,12 @@ async def check_duplicates(payload: DuplicateCheckRequest) -> object:
 
 def _create_command(payload) -> CreateTaskCommand:
     c=payload.initial_version
-    return CreateTaskCommand(payload.subject_id,payload.grade_id,payload.topic_id,payload.subtopic_id,VersionContentInput(c.title,c.statement,c.task_type,c.answer_format,c.difficulty,c.source,tuple(SkillLinkInput(x.skill_id,x.weight,x.is_primary) for x in c.skills)), payload.folder_id)
+    return CreateTaskCommand(payload.subject_id,payload.grade_id,payload.topic_id,payload.subtopic_id,VersionContentInput(c.title,c.statement,c.task_type,c.answer_format,c.difficulty,c.source,tuple(SkillLinkInput(x.skill_id,x.weight,x.is_primary) for x in c.skills)), payload.folder_id, tuple(getattr(payload,"tag_ids",())))
+
+@router.put("/task-versions/{version_id}/tags",response_model=VersionTagsResponse)
+async def replace_version_tags(version_id:UUID,payload:VersionTagsPutRequest,settings:Settings=Depends(get_settings)):
+    async with async_session_factory() as session:
+        return await ManagedTagService(session).replace_version_tags(version_id,payload.tag_ids,payload.expected_updated_at,settings.content_bank_dev_actor_id)
 
 @router.post("/imports/preview",response_model=ImportPreviewResponse)
 async def preview_import(payload: ImportPreviewRequest, settings: Settings=Depends(get_settings)) -> object:
@@ -103,9 +108,11 @@ async def list_tasks(
     sort_order: Literal["asc", "desc"] = "desc",
     q: str | None = None,
     folder_id: UUID | None = None, folder_scope: Literal["direct", "subtree"] | None = None,
+    tag_id: Annotated[list[UUID] | None, Query()] = None,
 ) -> object:
-    query = TaskListQuery(subject_id, grade_id, topic_id, subtopic_id, skill_id, task_type, difficulty_min, difficulty_max, status, offset, limit, sort_by, sort_order, q, folder_id, folder_scope)
+    query = TaskListQuery(subject_id, grade_id, topic_id, subtopic_id, skill_id, task_type, difficulty_min, difficulty_max, status, offset, limit, sort_by, sort_order, q, folder_id, folder_scope, False, tuple(tag_id or ()))
     async with async_session_factory() as session:
+        await ManagedTagService(session).validate_filter(query.tag_ids)
         return await ListTasksService(SQLAlchemyContentBankRepository(session)).list_tasks(query)
 
 
@@ -129,7 +136,7 @@ async def get_task_audit(
 @router.post("/tasks", response_model=TaskResponse, status_code=201)
 async def create_task(payload: TaskCreateRequest, response: Response, settings: Settings = Depends(get_settings)) -> object:
     content = payload.initial_version
-    command = CreateTaskCommand(payload.subject_id, payload.grade_id, payload.topic_id, payload.subtopic_id, VersionContentInput(content.title, content.statement, content.task_type, content.answer_format, content.difficulty, content.source, tuple(SkillLinkInput(x.skill_id, x.weight, x.is_primary) for x in content.skills)), payload.folder_id)
+    command = CreateTaskCommand(payload.subject_id, payload.grade_id, payload.topic_id, payload.subtopic_id, VersionContentInput(content.title, content.statement, content.task_type, content.answer_format, content.difficulty, content.source, tuple(SkillLinkInput(x.skill_id, x.weight, x.is_primary) for x in content.skills)), payload.folder_id, tuple(payload.tag_ids))
     # Temporary server-side development identity until authentication is introduced.
     result = await CreateTaskService(SQLAlchemyUnitOfWork(async_session_factory)).create_task(command, ActorContext(settings.content_bank_dev_actor_id))
     response.headers["Location"] = f"/api/content-bank/tasks/{result.id}"
@@ -198,6 +205,7 @@ async def _contents(subject_id:UUID,folder_id:UUID|None,query:TaskListQuery):
     # The path owns subject and location; query parameters can only filter tasks.
     query=ListTasksService.normalize_query(__import__('dataclasses').replace(query,subject_id=subject_id,folder_id=None,folder_scope=None,root_only=False))
     async with async_session_factory() as session:
+        await ManagedTagService(session).validate_filter(query.tag_ids)
         repo=SQLAlchemyContentBankRepository(session); result=await repo.get_level_contents(subject_id,folder_id,query)
         if result is None:
             from app.application.folders import FolderDomainError
@@ -216,13 +224,14 @@ def _contents_task_query(
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     sort_by: Literal["created_at", "updated_at", "title", "difficulty", "status", "version_no", "relevance"] | None = None,
     sort_order: Literal["asc", "desc"] = "desc", q: str | None = None,
+    tag_id: Annotated[list[UUID] | None, Query()] = None,
 ) -> TaskListQuery:
     """Build the safe public subset shared by both direct-contents routes."""
     return TaskListQuery(grade_id=grade_id, topic_id=topic_id, subtopic_id=subtopic_id,
                          skill_id=skill_id, task_type=task_type,
                          difficulty_min=difficulty_min, difficulty_max=difficulty_max,
                          status=status, offset=offset, limit=limit, sort_by=sort_by,
-                         sort_order=sort_order, q=q)
+                         sort_order=sort_order, q=q, tag_ids=tuple(tag_id or ()))
 
 @router.get("/subjects/{subject_id}/contents")
 async def subject_contents(subject_id:UUID,query:Annotated[TaskListQuery,Depends(_contents_task_query)]):
