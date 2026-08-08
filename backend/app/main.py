@@ -22,7 +22,7 @@ app.include_router(assessment_router)
 
 @app.exception_handler(AssessmentError)
 async def assessment_error(_: Request, exc: AssessmentError) -> JSONResponse:
-    return error_response(exc.code, str(exc), [], exc.status)
+    return error_response(exc.code, str(exc), exc.details, exc.status)
 
 @app.exception_handler(TagError)
 async def tag_error(_: Request, exc: TagError) -> JSONResponse:
