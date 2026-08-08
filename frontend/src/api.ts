@@ -23,7 +23,7 @@ export type ImportPreview={import_token:string;format:"csv"|"xlsx";expires_at:st
 export type ImportCommit={imported_count:number;items:{row_number:number;task_id:string;task_version_id:string;version_no:number;status:string}[]};
 export const previewTaskImport=(payload:{format:"csv"|"xlsx";rows:ImportRowPayload[]},signal?:AbortSignal):Promise<ImportPreview>=>request("/api/content-bank/imports/preview",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload),signal});
 export const commitTaskImport=(payload:{import_token:string;row_numbers:number[]},signal?:AbortSignal):Promise<ImportCommit>=>request("/api/content-bank/imports/commit",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload),signal});
-export type AuditAction="task_created"|"methodology_updated"|"submitted_for_review"|"returned_to_draft"|"version_approved"|"version_created"|"task_archived";
+export type AuditAction="tag_added_to_version"|"tag_removed_from_version"|"task_created"|"methodology_updated"|"submitted_for_review"|"returned_to_draft"|"version_approved"|"version_created"|"task_archived";
 export type AuditEvent={id:string;task_id:string;task_version_id:string|null;version_no:number|null;action:AuditAction;actor_id:string;reason:string|null;details:Record<string,unknown>;occurred_at:string};
 export type AuditPage={items:AuditEvent[];total:number;offset:number;limit:number};
 export type AuditQuery={offset?:number;limit?:number;action?:AuditAction|null;signal?:AbortSignal};
@@ -44,7 +44,7 @@ export function checkTaskDuplicates(payload:{statement:string;primary_skill_id:s
 
 export type TagCategory={code:string;name:string;sort_order:number};
 export type TagSubject={id:string;code?:string;name:string};
-export type TagRef={id:string;name:string;category_code:string;subject_id:string|null;status:"active"|"deprecated"};
+export type TagRef={id:string;name:string;category_code:string;subject_id:string|null;status:"active"|"deprecated";replacement?:TagRef|null};
 export type ManagedTag={id:string;category:TagCategory;subject:TagSubject|null;name:string;normalized_name:string;status:"active"|"deprecated";replacement:TagRef|null;created_at:string;created_by:string;updated_at:string;updated_by:string};
 export type TagPage={items:ManagedTag[];total:number;offset:number;limit:number};
 export type TagSimilarity={normalized_query:string;items:{tag:TagRef;similarity:number;exact_match:boolean}[]};
@@ -57,3 +57,5 @@ export const createTag=(body:{name:string;category_code:string;subject_id:string
 export const patchTag=(id:string,body:{expected_updated_at:string;name?:string;category_code?:string;subject_id?:string|null;replacement_tag_id?:string|null}):Promise<ManagedTag>=>request(`/api/content-bank/admin/tags/${enc(id)}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
 export const deprecateTag=(id:string,body:{expected_updated_at:string;replacement_tag_id:string|null}):Promise<ManagedTag>=>request(`/api/content-bank/admin/tags/${enc(id)}/deprecate`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
 export const getTagUsage=(id:string,signal?:AbortSignal):Promise<TagUsage>=>request(`/api/content-bank/admin/tags/${enc(id)}/usage`,{signal});
+export type VersionTagsResponse={task_id:string;task_version_id:string;version_no:number;updated_at:string;tags:TagRef[]};
+export const putVersionTags=(versionId:string,tag_ids:string[],expected_updated_at:string):Promise<VersionTagsResponse>=>request(`/api/content-bank/task-versions/${enc(versionId)}/tags`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({tag_ids,expected_updated_at})});

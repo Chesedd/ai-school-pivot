@@ -10,3 +10,5 @@
   архитектура спроектирована contract-first, но папки ещё не реализованы.
 
 * [Проверка backend иерархии папок](content-bank-folder-hierarchy-backend-verification.md)
+
+- [Проверка пользовательского frontend управляемых тегов](content-bank-managed-tags-user-frontend-verification.md)
