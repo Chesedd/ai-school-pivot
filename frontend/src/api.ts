@@ -2,7 +2,7 @@ import type {Methodology} from "./methodology";
 export const apiBase=import.meta.env.VITE_API_BASE_URL??"http://localhost:8000";
 export type ValidationIssue={field?:string;code?:string;message:string};
 export class ApiError extends Error{constructor(public status:number,public code:string,message:string,public details:any=[]){super(message)}}
-async function request(path:string,init?:RequestInit){const response=await fetch(`${apiBase}${path}`,init);let data:any={};try{data=await response.json()}catch{}if(!response.ok)throw new ApiError(response.status,data.error?.code??"unexpected_error",data.error?.message??"Ошибка API",data.error?.details??[]);return data}
+export async function request<T=any>(path:string,init?:RequestInit):Promise<T>{const response=await fetch(`${apiBase}${path}`,init);let data:any={};try{data=await response.json()}catch{}if(!response.ok)throw new ApiError(response.status,data.error?.code??"unexpected_error",data.error?.message??"Ошибка API",data.error?.details??[]);return data as T}
 export type Folder={id:string;subject_id:string;parent_id:string|null;name:string;depth:number;created_at:string;updated_at:string};
 export type FolderNode=Folder&{children:FolderNode[]};
 export type SubjectRoot={id:string;name:string};
@@ -59,3 +59,25 @@ export const deprecateTag=(id:string,body:{expected_updated_at:string;replacemen
 export const getTagUsage=(id:string,signal?:AbortSignal):Promise<TagUsage>=>request(`/api/content-bank/admin/tags/${enc(id)}/usage`,{signal});
 export type VersionTagsResponse={task_id:string;task_version_id:string;version_no:number;updated_at:string;tags:TagRef[]};
 export const putVersionTags=(versionId:string,tag_ids:string[],expected_updated_at:string):Promise<VersionTagsResponse>=>request(`/api/content-bank/task-versions/${enc(versionId)}/tags`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({tag_ids,expected_updated_at})});
+
+export type AssessmentStatus="draft"|"published";
+export type AssessmentSummary={id:string;title:string;description:string|null;status:AssessmentStatus;variant_count:number;created_at:string;updated_at:string;published_at:string|null;published_by:string|null};
+export type AssessmentItem={id:string;task_version_id:string;position:number;points:string};
+export type AssessmentVariant={id:string;name:string;position:number;items:AssessmentItem[];total_points:string};
+export type Assessment={id:string;title:string;description:string|null;status:AssessmentStatus;variants:AssessmentVariant[];created_at:string;updated_at:string;published_at:string|null;published_by:string|null};
+export type AssessmentListPage={items:AssessmentSummary[];total:number;offset:number;limit:number};
+export type ContentBankTask={task_id:string;latest_version_id:string;version_no:number;title:string|null;statement:string;subject_id:string;subject_name:string;grade_id:string;grade_name:string;topic_id:string;topic_name:string;task_type:string;difficulty:number;status:string};
+export type ContentBankTaskPage={items:ContentBankTask[];total:number;offset:number;limit:number};
+const assessmentRoot="/api/assessment-core/assessments";
+const body=(method:string,value:unknown):RequestInit=>({method,headers:{"Content-Type":"application/json"},body:JSON.stringify(value)});
+export const listAssessments=(status?:AssessmentStatus,offset=0,limit=20,signal?:AbortSignal):Promise<AssessmentListPage>=>{const p=new URLSearchParams({offset:String(offset),limit:String(limit)});if(status)p.set("status",status);return request(`${assessmentRoot}?${p}`,{signal})};
+export const createAssessment=(value:{title:string;description:string|null}):Promise<Assessment>=>request(assessmentRoot,body("POST",value));
+export const getAssessment=(id:string,signal?:AbortSignal):Promise<Assessment>=>request(`${assessmentRoot}/${enc(id)}`,{signal});
+export const patchAssessment=(id:string,value:{expected_updated_at:string;title?:string;description?:string|null}):Promise<Assessment>=>request(`${assessmentRoot}/${enc(id)}`,body("PATCH",value));
+export const createAssessmentVariant=(id:string,name:string):Promise<AssessmentVariant>=>request(`${assessmentRoot}/${enc(id)}/variants`,body("POST",{name}));
+export const deleteAssessmentVariant=(id:string,variantId:string):Promise<void>=>request(`${assessmentRoot}/${enc(id)}/variants/${enc(variantId)}`,{method:"DELETE"});
+export const addAssessmentItem=(id:string,variantId:string,value:{task_version_id:string;points:string}):Promise<AssessmentItem>=>request(`${assessmentRoot}/${enc(id)}/variants/${enc(variantId)}/items`,body("POST",value));
+export const deleteAssessmentItem=(id:string,variantId:string,itemId:string):Promise<void>=>request(`${assessmentRoot}/${enc(id)}/variants/${enc(variantId)}/items/${enc(itemId)}`,{method:"DELETE"});
+export const reorderAssessmentItems=(id:string,variantId:string,item_ids:string[],expected_updated_at:string):Promise<AssessmentVariant>=>request(`${assessmentRoot}/${enc(id)}/variants/${enc(variantId)}/item-order`,body("PUT",{item_ids,expected_updated_at}));
+export const patchAssessmentItem=(id:string,variantId:string,itemId:string,points:string,expected_updated_at:string):Promise<AssessmentItem>=>request(`${assessmentRoot}/${enc(id)}/variants/${enc(variantId)}/items/${enc(itemId)}`,body("PATCH",{points,expected_updated_at}));
+export const searchApprovedTasks=(params:URLSearchParams,signal?:AbortSignal):Promise<ContentBankTaskPage>=>{const approved=new URLSearchParams(params);approved.set("status","approved");return request(`/api/content-bank/tasks?${approved}`,{signal})};
