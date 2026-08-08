@@ -634,7 +634,12 @@ async def test_audit_schema_enum_constraints_and_indexes(catalog):
         enum_values = (await session.execute(text("SELECT enumlabel FROM pg_enum JOIN pg_type ON pg_type.oid=enumtypid WHERE typname='audit_action' ORDER BY enumsortorder"))).scalars().all()
         indexes = set((await session.execute(text("SELECT indexname FROM pg_indexes WHERE tablename='audit_log'"))).scalars().all())
         constraints = set((await session.execute(text("SELECT conname FROM pg_constraint WHERE conrelid='audit_log'::regclass"))).scalars().all())
-    assert enum_values == ["task_created", "methodology_updated", "submitted_for_review", "returned_to_draft", "version_approved", "version_created", "task_archived"]
+    assert enum_values == [
+        "task_created", "methodology_updated", "submitted_for_review",
+        "returned_to_draft", "version_approved", "version_created", "task_archived",
+        "task_folder_moved", "folder_created", "folder_renamed", "folder_moved",
+        "folder_deleted", "tag_added_to_version", "tag_removed_from_version",
+    ]
     assert {"ix_audit_log_task_occurred_at", "ix_audit_log_task_action_occurred_at", "ix_audit_log_task_version_id"} <= indexes
     assert {"fk_audit_log_task", "fk_audit_log_task_version", "ck_audit_log_version_no_positive"} <= constraints
 
