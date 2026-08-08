@@ -10,8 +10,8 @@ from sqlalchemy import String, and_, bindparam, delete, func, select, update, te
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
-from app.application.content_bank import AcceptedAnswerDTO, ActorContext, ArchiveResult, AuditEventDTO, AuditEventRecord, AuditPage, CatalogRecord, CatalogRef, ConflictError, CreateTaskCommand, DUPLICATE_CANDIDATE_THRESHOLD, DuplicateCandidate, DuplicateCandidateRecord, DuplicateQuery, EMPTY_METHODOLOGY, ExpectedSolutionDTO, HintDTO, LockedVersion, MethodologyDTO, RubricDTO, RubricItemDTO, SaveMethodologyCommand, SkillLinkDTO, TaskCard, TaskCardVersion, TaskDTO, TaskListItem, TaskListPage, TaskListQuery, TaskVersionDTO, TaskVersionSummary, TypicalErrorDTO, VersionState
-from app.infrastructure.models import AcceptedAnswer, AuditLog, FolderAuditLog, TaskFolder, ExpectedSolution, Grade, Hint, ImportPreview, Rubric, RubricItem, Skill, Subject, Subtopic, Task, TaskErrorLink, TaskSkillLink, TaskVersion, Topic, TypicalError
+from app.application.content_bank import AcceptedAnswerDTO, ActorContext, ArchiveResult, AuditEventDTO, AuditEventRecord, AuditPage, CatalogRecord, CatalogRef, ConflictError, CreateTaskCommand, DUPLICATE_CANDIDATE_THRESHOLD, DuplicateCandidate, DuplicateCandidateRecord, DuplicateQuery, EMPTY_METHODOLOGY, ExpectedSolutionDTO, HintDTO, LockedVersion, MethodologyDTO, RubricDTO, RubricItemDTO, SaveMethodologyCommand, SkillLinkDTO, TagRefDTO, TaskCard, TaskCardVersion, TaskDTO, TaskListItem, TaskListPage, TaskListQuery, TaskVersionDTO, TaskVersionSummary, TypicalErrorDTO, VersionState
+from app.infrastructure.models import AcceptedAnswer, AuditLog, FolderAuditLog, TaskFolder, ExpectedSolution, Grade, Hint, ImportPreview, Rubric, RubricItem, Skill, Subject, Subtopic, Tag, TagCategory, Task, TaskErrorLink, TaskSkillLink, TaskVersion, TaskVersionTag, Topic, TypicalError
 from app.application.folders import FolderSummaryDTO, FolderTreeNodeDTO, TaskLocationDTO
 from app.application.content_bank import ImportCatalogContext, ImportIssue, ImportPreviewRecord, ImportPreviewRow, SkillLinkInput, VersionContentInput
 
@@ -119,10 +119,35 @@ class SQLAlchemyContentBankRepository:
         skill_rows = await self.get_skills({link.skill_id for link in content.skills})
         links = [TaskSkillLink(task_version_id=version.id, skill_id=item.skill_id, weight=item.weight, is_primary=item.is_primary) for item in content.skills]
         self.session.add_all(links)
+        tags=await self._validate_initial_tags(command.tag_ids,command.subject_id)
+        self.session.add_all([TaskVersionTag(task_version_id=version.id,tag_id=x.id,attached_by=actor.actor_id) for x in tags])
+        occurred=datetime.now().astimezone()
+        for tag in sorted(tags,key=lambda x:str(x.id)):
+            self.session.add(AuditLog(task_id=task.id,task_version_id=version.id,version_no=1,action="tag_added_to_version",actor_id=actor.actor_id,
+                details={"task_id":str(task.id),"version_id":str(version.id),"tag_id":str(tag.id),"canonical_name":tag.name,
+                    "category_code":tag.category_code,"subject_id":str(tag.subject_id) if tag.subject_id else None,
+                    "actor_id":str(actor.actor_id),"occurred_at":occurred.isoformat()}))
         await self.session.flush()
         await self.session.refresh(task)
         await self.session.refresh(version)
-        return TaskDTO(task.id, task.subject_id, task.grade_id, task.topic_id, task.subtopic_id, task.created_by, task.created_at, TaskVersionDTO(version.id, 1, version.title, version.statement, version.task_type, version.answer_format, version.difficulty, version.source, version.status, version.created_by, version.created_at, tuple(SkillLinkDTO(link.id, link.skill_id, skill_rows[link.skill_id].name, link.weight, link.is_primary) for link in links)), folder_id=task.folder_id)
+        refs=tuple(self._tag_ref(x) for x in tags)
+        return TaskDTO(task.id, task.subject_id, task.grade_id, task.topic_id, task.subtopic_id, task.created_by, task.created_at, TaskVersionDTO(version.id, 1, version.title, version.statement, version.task_type, version.answer_format, version.difficulty, version.source, version.status, version.created_by, version.created_at, tuple(SkillLinkDTO(link.id, link.skill_id, skill_rows[link.skill_id].name, link.weight, link.is_primary) for link in links),refs), folder_id=task.folder_id)
+
+    async def _validate_initial_tags(self, ids, subject_id):
+        from app.application.managed_tags import TagError
+        if len(ids)!=len(set(ids)): raise TagError("duplicate_tag_assignment","Теги не должны повторяться.",400,"tag_ids")
+        if len(ids)>8: raise TagError("tag_limit_exceeded","Можно назначить не более восьми тегов.",422,"tag_ids")
+        if not ids:return []
+        rows=list((await self.session.execute(select(Tag).options(selectinload(Tag.category),selectinload(Tag.replacement)).where(Tag.id.in_(ids)).order_by(Tag.id).with_for_update(of=Tag))).unique().scalars())
+        if len(rows)!=len(ids):raise TagError("tag_not_found","Тег не найден.",404,"tag_ids")
+        if any(x.status!="active" for x in rows):raise TagError("tag_deprecated","Устаревший тег нельзя добавить.",409,"tag_ids")
+        if any(x.subject_id not in (None,subject_id) for x in rows):raise TagError("tag_subject_mismatch","Тег относится к другому предмету.",422,"tag_ids")
+        return sorted(rows,key=lambda x:(0 if x.subject_id==subject_id else 1,x.category.sort_order,x.normalized_name,str(x.id)))
+
+    @staticmethod
+    def _tag_ref(x):
+        r=x.replacement
+        return TagRefDTO(x.id,x.name,x.category_code,x.subject_id,x.status,{"id":r.id,"name":r.name,"category_code":r.category_code,"subject_id":r.subject_id,"status":r.status} if r else None)
 
     async def list_tasks(self, query: TaskListQuery) -> TaskListPage:
         latest_numbers = select(TaskVersion.task_id, func.max(TaskVersion.version_no).label("version_no")).group_by(TaskVersion.task_id).subquery()
@@ -167,6 +192,8 @@ class SQLAlchemyContentBankRepository:
         if query.skill_id is not None:
             skill_match = select(TaskSkillLink.id).where(TaskSkillLink.task_version_id == latest.c.id, TaskSkillLink.skill_id == query.skill_id).exists()
             base = base.where(skill_match)
+        for tag_id in query.tag_ids:
+            base=base.where(select(TaskVersionTag.tag_id).where(TaskVersionTag.task_version_id==latest.c.id,TaskVersionTag.tag_id==tag_id).exists())
         rank = None
         if query.q is not None:
             # SQLAlchemy binds q; no user text is interpolated into SQL.
@@ -182,7 +209,17 @@ class SQLAlchemyContentBankRepository:
             ordering.append(Task.updated_at.desc())
         ordering.append(Task.id.asc())
         rows = (await self.session.execute(base.order_by(*ordering).offset(query.offset).limit(query.limit))).all()
-        return TaskListPage(tuple(TaskListItem(*row) for row in rows), total, query.offset, query.limit)
+        items=[TaskListItem(*row) for row in rows]
+        tag_map=await self._tags_for_versions([x.latest_version_id for x in items])
+        items=[__import__('dataclasses').replace(x,tags=tag_map.get(x.latest_version_id,())) for x in items]
+        return TaskListPage(tuple(items), total, query.offset, query.limit)
+
+    async def _tags_for_versions(self,version_ids):
+        if not version_ids:return {}
+        rows=(await self.session.execute(select(TaskVersionTag.task_version_id,Tag).join(Tag).options(selectinload(Tag.category),selectinload(Tag.replacement)).where(TaskVersionTag.task_version_id.in_(version_ids)).order_by(TaskVersionTag.task_version_id,Tag.category_code,Tag.normalized_name,Tag.id))).all()
+        result={}
+        for version_id,tag in rows:result.setdefault(version_id,[]).append(self._tag_ref(tag))
+        return {k:tuple(sorted(v,key=lambda x:(0 if x.subject_id is not None else 1,next(t.category.sort_order for version_id,t in rows if t.id==x.id),x.name.casefold(),str(x.id)))) for k,v in result.items()}
 
     async def get_task_card(self, task_id: UUID) -> TaskCard | None:
         """Load a card in a bounded number of queries, including archived tasks."""
@@ -213,7 +250,8 @@ class SQLAlchemyContentBankRepository:
             if skill.id not in seen:
                 seen.add(skill.id)
                 skills.append(SkillLinkDTO(link.id, skill.id, skill.name, link.weight, link.is_primary))
-        summaries = tuple(TaskVersionSummary(version.id, version.version_no, version.status, version.created_at, version.approved_at) for *_, version in rows)
+        tag_map=await self._tags_for_versions([r[-1].id for r in rows])
+        summaries = tuple(TaskVersionSummary(version.id, version.version_no, version.status, version.created_at, version.approved_at,tag_map.get(version.id,())) for *_, version in rows)
         approved = next((summary for summary in summaries if summary.approved_at is not None), None)
         methodology = await self._get_methodology(latest.id)
         return TaskCard(
@@ -222,7 +260,7 @@ class SQLAlchemyContentBankRepository:
             task.created_by, task.created_at, task.archived_at,
             TaskCardVersion(latest.id, latest.version_no, latest.title, latest.statement, latest.task_type,
                 latest.answer_format, latest.difficulty, latest.source, latest.status, tuple(skills),
-                latest.created_by, latest.created_at, latest.approved_by, latest.approved_at, methodology, latest.updated_at),
+                latest.created_by, latest.created_at, latest.approved_by, latest.approved_at, methodology, latest.updated_at,tag_map.get(latest.id,())),
             approved, summaries, task.updated_at,
         )
 
@@ -291,6 +329,8 @@ class SQLAlchemyContentBankRepository:
         await self.session.execute(update(Task).where(Task.id == task_id).values(updated_at=func.now()))
         links = (await self.session.scalars(select(TaskSkillLink).where(TaskSkillLink.task_version_id == source.id))).all()
         self.session.add_all([TaskSkillLink(task_version_id=target.id, skill_id=x.skill_id, weight=x.weight, is_primary=x.is_primary) for x in links])
+        tag_ids=(await self.session.scalars(select(TaskVersionTag.tag_id).where(TaskVersionTag.task_version_id==source.id))).all()
+        self.session.add_all([TaskVersionTag(task_version_id=target.id,tag_id=x,attached_by=actor.actor_id) for x in tag_ids])
         solution = await self.session.scalar(select(ExpectedSolution).where(ExpectedSolution.task_version_id == source.id))
         if solution: self.session.add(ExpectedSolution(task_version_id=target.id, solution_text=solution.solution_text, final_answer=solution.final_answer, solution_steps_json=list(solution.solution_steps_json)))
         rubric = await self.session.scalar(select(Rubric).options(selectinload(Rubric.items)).where(Rubric.task_version_id == source.id))

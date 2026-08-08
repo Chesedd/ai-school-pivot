@@ -64,6 +64,19 @@ class TaskCreateRequest(StrictRequest):
     subtopic_id: UUID | None = None
     folder_id: UUID | None = None
     initial_version: InitialVersionCreate
+    tag_ids: list[UUID] = Field(default_factory=list)
+
+class TagRefResponse(BaseModel):
+    id: UUID; name: str; category_code: str; subject_id: UUID | None; status: str
+    replacement: dict | None = None
+
+class VersionTagsPutRequest(StrictRequest):
+    tag_ids: list[UUID]
+    expected_updated_at: datetime
+
+class VersionTagsResponse(BaseModel):
+    task_id: UUID; task_version_id: UUID; version_no: int; updated_at: datetime
+    tags: list[TagRefResponse]
 
 
 class SkillLinkResponse(BaseModel):
@@ -87,6 +100,7 @@ class TaskVersionResponse(BaseModel):
     created_by: UUID
     created_at: datetime
     skills: list[SkillLinkResponse]
+    tags: list[TagRefResponse] = Field(default_factory=list)
 
 
 class TaskResponse(BaseModel):
@@ -144,6 +158,7 @@ class TaskListItemResponse(BaseModel):
     updated_at: datetime
     folder_id: UUID | None = None
     folder_name: str | None = None
+    tags: list[TagRefResponse] = Field(default_factory=list)
 
 
 class TaskListPageResponse(BaseModel):
@@ -164,6 +179,7 @@ class TaskVersionSummaryResponse(BaseModel):
     status: str
     created_at: datetime
     approved_at: datetime | None
+    tags: list[TagRefResponse] = Field(default_factory=list)
 
 
 class TaskCardVersionResponse(BaseModel):
@@ -183,6 +199,7 @@ class TaskCardVersionResponse(BaseModel):
     approved_at: datetime | None
     methodology: "MethodologyResponse"
     updated_at: datetime
+    tags: list[TagRefResponse] = Field(default_factory=list)
 
 
 class ExpectedSolutionRequest(StrictRequest):

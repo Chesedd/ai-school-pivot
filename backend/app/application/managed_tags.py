@@ -4,12 +4,12 @@ from datetime import datetime
 import unicodedata
 from uuid import UUID
 
-from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy import and_, case, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from app.infrastructure.models import Subject, Tag, TagAuditLog, TagCategory, Task, TaskVersion, TaskVersionTag
+from app.infrastructure.models import AuditLog, Subject, Tag, TagAuditLog, TagCategory, Task, TaskVersion, TaskVersionTag
 
 
 class TagError(Exception):
@@ -46,6 +46,13 @@ def serialize(tag: Tag) -> dict:
         "replacement":({"id":tag.replacement.id,"name":tag.replacement.name,"category_code":tag.replacement.category_code,"subject_id":tag.replacement.subject_id,"status":tag.replacement.status} if tag.replacement else None),
         "created_at":tag.created_at,"created_by":tag.created_by,"updated_at":tag.updated_at,"updated_by":tag.updated_by}
 
+def tag_ref(tag: Tag) -> dict:
+    replacement = tag.replacement
+    return {"id":tag.id,"name":tag.name,"category_code":tag.category_code,"subject_id":tag.subject_id,
+        "status":tag.status,"replacement":({"id":replacement.id,"name":replacement.name,
+        "category_code":replacement.category_code,"subject_id":replacement.subject_id,"status":replacement.status}
+        if replacement else None)}
+
 
 class ManagedTagService:
     def __init__(self, session: AsyncSession): self.session=session
@@ -53,6 +60,11 @@ class ManagedTagService:
     async def categories(self):
         rows=(await self.session.execute(select(TagCategory).order_by(TagCategory.sort_order))).scalars()
         return {"items":[{"code":x.code,"name":x.display_name,"sort_order":x.sort_order} for x in rows]}
+    async def validate_filter(self, ids):
+        if len(ids)!=len(set(ids)): raise TagError("duplicate_tag_assignment","Теги не должны повторяться.",400,"tag_id")
+        if ids:
+            found=set((await self.session.scalars(select(Tag.id).where(Tag.id.in_(ids)))).all())
+            if found!=set(ids): raise TagError("tag_not_found","Тег не найден.",404,"tag_id")
     async def get(self, tag_id: UUID, lock: bool=False) -> Tag:
         stmt=select(Tag).options(*self._loaded()).where(Tag.id==tag_id)
         if lock: stmt=stmt.with_for_update()
@@ -145,3 +157,52 @@ class ManagedTagService:
         lrows=(await self.session.execute(select(latest_base.c.status,func.count()).group_by(latest_base.c.status))).all(); lcounts={x:0 for x in counts};lcounts.update(dict(lrows))
         historical=await self.session.scalar(select(func.count()).select_from(base));distinct=await self.session.scalar(select(func.count(func.distinct(base.c.task_id))).select_from(base))
         return {"tag_id":tag_id,"historical_version_count":historical,"distinct_task_count":distinct,"latest_version_count":sum(lcounts.values()),"status_counts":counts,"latest_status_counts":lcounts}
+
+    async def replace_version_tags(self, version_id: UUID, tag_ids: list[UUID], expected: datetime, actor: UUID):
+        if len(tag_ids) != len(set(tag_ids)):
+            raise TagError("duplicate_tag_assignment","Теги не должны повторяться.",400,"tag_ids")
+        if len(tag_ids) > 8:
+            raise TagError("tag_limit_exceeded","Можно назначить не более восьми тегов.",422,"tag_ids")
+        row=(await self.session.execute(select(TaskVersion,Task).join(Task).where(TaskVersion.id==version_id).with_for_update())).one_or_none()
+        if row is None: raise TagError("task_version_not_found","Версия задания не найдена.",404,"version_id")
+        version,task=row
+        latest=await self.session.scalar(select(func.max(TaskVersion.version_no)).where(TaskVersion.task_id==task.id))
+        if version.status!="draft" or version.version_no!=latest or task.archived_at is not None:
+            raise TagError("task_version_not_editable","Изменять теги можно только у последней draft-версии.",409,"version_id")
+        if version.updated_at != expected:
+            raise TagError("tag_concurrent_modification","Версия уже изменена.",409,"expected_updated_at")
+        current=set((await self.session.scalars(select(TaskVersionTag.tag_id).where(TaskVersionTag.task_version_id==version.id))).all())
+        requested=set(tag_ids); added=requested-current; removed=current-requested
+        tags=[]
+        if requested:
+            tags=list((await self.session.execute(select(Tag).options(*self._loaded()).where(Tag.id.in_(requested)).order_by(Tag.id).with_for_update(of=Tag))).unique().scalars())
+        by_id={x.id:x for x in tags}
+        missing=requested-by_id.keys()
+        if missing: raise TagError("tag_not_found","Тег не найден.",404,"tag_ids")
+        for tag in tags:
+            if tag.subject_id not in (None,task.subject_id): raise TagError("tag_subject_mismatch","Тег относится к другому предмету.",422,"tag_ids")
+            if tag.id in added and tag.status!="active": raise TagError("tag_deprecated","Устаревший тег нельзя добавить.",409,"tag_ids")
+        if not added and not removed:
+            return {"task_id":task.id,"task_version_id":version.id,"version_no":version.version_no,"updated_at":version.updated_at,"tags":self._ordered_refs(tags,task.subject_id)}
+        snapshots={x.id:x for x in tags}
+        if removed:
+            old=list((await self.session.execute(select(Tag).options(*self._loaded()).where(Tag.id.in_(removed)))).unique().scalars())
+            snapshots.update({x.id:x for x in old})
+            await self.session.execute(delete(TaskVersionTag).where(TaskVersionTag.task_version_id==version.id,TaskVersionTag.tag_id.in_(removed)))
+        self.session.add_all([TaskVersionTag(task_version_id=version.id,tag_id=x,attached_by=actor) for x in sorted(added,key=str)])
+        version.updated_at=func.clock_timestamp(); task.updated_at=func.clock_timestamp(); await self.session.flush(); await self.session.refresh(version)
+        occurred=datetime.now().astimezone()
+        for action,ids in (("tag_added_to_version",added),("tag_removed_from_version",removed)):
+            for tag_id in sorted(ids,key=str):
+                tag=snapshots[tag_id]
+                details={"task_id":str(task.id),"version_id":str(version.id),"tag_id":str(tag.id),"canonical_name":tag.name,
+                    "category_code":tag.category_code,"subject_id":str(tag.subject_id) if tag.subject_id else None,
+                    "actor_id":str(actor),"occurred_at":occurred.isoformat()}
+                self.session.add(AuditLog(task_id=task.id,task_version_id=version.id,version_no=version.version_no,action=action,actor_id=actor,details=details))
+        await self.session.commit()
+        refreshed=list((await self.session.execute(select(Tag).options(*self._loaded()).where(Tag.id.in_(requested)))).unique().scalars()) if requested else []
+        return {"task_id":task.id,"task_version_id":version.id,"version_no":version.version_no,"updated_at":version.updated_at,"tags":self._ordered_refs(refreshed,task.subject_id)}
+
+    @staticmethod
+    def _ordered_refs(tags, subject_id):
+        return [tag_ref(x) for x in sorted(tags,key=lambda x:(0 if x.subject_id==subject_id else 1,x.category.sort_order,x.normalized_name,str(x.id)))]
