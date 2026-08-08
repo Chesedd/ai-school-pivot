@@ -13,8 +13,44 @@ from app.db.session import async_session_factory
 from app.infrastructure.repository import SQLAlchemyContentBankRepository, SQLAlchemyUnitOfWork
 from app.presentation.schemas import FolderCreateRequest, FolderRenameRequest, FolderMoveRequest, TaskLocationRequest, FolderSummaryResponse, FolderTreeResponse, TaskLocationResponse
 from app.presentation.schemas import AuditPageResponse, ArchiveRequest, ArchiveResponse, CatalogResponse, CreatedVersionResponse, CreateVersionRequest, DuplicateCheckRequest, DuplicateCheckResponse, EmptyRequest, ImportCommitRequest, ImportCommitResponse, ImportPreviewRequest, ImportPreviewResponse, MethodologyPutRequest, MethodologyResponse, ReturnToDraftRequest, StatusCommandResponse, TaskCardResponse, TaskCreateRequest, TaskListPageResponse, TaskResponse
+from app.presentation.schemas import TagCreateRequest, TagPatchRequest, TagDeprecateRequest, TagResponse
+from app.application.managed_tags import ManagedTagService
 
 router = APIRouter(prefix="/api/content-bank")
+
+@router.get("/tag-categories")
+async def tag_categories():
+    async with async_session_factory() as session: return await ManagedTagService(session).categories()
+
+@router.get("/tags/similar")
+async def similar_tags(name: Annotated[str,Query(min_length=1,max_length=80)], exclude_tag_id: UUID|None=None, limit:Annotated[int,Query(ge=1,le=20)]=5):
+    async with async_session_factory() as session: return await ManagedTagService(session).similar(name,exclude_tag_id,limit)
+
+@router.get("/tags")
+async def list_tags(q:Annotated[str|None,Query(max_length=80)]=None,subject_id:UUID|None=None,category_code:str|None=None,status:Literal["active","deprecated","all"]="active",offset:Annotated[int,Query(ge=0)]=0,limit:Annotated[int,Query(ge=1,le=100)]=20):
+    async with async_session_factory() as session:return await ManagedTagService(session).list(q,subject_id,category_code,status,offset,limit)
+
+@router.get("/tags/{tag_id}",response_model=TagResponse)
+async def get_tag(tag_id:UUID):
+    async with async_session_factory() as session:return __import__('app.application.managed_tags',fromlist=['serialize']).serialize(await ManagedTagService(session).get(tag_id))
+
+@router.post("/admin/tags",response_model=TagResponse,status_code=201,summary="Trusted pilot only: production authentication/RBAC is required")
+async def create_tag(payload:TagCreateRequest,response:Response,settings:Settings=Depends(get_settings)):
+    async with async_session_factory() as session: result=await ManagedTagService(session).create(payload.category_code,payload.subject_id,payload.name,settings.content_bank_dev_actor_id)
+    response.headers["Location"]=f"/api/content-bank/tags/{result['id']}";return result
+
+@router.patch("/admin/tags/{tag_id}",response_model=TagResponse,summary="Trusted pilot only: production authentication/RBAC is required")
+async def patch_tag(tag_id:UUID,payload:TagPatchRequest,settings:Settings=Depends(get_settings)):
+    fields=payload.model_fields_set-{"expected_updated_at"}; values=payload.model_dump()
+    async with async_session_factory() as session:return await ManagedTagService(session).patch(tag_id,payload.expected_updated_at,settings.content_bank_dev_actor_id,values,fields)
+
+@router.post("/admin/tags/{tag_id}/deprecate",response_model=TagResponse,summary="Trusted pilot only: production authentication/RBAC is required")
+async def deprecate_tag(tag_id:UUID,payload:TagDeprecateRequest,settings:Settings=Depends(get_settings)):
+    async with async_session_factory() as session:return await ManagedTagService(session).deprecate(tag_id,payload.replacement_tag_id,payload.expected_updated_at,settings.content_bank_dev_actor_id)
+
+@router.get("/admin/tags/{tag_id}/usage",summary="Trusted pilot only: production authentication/RBAC is required")
+async def tag_usage(tag_id:UUID):
+    async with async_session_factory() as session:return await ManagedTagService(session).usage(tag_id)
 
 @router.post("/task-versions/check-duplicates",response_model=DuplicateCheckResponse)
 async def check_duplicates(payload: DuplicateCheckRequest) -> object:

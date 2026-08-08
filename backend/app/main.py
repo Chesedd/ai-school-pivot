@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 
 from app.application.folders import FolderDomainError
 from app.application.content_bank import ApplicationError, ConflictError, GoneError, IssuesError, NotFoundError
+from app.application.managed_tags import TagError
 from app.config import get_settings
 from app.presentation.routes import router
 
@@ -15,6 +16,11 @@ app = FastAPI()
 settings = get_settings()
 app.add_middleware(CORSMiddleware, allow_origins=[x.strip() for x in settings.cors_origins.split(",") if x.strip()], allow_credentials=False, allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"], allow_headers=["Content-Type", "Authorization"])
 app.include_router(router)
+
+@app.exception_handler(TagError)
+async def tag_error(_: Request, exc: TagError) -> JSONResponse:
+    details=[{"field":exc.field,"code":exc.code,"message":str(exc)}] if exc.field else []
+    return error_response(exc.code,str(exc),details,exc.status)
 
 
 def error_response(code: str, message: str, details: list[dict[str, str]], status: int) -> JSONResponse:
