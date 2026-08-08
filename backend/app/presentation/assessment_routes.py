@@ -24,8 +24,8 @@ def actor(settings: Settings = Depends(get_settings)) -> ActorContext:
 
 def assessment_view(row):
     variants = []
-    for variant in sorted(row.variants, key=lambda value: (value.position, value.id)):
-        items = sorted(variant.items, key=lambda value: (value.position, value.id))
+    for variant in row.variants:
+        items = list(variant.items)
         variants.append({"id": variant.id, "name": variant.name, "position": variant.position,
                          "items": items, "total_points": sum((item.points for item in items), start=0)})
     return {"id": row.id, "title": row.title, "description": row.description, "status": row.status,
@@ -46,7 +46,7 @@ async def list_assessments(context: Annotated[ActorContext, Depends(actor)], sta
 async def create_assessment(payload: AssessmentCreateRequest, response: Response, context: Annotated[ActorContext, Depends(actor)]):
     result = await service().create(CreateAssessmentCommand(payload.title, payload.description), context)
     response.headers["Location"] = f"/api/assessment-core/assessments/{result.id}"
-    return result
+    return assessment_view(result)
 
 
 @router.get("/assessments/{assessment_id}", response_model=AssessmentResponse)

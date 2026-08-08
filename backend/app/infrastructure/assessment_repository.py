@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
-from app.application.assessments import CreateAssessmentCommand
+from app.application.assessments import AssessmentItemRecord, AssessmentRecord, AssessmentVariantRecord, CreateAssessmentCommand
 from app.infrastructure.assessment_models import Assessment, AssessmentAuditLog, AssessmentVariant
 
 
@@ -22,23 +22,40 @@ class SQLAlchemyAssessmentRepository:
     def _options():
         return (selectinload(Assessment.variants).selectinload(AssessmentVariant.items),)
 
+    @staticmethod
+    def _variant_record(row: AssessmentVariant) -> AssessmentVariantRecord:
+        items = tuple(AssessmentItemRecord(item.id, item.task_version_id, item.position, item.points)
+                      for item in sorted(row.items, key=lambda value: (value.position, value.id)))
+        return AssessmentVariantRecord(row.id, row.name, row.position, items)
+
+    @classmethod
+    def _record(cls, row: Assessment) -> AssessmentRecord:
+        variants = tuple(cls._variant_record(variant)
+                         for variant in sorted(row.variants, key=lambda value: (value.position, value.id)))
+        return AssessmentRecord(row.id, row.title, row.description, row.status, variants, row.created_at,
+                                row.updated_at, row.published_at, row.published_by)
+
     async def list(self, status: str | None, offset: int, limit: int):
         base = select(Assessment)
         if status:
             base = base.where(Assessment.status == status)
         total = await self.session.scalar(select(func.count()).select_from(base.order_by(None).subquery()))
         rows = (await self.session.execute(base.options(*self._options()).order_by(Assessment.created_at.desc(), Assessment.id).offset(offset).limit(limit))).scalars().all()
-        return {"items": rows, "total": total or 0, "offset": offset, "limit": limit}
+        return {"items": [self._record(row) for row in rows], "total": total or 0, "offset": offset, "limit": limit}
 
     async def get(self, assessment_id: UUID):
-        return (await self.session.execute(select(Assessment).options(*self._options()).where(Assessment.id == assessment_id))).scalar_one_or_none()
+        row = (await self.session.execute(select(Assessment).options(*self._options()).where(Assessment.id == assessment_id))).scalar_one_or_none()
+        return self._record(row) if row is not None else None
 
     async def create(self, command: CreateAssessmentCommand, actor_id: UUID):
         row = Assessment(title=command.title, description=command.description, created_by=actor_id, variants=[])
         self.session.add(row)
         await self.session.flush()
         await self.session.refresh(row)
-        return row
+        # refresh expires unloaded relationships; creation nevertheless has a
+        # domain-known empty composition, so materialize without touching it.
+        return AssessmentRecord(row.id, row.title, row.description, row.status, (), row.created_at,
+                                row.updated_at, row.published_at, row.published_by)
 
     async def lock(self, assessment_id: UUID):
         return await self.session.scalar(select(Assessment).where(Assessment.id == assessment_id).with_for_update())
@@ -64,7 +81,7 @@ class SQLAlchemyAssessmentRepository:
                 await self.session.flush()
         except IntegrityError:
             return None
-        return row
+        return AssessmentVariantRecord(row.id, row.name, row.position, ())
 
     async def delete_variant(self, assessment_id: UUID, variant_id: UUID):
         row = await self.session.scalar(select(AssessmentVariant).where(AssessmentVariant.id == variant_id, AssessmentVariant.assessment_id == assessment_id))

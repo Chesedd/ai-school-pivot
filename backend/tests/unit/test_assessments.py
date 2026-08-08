@@ -5,8 +5,9 @@ from uuid import uuid4
 
 import pytest
 
-from app.application.assessments import AssessmentError, AssessmentService, CreateAssessmentCommand, UpdateAssessmentCommand
+from app.application.assessments import AssessmentError, AssessmentRecord, AssessmentService, CreateAssessmentCommand, UpdateAssessmentCommand
 from app.application.content_bank import ActorContext
+from app.presentation.assessment_schemas import AssessmentResponse
 
 
 NOW = datetime(2026, 8, 8, tzinfo=timezone.utc)
@@ -104,3 +105,9 @@ async def test_variant_create_delete_ownership_and_published_guards():
     first.status = "draft"
     await service.delete_variant(first.id, variant.id, actor)
     assert variant.id not in uow.repository.variants and uow.repository.audit[-1][1] == "variant_deleted"
+
+
+def test_created_assessment_projection_serializes_without_an_orm_session():
+    record = AssessmentRecord(uuid4(), "Алгебра", None, "draft", (), NOW, NOW, None, None)
+    response = AssessmentResponse.model_validate(record)
+    assert response.status == "draft" and response.variants == []

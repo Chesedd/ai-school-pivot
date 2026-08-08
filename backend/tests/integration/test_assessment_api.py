@@ -50,6 +50,8 @@ async def create(client, title="Работа"):
     assert response.status_code == 422  # actor fields are forbidden
     response = await client.post("/api/assessment-core/assessments", json={"title": title, "description": None})
     assert response.status_code == 201
+    assert response.headers["location"] == f"/api/assessment-core/assessments/{response.json()['id']}"
+    assert response.json()["variants"] == []
     return response.json()
 
 
@@ -63,7 +65,10 @@ async def test_assessment_api_lifecycle_ownership_immutability_and_audit(client,
 
     patched = await client.patch(f"/api/assessment-core/assessments/{first['id']}", json={"title": "Обновлена", "expected_updated_at": first["updated_at"]})
     assert patched.status_code == 200 and patched.json()["title"] == "Обновлена"
+    before_variant = patched.json()["updated_at"]
     one = await client.post(f"/api/assessment-core/assessments/{first['id']}/variants", json={"name": "A"})
+    after_create = (await client.get(f"/api/assessment-core/assessments/{first['id']}")).json()["updated_at"]
+    assert after_create > before_variant
     two = await client.post(f"/api/assessment-core/assessments/{first['id']}/variants", json={"name": "B"})
     assert [one.json()["position"], two.json()["position"]] == [1, 2]
     duplicate = await client.post(f"/api/assessment-core/assessments/{first['id']}/variants", json={"name": "A"})
@@ -72,6 +77,7 @@ async def test_assessment_api_lifecycle_ownership_immutability_and_audit(client,
     assert foreign.status_code == 404 and foreign.json()["error"]["code"] == "variant_not_found"
     assert (await client.delete(f"/api/assessment-core/assessments/{first['id']}/variants/{one.json()['id']}")).status_code == 204
     detail = (await client.get(f"/api/assessment-core/assessments/{first['id']}")).json()
+    assert detail["updated_at"] > after_create
     assert [(value["name"], value["position"]) for value in detail["variants"]] == [("B", 1)]
 
     async with engine.begin() as connection:

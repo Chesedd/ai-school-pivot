@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from decimal import Decimal
 from typing import Protocol
 from uuid import UUID
 
@@ -20,6 +21,35 @@ class UpdateAssessmentCommand:
     assessment_id: UUID
     expected_updated_at: datetime
     values: dict[str, object]
+
+
+@dataclass(frozen=True)
+class AssessmentItemRecord:
+    id: UUID
+    task_version_id: UUID
+    position: int
+    points: Decimal
+
+
+@dataclass(frozen=True)
+class AssessmentVariantRecord:
+    id: UUID
+    name: str
+    position: int
+    items: tuple[AssessmentItemRecord, ...]
+
+
+@dataclass(frozen=True)
+class AssessmentRecord:
+    id: UUID
+    title: str
+    description: str | None
+    status: str
+    variants: tuple[AssessmentVariantRecord, ...]
+    created_at: datetime
+    updated_at: datetime
+    published_at: datetime | None
+    published_by: UUID | None
 
 
 class AssessmentError(Exception):
