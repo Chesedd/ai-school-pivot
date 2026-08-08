@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.config import get_settings
 from app.infrastructure.models import Base
+from app.infrastructure import assessment_models  # noqa: F401  (register tables)
 
 config = context.config
 if config.config_file_name is not None:
