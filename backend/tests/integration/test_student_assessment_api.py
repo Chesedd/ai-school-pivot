@@ -228,13 +228,17 @@ async def test_attempt_limit_rejects_without_success_key(client, database):
             AssessmentIdempotencyKey.key == "over-limit")) == 0
 
 
-@pytest.mark.parametrize("header", [None,""," key","key ","a/b","ключ","x"*129])
+@pytest.mark.parametrize("header", [None,""," key","key ","a/b","ключ".encode("utf-8"),"x"*129])
 async def test_start_rejects_noncanonical_key_without_state(client,database,header):
     _,factory=database; ids=await scenario(database)
     headers={} if header is None else {"Idempotency-Key":header}
     response=await client.post(f"/api/assessment-core/student/assignments/{ids['assignment']}/attempts/start",json={},headers=headers)
     assert response.status_code==400 and response.json()["error"]["code"]=="invalid_request"
-    values=await counts(factory,ids); assert values["submissions"]==values["keys"]==values["variant_assigned"]==0
+    values=await counts(factory,ids)
+    assert values["submissions"]==values["keys"]==values["variant_assigned"]==values["submission_started"]==0
+    async with factory() as session:
+        participant=await session.get(AssignmentParticipant,ids["participant"])
+        assert participant.assigned_variant_id is None and participant.variant_assigned_at is None
 
 
 @pytest.mark.parametrize("state,code", [("before","assignment_not_started"),("due","assignment_deadline_passed"),("closed","assignment_closed")])
