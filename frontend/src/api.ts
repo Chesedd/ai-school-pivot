@@ -81,3 +81,23 @@ export const deleteAssessmentItem=(id:string,variantId:string,itemId:string):Pro
 export const reorderAssessmentItems=(id:string,variantId:string,item_ids:string[],expected_updated_at:string):Promise<AssessmentVariant>=>request(`${assessmentRoot}/${enc(id)}/variants/${enc(variantId)}/item-order`,body("PUT",{item_ids,expected_updated_at}));
 export const patchAssessmentItem=(id:string,variantId:string,itemId:string,points:string,expected_updated_at:string):Promise<AssessmentItem>=>request(`${assessmentRoot}/${enc(id)}/variants/${enc(variantId)}/items/${enc(itemId)}`,body("PATCH",{points,expected_updated_at}));
 export const searchApprovedTasks=(params:URLSearchParams,signal?:AbortSignal):Promise<ContentBankTaskPage>=>{const approved=new URLSearchParams(params);approved.set("status","approved");return request(`/api/content-bank/tasks?${approved}`,{signal})};
+
+export type StudentAssignmentSummary={assignment_id:string;assessment_id:string;title:string;status:"open"|"closed";start_at:string;due_at:string;max_attempts:number;assigned_variant_id:string|null;attempt_count:number};
+export type StudentAssignmentPage={items:StudentAssignmentSummary[];total:number;offset:number;limit:number};
+export type StudentAssignmentDetail=StudentAssignmentSummary&{description:string|null;participant_id:string;current_draft_attempt_id:string|null;submitted_attempt_count:number};
+export type StudentExecutionItem={id:string;task_version_id:string;position:number;points:string;title:string|null;statement:string;task_type:string;answer_format:"single_choice"|"multiple_choice"|"short_text"|"number"|"expression"|"long_text"};
+export type StudentRawAnswer=string|string[]|null|boolean|number|Record<string,unknown>;
+export type StudentAnswer={item_id:string;raw_answer:StudentRawAnswer;normalized_answer:unknown;created_at:string;updated_at:string};
+export type StudentSubmission={id:string;attempt_no:number;status:"draft"|"submitted";assigned_variant_id:string;resumed:boolean;started_at:string;submitted_at:string|null;answers:StudentAnswer[];items:StudentExecutionItem[]};
+const studentRoot="/api/assessment-core/student";
+export const listStudentAssignments=(offset=0,limit=20,signal?:AbortSignal):Promise<StudentAssignmentPage>=>request(`${studentRoot}/assignments?${new URLSearchParams({offset:String(offset),limit:String(limit)})}`,{signal});
+export const getStudentAssignment=(id:string,signal?:AbortSignal):Promise<StudentAssignmentDetail>=>request(`${studentRoot}/assignments/${enc(id)}`,{signal});
+export const startStudentAttempt=(assignmentId:string,key:string):Promise<StudentSubmission>=>request(`${studentRoot}/assignments/${enc(assignmentId)}/attempts/start`,{method:"POST",headers:{"Content-Type":"application/json","Idempotency-Key":key},body:"{}"});
+export const getStudentAttempt=(submissionId:string,signal?:AbortSignal):Promise<StudentSubmission>=>request(`${studentRoot}/attempts/${enc(submissionId)}`,{signal});
+export const putStudentAnswer=(submissionId:string,itemId:string,raw_answer:StudentRawAnswer,expected_updated_at:string|null):Promise<StudentAnswer>=>request(`${studentRoot}/attempts/${enc(submissionId)}/answers/${enc(itemId)}`,body("PUT",{raw_answer,expected_updated_at}));
+export const deleteStudentAnswer=(submissionId:string,itemId:string):Promise<void>=>request(`${studentRoot}/attempts/${enc(submissionId)}/answers/${enc(itemId)}`,{method:"DELETE"});
+export const submitStudentAttempt=(submissionId:string,key:string):Promise<StudentSubmission>=>request(`${studentRoot}/attempts/${enc(submissionId)}/submit`,{method:"POST",headers:{"Content-Type":"application/json","Idempotency-Key":key},body:"{}"});
+
+export type StudentCommand="start"|"submit";
+export function pendingCommandKey(command:StudentCommand,id:string):string{const storageKey=`assessment:${command}:${id}`;let key=sessionStorage.getItem(storageKey);if(!key){key=`${command}:${crypto.randomUUID()}`;sessionStorage.setItem(storageKey,key)}return key}
+export const clearPendingCommandKey=(command:StudentCommand,id:string)=>sessionStorage.removeItem(`assessment:${command}:${id}`);
