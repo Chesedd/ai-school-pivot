@@ -37,11 +37,15 @@ class StudentAssessmentService:
 
     async def _locked_start_context(self, session, assignment_id, student_id):
         """Acquire the command's Assignment -> Participant lock order."""
-        initial = await self._own_participant(session, assignment_id, student_id)
         assignment = await session.scalar(
             select(Assignment).where(Assignment.id == assignment_id).with_for_update())
+        if assignment is None:
+            raise AssessmentError("assignment_not_found", "Назначение не найдено.", 404)
         participant = await session.scalar(select(AssignmentParticipant).where(
-            AssignmentParticipant.id == initial.id).with_for_update())
+            AssignmentParticipant.assignment_id == assignment_id,
+            AssignmentParticipant.student_id == student_id).with_for_update())
+        if participant is None:
+            raise AssessmentError("assignment_not_found", "Назначение не найдено.", 404)
         return assignment, participant
 
     async def list_assignments(self, student_id, offset, limit):
@@ -137,11 +141,23 @@ class StudentAssessmentService:
         return row
 
     async def _locked_attempt_context(self,s,submission_id,student_id):
-        initial=await self._own_submission(s,submission_id,student_id)
-        p0=await s.get(AssignmentParticipant,initial.assignment_participant_id)
-        a=await s.scalar(select(Assignment).where(Assignment.id==p0.assignment_id).with_for_update())
-        p=await s.scalar(select(AssignmentParticipant).where(AssignmentParticipant.id==p0.id).with_for_update())
-        sub=await s.scalar(select(StudentSubmission).where(StudentSubmission.id==submission_id).with_for_update())
+        identifiers=(await s.execute(select(Assignment.id,AssignmentParticipant.id)
+            .join(AssignmentParticipant,AssignmentParticipant.assignment_id==Assignment.id)
+            .join(StudentSubmission,StudentSubmission.assignment_participant_id==AssignmentParticipant.id)
+            .where(StudentSubmission.id==submission_id,
+                AssignmentParticipant.student_id==student_id))).one_or_none()
+        if identifiers is None:
+            raise AssessmentError("submission_not_found","Попытка не найдена.",404)
+        assignment_id,participant_id=identifiers
+        a=await s.scalar(select(Assignment).where(Assignment.id==assignment_id).with_for_update())
+        p=await s.scalar(select(AssignmentParticipant).where(
+            AssignmentParticipant.id==participant_id,
+            AssignmentParticipant.student_id==student_id).with_for_update())
+        sub=await s.scalar(select(StudentSubmission).where(
+            StudentSubmission.id==submission_id,
+            StudentSubmission.assignment_participant_id==participant_id).with_for_update())
+        if p is None or sub is None:
+            raise AssessmentError("submission_not_found","Попытка не найдена.",404)
         return a,p,sub
 
     async def _item(self,s,p,item_id):

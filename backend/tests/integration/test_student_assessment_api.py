@@ -356,8 +356,17 @@ async def _start_race(client,database,monkeypatch,same):
     while len(pids)<2: await yield_control()
     await assert_postgres_lock_wait(engine,pids[1]); release.set()
     a,b=await asyncio.gather(first,second); values=await counts(factory,ids)
-    assert a.json()["id"]==b.json()["id"] and values["submissions"]==values["variant_assigned"]==values["submission_started"]==1
-    assert sorted([a.status_code,b.status_code])==([201,201] if same else [200,201])
+    expected_statuses=[201,201] if same else [200,201]
+    actual_statuses=sorted([a.status_code,b.status_code])
+    assert actual_statuses==expected_statuses, (
+        f"unexpected concurrent START responses: "
+        f"first=({a.status_code}, {a.json()}), second=({b.status_code}, {b.json()})")
+    assert a.json()["id"]==b.json()["id"]
+    assert a.json()["assigned_variant_id"] is not None
+    assert a.json()["assigned_variant_id"]==b.json()["assigned_variant_id"]
+    assert a.json()["attempt_no"]==b.json()["attempt_no"]==1
+    assert a.json()["items"] and b.json()["items"]
+    assert values["submissions"]==values["variant_assigned"]==values["submission_started"]==1
     assert values["keys"]==(1 if same else 2)
 
 @RACE
