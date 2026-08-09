@@ -62,7 +62,7 @@ def normalize_answer(answer_format: str, raw):
         return {"option_ids": sorted(raw)}
     if answer_format in {"short_text", "expression", "long_text"}:
         if not isinstance(raw, str) or len(raw) > 60000: _invalid()
-        value = unicodedata.normalize("NFC", raw)
+        value = unicodedata.normalize("NFC", raw).replace("\r\n", "\n").replace("\r", "\n")
         if answer_format == "long_text": return {"text": value.replace("\r\n", "\n").replace("\r", "\n")}
         value = value.strip()
         return {"text" if answer_format == "short_text" else "expression": value}

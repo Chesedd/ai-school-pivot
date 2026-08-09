@@ -3,6 +3,7 @@
 - [Пользовательский гайд Content Bank](content-bank-user-guide.md) —
   возможности интерфейса, ограничения, локальный запуск и безопасная проверка.
 - [Контракты Content Bank](content-bank-contracts.md).
+- [Assessment → Checking Handoff v1](assessment-checking-handoff-v1.md) — внутренний read model отправленной попытки без correctness и PII.
 - [Контракт Assessment Core](assessment-core-contracts.md) — Phase 3.0:
   схема, состояния, API, конкурентность, идемпотентность и исторические гарантии
   до начала production-реализации.

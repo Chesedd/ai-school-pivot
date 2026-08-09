@@ -31,6 +31,14 @@ class SQLAlchemyContentBankReadPort:
         return HistoricalTaskVersion(row.id, row.task_id, row.title, row.statement,
                                      row.task_type, row.answer_format)
 
+    async def get_historical_versions(self, version_ids: tuple[UUID, ...]) -> dict[UUID, HistoricalTaskVersion]:
+        """Batch historical read; lifecycle/archive state is intentionally ignored."""
+        if not version_ids:
+            return {}
+        rows = (await self.session.scalars(select(TaskVersion).where(TaskVersion.id.in_(version_ids)))).all()
+        return {row.id: HistoricalTaskVersion(row.id, row.task_id, row.title, row.statement,
+                    row.task_type, row.answer_format) for row in rows}
+
     async def lock_new_usage(self, version_id: UUID) -> bool:
         task_id = await self.session.scalar(select(TaskVersion.task_id).where(TaskVersion.id == version_id))
         if task_id is None:

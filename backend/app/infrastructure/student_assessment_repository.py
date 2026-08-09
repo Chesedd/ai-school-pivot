@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.application.assessments import AssessmentError
+from app.application.checking_handoff import CheckingHandoff, CheckingHandoffItem, CheckingHandoffNotReady
 from app.application.student_assessments import command_hash, normalize_answer, select_deterministic_variant
 from app.infrastructure.assessment_models import (Assignment, AssignmentParticipant, Assessment,
     AssessmentAuditLog, AssessmentIdempotencyKey, AssessmentItem, AssessmentVariant,
@@ -222,3 +223,31 @@ class StudentAssessmentService:
             s.add(AssessmentIdempotencyKey(assignment_participant_id=p.id,key=key,operation="submit",request_hash=request_hash,
                 submission_id=sub.id,http_status=200)); await s.flush()
             return await self._materialize(s,sub),200
+
+
+class AssessmentCheckingHandoffService:
+    """Materialize one coherent submitted snapshot without leaking ORM objects."""
+    def __init__(self, factory: async_sessionmaker[AsyncSession]): self.factory = factory
+
+    async def get(self, submission_id: UUID) -> CheckingHandoff:
+        async with self.factory() as session, session.begin():
+            submission = await session.get(StudentSubmission, submission_id)
+            if submission is None:
+                raise AssessmentError("submission_not_found", "Попытка не найдена.", 404)
+            if submission.status != "submitted" or submission.submitted_at is None:
+                raise CheckingHandoffNotReady("submission is not submitted")
+            participant = await session.get(AssignmentParticipant, submission.assignment_participant_id)
+            rows = (await session.execute(select(AssessmentItem, StudentAnswer)
+                .outerjoin(StudentAnswer, (StudentAnswer.submission_id == submission.id) &
+                           (StudentAnswer.assessment_item_id == AssessmentItem.id))
+                .where(AssessmentItem.variant_id == participant.assigned_variant_id)
+                .order_by(AssessmentItem.position, AssessmentItem.id))).all()
+            version_ids = tuple(item.task_version_id for item, _ in rows)
+            versions = await SQLAlchemyContentBankReadPort(session).get_historical_versions(version_ids)
+            if len(versions) != len(set(version_ids)):
+                raise AssessmentError("item_not_found", "Историческая версия задания не найдена.", 404)
+            items = tuple(CheckingHandoffItem(item.id, item.task_version_id, item.position,
+                item.points, versions[item.task_version_id].answer_format,
+                answer.raw_answer if answer else None, answer.normalized_answer if answer else None)
+                for item, answer in rows)
+            return CheckingHandoff(submission.id, submission.submitted_at, items)
