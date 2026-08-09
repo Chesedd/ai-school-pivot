@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
-from app.application.assessments import AssignmentRecord, AssessmentItemRecord, AssessmentRecord, AssessmentVariantRecord, CreateAssessmentCommand
+from app.application.assessments import AssignmentRecord, AssessmentItemRecord, AssessmentRecord, AssessmentVariantRecord, CreateAssessmentCommand, HistoricalTaskVersion
 from app.infrastructure.assessment_models import (Assignment, AssignmentParticipant, Assessment, AssessmentAuditLog,
     AssessmentItem, AssessmentVariant, ClassGroup, Student)
 from app.infrastructure.models import Task, TaskVersion
@@ -22,6 +22,14 @@ class SQLAlchemyContentBankReadPort:
 
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    async def get_historical_version(self, version_id: UUID) -> HistoricalTaskVersion | None:
+        """Read one concrete version without current lifecycle eligibility checks."""
+        row = await self.session.get(TaskVersion, version_id)
+        if row is None:
+            return None
+        return HistoricalTaskVersion(row.id, row.task_id, row.title, row.statement,
+                                     row.task_type, row.answer_format)
 
     async def lock_new_usage(self, version_id: UUID) -> bool:
         task_id = await self.session.scalar(select(TaskVersion.task_id).where(TaskVersion.id == version_id))

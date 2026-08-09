@@ -107,6 +107,16 @@ class PublicationRecord:
     assignment: AssignmentRecord
 
 
+@dataclass(frozen=True)
+class HistoricalTaskVersion:
+    version_id: UUID
+    task_id: UUID
+    title: str | None
+    statement: str
+    task_type: str
+    answer_format: str
+
+
 class AssessmentError(Exception):
     def __init__(self, code: str, message: str, status: int = 409,
                  details: list[dict[str, str]] | None = None):
@@ -146,6 +156,7 @@ class ContentBankReadPort(Protocol):
 
     async def lock_new_usage(self, version_id: UUID) -> bool: ...
     async def lock_publication_usage(self, version_ids: tuple[UUID, ...]) -> bool: ...
+    async def get_historical_version(self, version_id: UUID) -> HistoricalTaskVersion | None: ...
 
 
 def _require_draft(row) -> None:
