@@ -555,3 +555,26 @@ methodology may still be insufficient for automation. These gaps are exposed as
 This Prompt 4.0 changes documentation only. It creates no migration, ORM model,
 repository/service/route, checker, provider, job, teacher override/review, analytics,
 IAM, frontend behavior or dependency.
+
+## 13. Typed Methodology Foundation (Phase 4.1M)
+
+Content Bank now authors checking truth explicitly and per task version. Legacy
+`answer_value`, `tolerance`, `unit`, and `normalization_rule` remain unchanged and
+non-executable; existing rows are `legacy_untyped` and are never promoted by the
+migration. Typed alternatives use `text`, `decimal`, `expression`, or `choice_set`
+with allowlisted version-1 policies (`exact_text_v1`, `decimal_v1`, and
+`expression_identity_v1`). Decimal values and absolute/relative tolerances are
+arbitrary-precision finite values; numeric comparison is specified as
+`abs(actual - expected) <= abs_tol + rel_tol * abs(expected)`. The default
+absolute and relative tolerance authored for a decimal is zero. Canonical decimal
+API output is a plain base-10 string; negative zero is stored as zero.
+
+Choice option IDs are canonical checking identities. Stable `option_key` exists
+only as an authoring reference. Accepted sets are relational, non-empty,
+version-safe through composite foreign keys, and use OR semantics between accepted
+answer rows. `single_choice` requires one member and `multiple_choice` at least one.
+The versioned scoring policy is either `all_or_nothing` or explicit `per_option`;
+its weights are authored Decimal values. No checker, inference from labels/keys,
+unit conversion, free-text normalization, evaluation, or CAS is introduced here.
+A canonical `unit_code` only records authored identity and can still require manual
+checking until input-unit support exists.
