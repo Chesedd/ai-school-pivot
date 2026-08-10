@@ -11,7 +11,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 URL=os.environ.get("TEST_DATABASE_URL","")
 if URL and not URL.rsplit("/",1)[-1].split("?",1)[0].endswith("_test"):
@@ -21,6 +21,19 @@ pytestmark=[pytest.mark.asyncio,pytest.mark.skipif(not URL,reason="TEST_DATABASE
 @pytest_asyncio.fixture
 async def engine():
     value=create_async_engine(URL); yield value; await value.dispose()
+
+@pytest_asyncio.fixture
+async def api_client(engine,monkeypatch):
+    os.environ["DATABASE_URL"]=URL
+    os.environ.setdefault("CONTENT_BANK_DEV_ACTOR_ID","00000000-0000-4000-8000-000000000001")
+    os.environ.setdefault("ASSESSMENT_DEV_STUDENT_ID","00000000-0000-4000-8000-000000000002")
+    from httpx import ASGITransport,AsyncClient
+    from app.main import app
+    import app.presentation.routes as routes
+    test_factory=async_sessionmaker(engine,class_=AsyncSession,expire_on_commit=False)
+    monkeypatch.setattr(routes,"async_session_factory",test_factory)
+    async with AsyncClient(transport=ASGITransport(app=app),base_url="http://test") as client:
+        yield client
 
 @pytest_asyncio.fixture
 async def seeded(engine):
@@ -92,7 +105,7 @@ async def test_legacy_bytes_and_backfill_are_unchanged(engine,seeded):
 
 async def test_decimal_round_trip_is_exact_and_constraints_reject_bad_shapes(engine,seeded):
     async with engine.begin() as c:
-        value=await c.scalar(text("INSERT INTO accepted_answers(task_version_id,answer_value,value_kind,canonical_decimal,absolute_tolerance,relative_tolerance,normalization_policy_code,normalization_policy_version) VALUES (:v,'x','decimal',.000000000000000000123,0,.000001,'decimal_v1',1) RETURNING canonical_decimal::text"),seeded)
+        value=await c.scalar(text("INSERT INTO accepted_answers(task_version_id,answer_value,value_kind,canonical_decimal,absolute_tolerance,relative_tolerance,normalization_policy_code,normalization_policy_version) VALUES (:v,'x','decimal',.000000000000000000123,0,.000001,'decimal_v1',1) RETURNING canonical_decimal::text"),{"v":seeded["v2"]})
         assert value=="0.000000000000000000123"
         base="INSERT INTO accepted_answers(task_version_id,answer_value,value_kind,canonical_decimal,absolute_tolerance,relative_tolerance,normalization_policy_code,normalization_policy_version) VALUES (:v,'bad','decimal',1,:a,:r,'decimal_v1',1)"
         await rejected(c,base,{"v":seeded["v2"],"a":-1,"r":0}); await rejected(c,base,{"v":seeded["v2"],"a":0,"r":-1})
@@ -117,14 +130,6 @@ async def test_membership_is_relational_unique_nonempty_and_cross_version_safe(e
         async with engine.begin() as c:
             await add_choice_answer(c,seeded["v2"],"empty")
 
-async def _client():
-    os.environ["DATABASE_URL"]=URL
-    os.environ.setdefault("CONTENT_BANK_DEV_ACTOR_ID","00000000-0000-4000-8000-000000000001")
-    os.environ.setdefault("ASSESSMENT_DEV_STUDENT_ID","00000000-0000-4000-8000-000000000002")
-    from app.main import app
-    from httpx import ASGITransport,AsyncClient
-    return AsyncClient(transport=ASGITransport(app=app),base_url="http://test")
-
 def legacy_payload():
     return {"expected_solution":None,"rubric":None,"accepted_answers":[{"answer_value":" old ","tolerance":None,"unit":" kg ","normalization_rule":"opaque"}],"typical_errors":[],"hints":[]}
 
@@ -132,44 +137,41 @@ def choice_payload(weighted=True):
     rules=[{"option_key":"a","role":"correct","weight":"1.000000"},{"option_key":"x","role":"distractor","weight":"-0.250000"}] if weighted else []
     return {"expected_solution":None,"rubric":None,"choice_options":[{"option_key":"a","content":"A","order_index":0},{"option_key":"x","content":"X","order_index":1}],"choice_scoring_policy":{"mode":"per_option" if weighted else "all_or_nothing","policy_version":1,"option_rules":rules},"accepted_answers":[{"answer_value":"display","value_kind":"choice_set","option_keys":["a"]}],"typical_errors":[],"hints":[]}
 
-async def test_api_legacy_put_and_typed_decimal_plain_round_trip(engine,seeded):
-    async with await _client() as client:
-        legacy=await client.put(f"/api/content-bank/task-versions/{seeded['v2']}/methodology",json=legacy_payload())
-        assert legacy.status_code==200 and legacy.json()["accepted_answers"][0]["value_kind"]=="legacy_untyped"
-        async with engine.begin() as c: await c.execute(text("UPDATE task_versions SET answer_format='number' WHERE id=:v2"),seeded)
-        payload=legacy_payload(); payload["accepted_answers"]=[{"answer_value":"1e-21","value_kind":"decimal","canonical_decimal":"1e-21","absolute_tolerance":"0","relative_tolerance":"0","normalization_policy_code":"decimal_v1","normalization_policy_version":1}]
-        typed=await client.put(f"/api/content-bank/task-versions/{seeded['v2']}/methodology",json=payload)
-        assert typed.status_code==200 and typed.json()["accepted_answers"][0]["canonical_decimal"]=="0.000000000000000000001"
+async def test_api_legacy_put_and_typed_decimal_plain_round_trip(api_client,engine,seeded):
+    legacy=await api_client.put(f"/api/content-bank/task-versions/{seeded['v2']}/methodology",json=legacy_payload())
+    assert legacy.status_code==200 and legacy.json()["accepted_answers"][0]["value_kind"]=="legacy_untyped"
+    async with engine.begin() as c: await c.execute(text("UPDATE task_versions SET answer_format='number' WHERE id=:v2"),seeded)
+    payload=legacy_payload(); payload["accepted_answers"]=[{"answer_value":"1e-21","value_kind":"decimal","canonical_decimal":"1e-21","absolute_tolerance":"0","relative_tolerance":"0","normalization_policy_code":"decimal_v1","normalization_policy_version":1}]
+    typed=await api_client.put(f"/api/content-bank/task-versions/{seeded['v2']}/methodology",json=payload)
+    assert typed.status_code==200 and typed.json()["accepted_answers"][0]["canonical_decimal"]=="0.000000000000000000001"
 
-async def test_api_choice_put_resolves_keys_to_ids_and_reads_or_alternatives(engine,seeded):
+async def test_api_choice_put_resolves_keys_to_ids_and_reads_or_alternatives(api_client,seeded):
     data=choice_payload(); data["accepted_answers"].append({"answer_value":"alternative","value_kind":"choice_set","option_keys":["x"]})
     # Adjust roles because both alternatives are accepted correctness options.
     data["choice_scoring_policy"]["option_rules"]=[{"option_key":"a","role":"correct","weight":"0.400000"},{"option_key":"x","role":"correct","weight":"0.600000"}]
-    async with await _client() as client: response=await client.put(f"/api/content-bank/task-versions/{seeded['v2']}/methodology",json=data)
+    response=await api_client.put(f"/api/content-bank/task-versions/{seeded['v2']}/methodology",json=data)
     assert response.status_code==200, response.text
     body=response.json(); assert len(body["choice_options"])==2 and len(body["accepted_answers"])==2
     ids={x["id"] for x in body["choice_options"]}; assert all(set(answer["option_ids"])<=ids for answer in body["accepted_answers"])
 
-async def test_api_unknown_option_is_atomic_and_statuses_are_immutable(engine,seeded):
-    async with await _client() as client:
-        good=await client.put(f"/api/content-bank/task-versions/{seeded['v2']}/methodology",json=choice_payload(False)); assert good.status_code==200
-        bad=choice_payload(False); bad["accepted_answers"][0]["option_keys"]=["missing"]
-        rejected_response=await client.put(f"/api/content-bank/task-versions/{seeded['v2']}/methodology",json=bad); assert rejected_response.status_code==422
-        async with engine.connect() as c: assert await c.scalar(text("SELECT count(*) FROM choice_options WHERE task_version_id=:v2"),seeded)==2
-        async with engine.begin() as c: await c.execute(text("UPDATE task_versions SET status='review' WHERE id=:v2"),seeded)
-        locked=await client.put(f"/api/content-bank/task-versions/{seeded['v2']}/methodology",json=legacy_payload()); assert locked.status_code==409
+async def test_api_unknown_option_is_atomic_and_statuses_are_immutable(api_client,engine,seeded):
+    good=await api_client.put(f"/api/content-bank/task-versions/{seeded['v2']}/methodology",json=choice_payload(False)); assert good.status_code==200
+    bad=choice_payload(False); bad["accepted_answers"][0]["option_keys"]=["missing"]
+    rejected_response=await api_client.put(f"/api/content-bank/task-versions/{seeded['v2']}/methodology",json=bad); assert rejected_response.status_code==422
+    async with engine.connect() as c: assert await c.scalar(text("SELECT count(*) FROM choice_options WHERE task_version_id=:v2"),seeded)==2
+    async with engine.begin() as c: await c.execute(text("UPDATE task_versions SET status='review' WHERE id=:v2"),seeded)
+    locked=await api_client.put(f"/api/content-bank/task-versions/{seeded['v2']}/methodology",json=legacy_payload()); assert locked.status_code==409
 
-async def test_weighted_policy_application_rejects_sum_roles_penalties_and_single_choice(engine,seeded):
-    async with await _client() as client:
-        valid=await client.put(f"/api/content-bank/task-versions/{seeded['v2']}/methodology",json=choice_payload()); assert valid.status_code==200,valid.text
-        for mutate in ("sum","role","penalty"):
-            data=choice_payload()
-            if mutate=="sum": data["choice_scoring_policy"]["option_rules"][0]["weight"]=".9"
-            if mutate=="role": data["choice_scoring_policy"]["option_rules"][1].update(role="correct",weight=".1")
-            if mutate=="penalty": data["choice_scoring_policy"]["option_rules"][1]["weight"]=".1"
-            response=await client.put(f"/api/content-bank/task-versions/{seeded['v2']}/methodology",json=data); assert response.status_code==422
-        async with engine.begin() as c: await c.execute(text("UPDATE task_versions SET answer_format='single_choice' WHERE id=:v2"),seeded)
-        response=await client.put(f"/api/content-bank/task-versions/{seeded['v2']}/methodology",json=choice_payload()); assert response.status_code==422
+async def test_weighted_policy_application_rejects_sum_roles_penalties_and_single_choice(api_client,engine,seeded):
+    valid=await api_client.put(f"/api/content-bank/task-versions/{seeded['v2']}/methodology",json=choice_payload()); assert valid.status_code==200,valid.text
+    for mutate in ("sum","role","penalty"):
+        data=choice_payload()
+        if mutate=="sum": data["choice_scoring_policy"]["option_rules"][0]["weight"]=".9"
+        if mutate=="role": data["choice_scoring_policy"]["option_rules"][1].update(role="correct",weight=".1")
+        if mutate=="penalty": data["choice_scoring_policy"]["option_rules"][1]["weight"]=".1"
+        response=await api_client.put(f"/api/content-bank/task-versions/{seeded['v2']}/methodology",json=data); assert response.status_code==422
+    async with engine.begin() as c: await c.execute(text("UPDATE task_versions SET answer_format='single_choice' WHERE id=:v2"),seeded)
+    response=await api_client.put(f"/api/content-bank/task-versions/{seeded['v2']}/methodology",json=choice_payload()); assert response.status_code==422
 
 async def test_database_weighted_integrity_rejects_unknown_cross_version_and_invalid_roles(engine,seeded):
     async with engine.begin() as c:

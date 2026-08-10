@@ -5,10 +5,19 @@ from decimal import Decimal
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 
 Difficulty = Annotated[int, Field(strict=True, ge=1, le=100)]
+
+
+def plain_decimal(value: Decimal | None) -> str | None:
+    """Serialize exact Decimal values without exponent notation or signed zero."""
+    if value is None:
+        return None
+    if value == 0:
+        return "0"
+    return format(value, "f")
 
 
 class StrictRequest(BaseModel):
@@ -282,12 +291,20 @@ class RubricItemResponse(BaseModel):
     common_failure: str | None
     order_index: int
 
+    @field_serializer("max_points", when_used="json")
+    def serialize_max_points(self, value: Decimal) -> str:
+        return plain_decimal(value)
+
 class RubricResponse(BaseModel):
     id: UUID
     grading_mode: str
     max_score: Decimal
     notes: str | None
     items: list[RubricItemResponse]
+
+    @field_serializer("max_score", when_used="json")
+    def serialize_max_score(self, value: Decimal) -> str:
+        return plain_decimal(value)
 
 class AcceptedAnswerResponse(BaseModel):
     id: UUID
@@ -306,6 +323,13 @@ class AcceptedAnswerResponse(BaseModel):
     normalization_policy_code: str | None
     normalization_policy_version: int | None
 
+    @field_serializer(
+        "tolerance", "canonical_decimal", "absolute_tolerance", "relative_tolerance",
+        when_used="json",
+    )
+    def serialize_decimal_fields(self, value: Decimal | None) -> str | None:
+        return plain_decimal(value)
+
 class ChoiceOptionResponse(BaseModel):
     id: UUID
     option_key: str
@@ -315,6 +339,10 @@ class ChoiceOptionRuleResponse(BaseModel):
     option_key: str
     role: str
     weight: Decimal
+
+    @field_serializer("weight", when_used="json")
+    def serialize_weight(self, value: Decimal) -> str:
+        return plain_decimal(value)
 class ChoiceScoringPolicyResponse(BaseModel):
     mode: str
     policy_version: int
