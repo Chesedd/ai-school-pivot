@@ -50,13 +50,24 @@ async def add_option(c,version,key,index,content=None):
 async def add_choice_answer(c,version,value="display"):
     return await c.scalar(text("INSERT INTO accepted_answers(task_version_id,answer_value,value_kind) VALUES (:v,:a,'choice_set') RETURNING id"),{"v":version,"a":value})
 
-async def test_schema_columns_tables_and_corrective_head(engine,seeded):
+async def test_schema_columns_tables_named_policy_constraint_and_corrective_head(engine,seeded):
     async with engine.connect() as c:
         columns=set((await c.scalars(text("SELECT column_name FROM information_schema.columns WHERE table_name='accepted_answers'"))).all())
         assert {"value_kind","canonical_text","canonical_decimal","absolute_tolerance","relative_tolerance","unit_code","normalization_policy_code","normalization_policy_version"}<=columns
         tables=set((await c.scalars(text("SELECT tablename FROM pg_tables WHERE schemaname=current_schema()"))).all())
         assert {"choice_options","accepted_answer_options","choice_scoring_policies","choice_option_rules"}<=tables
         assert await c.scalar(text("SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='choice_option_rules' AND column_name='role')"))
+        names=(await c.scalars(text("""SELECT constraint_name FROM information_schema.table_constraints
+            WHERE table_schema=current_schema() AND table_name='choice_scoring_policies'
+              AND constraint_type='UNIQUE'"""))).all()
+        assert names == ["uq_choice_scoring_policy_version"]
+        assert "choice_scoring_policies_task_version_id_key" not in names
+
+    async with engine.begin() as c:
+        policy=await c.scalar(text("INSERT INTO choice_scoring_policies(task_version_id,mode) VALUES (:v,'all_or_nothing') RETURNING id"),{"v":seeded["v2"]})
+        assert policy is not None
+        await rejected(c,"INSERT INTO choice_scoring_policies(task_version_id,mode) VALUES (:v,'all_or_nothing')",{"v":seeded["v2"]})
+        assert await c.scalar(text("SELECT mode FROM choice_scoring_policies WHERE id=:id"),{"id":policy})=="all_or_nothing"
 
 async def test_legacy_bytes_and_backfill_are_unchanged(engine,seeded):
     raw="  A\r\nB  "; rule="do NOT execute (.*)"

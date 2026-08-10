@@ -10,7 +10,10 @@ could bypass the original non-empty-set trigger. Its schema semantics remain
 immutable; only the narrowly proven asyncpg execution packaging in `20260810_02`
 was repaired by splitting top-level commands. Corrective revision `20260810_03` has
 `down_revision = 20260810_02`; it adds `choice_option_rules.role` and deferred
-version-wide integrity triggers. The expected head is therefore `20260810_03`.
+version-wide integrity triggers. Revision `20260810_04` has
+`down_revision = 20260810_03` and renames the generated scoring-policy unique
+constraint to the ORM-canonical `uq_choice_scoring_policy_version` without rewriting
+data or replacing its backing index. The expected head is therefore `20260810_04`.
 
 ## Asyncpg execution compatibility repair
 
@@ -24,6 +27,18 @@ own Alembic execution call; PL/pgSQL semicolons remain inside their single
 transactional behavior, constraints, deferred triggers, and downgrade schema are
 unchanged. A source-level regression parses every `execute` call and distinguishes
 top-level separators from semicolons inside dollar-quoted bodies.
+
+## Constraint-name parity correction
+
+PostgreSQL created the column-level `unique=True` constraint from `20260810_02` as
+`choice_scoring_policies_task_version_id_key`, while ORM metadata names the identical
+constraint `uq_choice_scoring_policy_version`. Revision `20260810_04` performs one
+transactional `ALTER TABLE ... RENAME CONSTRAINT` in each direction. It neither drops
+uniqueness nor creates a second constraint, rewrites no rows, and retains the backing
+unique index. At head, `pg_constraint` must expose exactly one unique constraint on
+`choice_scoring_policies(task_version_id)`, named
+`uq_choice_scoring_policy_version`; downgrade to `20260810_03` must restore the old
+implicit name and preserve duplicate rejection.
 
 ## Schema inventory and invariants
 
@@ -112,6 +127,7 @@ only to cloned option IDs. The approved historical source remains readable.
 | Catalogue and relational sets | yes | unit + collected PostgreSQL | canonical IDs added to response |
 | Cross-version protection | yes | collected direct-SQL PostgreSQL | composite FKs, not application-only |
 | Weighted policy and roles | yes | unit + collected PostgreSQL | corrective `20260810_03` adds roles and deferred integrity |
+| Scoring-policy constraint name parity | yes | source + collected PostgreSQL | `20260810_04` renames the existing constraint/index identity without data rewrite |
 | Non-empty set after member deletion | yes | collected PostgreSQL | corrective deferred version validator |
 | Atomic replacement/status immutability | yes | collected API PostgreSQL | transaction and latest-draft lock |
 | Version cloning | yes | collected PostgreSQL | rekeys and rewires every relation |
@@ -137,6 +153,15 @@ No checker/router/intake, student-answer normalization, unit conversion, fuzzy t
 regex execution, `eval`, mathematical equivalence/CAS, provider/LLM invocation,
 Teacher Review, or frontend authoring UI is introduced. A canonical unit is authored
 metadata and yields manual readiness until input-unit support exists.
+
+## PowerShell constraint-name continuation from `20260810_03`
+
+The existing disposable database that completed the previous lifecycle can continue
+from `20260810_03`: upgrade to head, inspect `pg_constraint`, test duplicate rejection,
+downgrade and inspect the restored implicit name, then always recover to head in a
+`finally` block before `alembic check/current/heads` and the focused PostgreSQL suite.
+The complete command block is included in the corrective report; the broader fresh
+`20260810_01` lifecycle remains below for full recovery.
 
 ## PowerShell continuation and Docker Hub TLS recovery
 

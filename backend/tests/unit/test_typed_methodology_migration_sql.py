@@ -11,6 +11,7 @@ VERSIONS = Path(__file__).parents[2] / "alembic" / "versions"
 MIGRATIONS = {
     "20260810_02_typed_methodology_foundation.py": 8,
     "20260810_03_typed_methodology_integrity.py": 8,
+    "20260810_04_typed_methodology_constraint_name.py": 2,
 }
 _DOLLAR = re.compile(r"\$[A-Za-z_][A-Za-z0-9_]*\$|\$\$")
 
