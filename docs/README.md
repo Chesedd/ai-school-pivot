@@ -1,5 +1,7 @@
 # Документация
 
+- [Проверка Checking DB Foundation](checking-engine-db-foundation-verification.md) —
+  схема, PostgreSQL invariants, migration lifecycle и локальный gate Phase 4.1.
 - [Checking Engine v1: контракт и gap audit](checking-engine-v1-contract.md) —
   решения Phase 4.0 для intake, routing/checkers, результатов, persistence,
   provider boundary, confidence и следующих implementation prompts; production
