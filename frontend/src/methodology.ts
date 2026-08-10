@@ -1,12 +1,13 @@
 export type Solution={id?:string;solution_text:string;final_answer:string;solution_steps:string[]};
 export type RubricItem={id?:string;criterion:string;max_points:string;required:boolean;common_failure:string;order_index?:number};
 export type Rubric={id?:string;grading_mode:"points";max_score?:string;notes:string;items:RubricItem[]};
-export type Answer={id?:string;answer_value:string;tolerance:string;unit:string;normalization_rule:string;value_kind?:"legacy_untyped"|"text"|"decimal"|"expression"|"choice_set";canonical_text?:string|null;canonical_decimal?:string|null;option_keys?:string[];absolute_tolerance?:string|null;relative_tolerance?:string|null;unit_code?:string|null;normalization_policy_code?:string|null;normalization_policy_version?:number|null};
+export type Answer={id?:string;answer_value:string;tolerance:string;unit:string;normalization_rule:string;value_kind?:"legacy_untyped"|"text"|"decimal"|"expression"|"choice_set";canonical_text?:string|null;canonical_decimal?:string|null;option_keys?:string[];option_ids?:string[];absolute_tolerance?:string|null;relative_tolerance?:string|null;unit_code?:string|null;normalization_policy_code?:string|null;normalization_policy_version?:number|null};
 export type ChoiceOption={id?:string;option_key:string;content:string;order_index:number};
-export type ChoiceScoringPolicy={mode:"all_or_nothing"|"per_option";policy_version:number;option_rules:{option_key:string;weight:string}[]};
+export type ChoiceScoringPolicy={mode:"all_or_nothing"|"per_option";policy_version:number;option_rules:{option_key:string;role:"correct"|"distractor";weight:string}[]};
+export type AutomationReadiness={ready:boolean;checker_candidate:"exact"|"numeric"|"multiple_choice"|"structured_expression"|"llm_rubric"|"manual_required";contract_version:string;reason_codes:string[];issues:{field:string;code:string;message:string}[]};
 export type TypicalError={id?:string;skill_id:string;code:string;title:string;description:string;severity:"low"|"medium"|"high";remediation_hint:string;detection_hint:string};
 export type Hint={id?:string;level:number;hint_text:string};
-export type Methodology={expected_solution:Solution|null;rubric:Rubric|null;accepted_answers:Answer[];typical_errors:TypicalError[];hints:Hint[];choice_options?:ChoiceOption[];choice_scoring_policy?:ChoiceScoringPolicy|null};
+export type Methodology={expected_solution:Solution|null;rubric:Rubric|null;accepted_answers:Answer[];typical_errors:TypicalError[];hints:Hint[];choice_options?:ChoiceOption[];choice_scoring_policy?:ChoiceScoringPolicy|null;automation_readiness?:AutomationReadiness|null};
 export type FieldErrors=Record<string,string>;
 const nullable=(x:string)=>x.trim()===""?null:x.trim();
 export function methodologyToForm(value:any):Methodology{return {

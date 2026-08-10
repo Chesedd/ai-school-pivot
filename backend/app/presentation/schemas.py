@@ -239,6 +239,7 @@ class ChoiceOptionRequest(StrictRequest):
     order_index: int
 class ChoiceOptionRuleRequest(StrictRequest):
     option_key: str
+    role: Literal["correct", "distractor"]
     weight: Decimal
 class ChoiceScoringPolicyRequest(StrictRequest):
     mode: Literal["all_or_nothing","per_option"]
@@ -298,6 +299,7 @@ class AcceptedAnswerResponse(BaseModel):
     canonical_text: str | None
     canonical_decimal: Decimal | None
     option_keys: list[str]
+    option_ids: list[UUID]
     absolute_tolerance: Decimal | None
     relative_tolerance: Decimal | None
     unit_code: str | None
@@ -311,11 +313,24 @@ class ChoiceOptionResponse(BaseModel):
     order_index: int
 class ChoiceOptionRuleResponse(BaseModel):
     option_key: str
+    role: str
     weight: Decimal
 class ChoiceScoringPolicyResponse(BaseModel):
     mode: str
     policy_version: int
     option_rules: list[ChoiceOptionRuleResponse]
+
+class ReadinessIssueResponse(BaseModel):
+    field: str
+    code: str
+    message: str
+
+class AutomationReadinessResponse(BaseModel):
+    ready: bool
+    checker_candidate: str
+    contract_version: str
+    reason_codes: list[str]
+    issues: list[ReadinessIssueResponse]
 
 class TypicalErrorResponse(BaseModel):
     id: UUID
@@ -340,6 +355,7 @@ class MethodologyResponse(BaseModel):
     hints: list[HintResponse]
     choice_options: list[ChoiceOptionResponse] = []
     choice_scoring_policy: ChoiceScoringPolicyResponse | None = None
+    automation_readiness: AutomationReadinessResponse | None = None
 
 
 class TaskCardResponse(BaseModel):

@@ -312,6 +312,7 @@ class ChoiceOptionInput:
 @dataclass(frozen=True)
 class ChoiceOptionRuleInput:
     option_key: str
+    role: str
     weight: Decimal
 
 @dataclass(frozen=True)
@@ -386,6 +387,7 @@ class AcceptedAnswerDTO:
     unit_code: str | None = None
     normalization_policy_code: str | None = None
     normalization_policy_version: int | None = None
+    option_ids: tuple[UUID, ...] = ()
 
 @dataclass(frozen=True)
 class ChoiceOptionDTO:
@@ -397,6 +399,7 @@ class ChoiceOptionDTO:
 @dataclass(frozen=True)
 class ChoiceOptionRuleDTO:
     option_key: str
+    role: str
     weight: Decimal
 
 @dataclass(frozen=True)
@@ -404,6 +407,14 @@ class ChoiceScoringPolicyDTO:
     mode: str
     policy_version: int
     option_rules: tuple[ChoiceOptionRuleDTO, ...]
+
+@dataclass(frozen=True)
+class AutomationReadinessDTO:
+    ready: bool
+    checker_candidate: str
+    contract_version: str
+    reason_codes: tuple[str, ...]
+    issues: tuple[ValidationDetail, ...]
 
 @dataclass(frozen=True)
 class TypicalErrorDTO:
@@ -431,6 +442,7 @@ class MethodologyDTO:
     hints: tuple[HintDTO, ...]
     choice_options: tuple[ChoiceOptionDTO, ...] = ()
     choice_scoring_policy: ChoiceScoringPolicyDTO | None = None
+    automation_readiness: AutomationReadinessDTO | None = None
 
 EMPTY_METHODOLOGY = MethodologyDTO(None, None, (), (), ())
 
@@ -466,6 +478,67 @@ class ValidationDetail:
     field: str
     code: str
     message: str
+
+
+READINESS_VERSION = "methodology_readiness_v1"
+
+
+def assess_automation_readiness(answer_format: str, methodology: MethodologyDTO) -> AutomationReadinessDTO:
+    """Describe checker eligibility without routing or inspecting a student answer."""
+    reasons: list[str] = []
+    issues: list[ValidationDetail] = []
+    candidate = {
+        "short_text": "exact", "number": "numeric", "expression": "structured_expression",
+        "single_choice": "multiple_choice", "multiple_choice": "multiple_choice",
+        "long_text": "llm_rubric",
+    }.get(answer_format, "manual_required")
+
+    def issue(field: str, code: str, message: str) -> None:
+        if code not in reasons:
+            reasons.append(code)
+        issues.append(ValidationDetail(field, code, message))
+
+    typed = [answer for answer in methodology.accepted_answers if answer.value_kind != "legacy_untyped"]
+    if any(answer.value_kind == "legacy_untyped" for answer in methodology.accepted_answers):
+        issue("accepted_answers", "legacy_untyped_answer", "Legacy accepted answer is not automation truth.")
+
+    if answer_format == "long_text":
+        if typed:
+            issue("accepted_answers", "unsupported_exact_long_text", "Long text cannot use an exact typed answer in V1.")
+        if methodology.rubric is None or not methodology.rubric.items or methodology.expected_solution is None:
+            issue("rubric", "insufficient_rubric", "Long text requires an expected solution and a non-empty rubric.")
+    elif answer_format in {"short_text", "number", "expression", "single_choice", "multiple_choice"} and not typed:
+        issue("accepted_answers", "missing_typed_accepted_answer", "A compatible typed accepted answer is required.")
+
+    if answer_format == "number":
+        for index, answer in enumerate(typed):
+            if answer.absolute_tolerance is None or answer.relative_tolerance is None or answer.absolute_tolerance < 0 or answer.relative_tolerance < 0:
+                issue(f"accepted_answers.{index}.absolute_tolerance", "invalid_numeric_tolerance", "Both numeric tolerances must be finite and nonnegative.")
+            if answer.unit_code is not None:
+                issue(f"accepted_answers.{index}.unit_code", "unsupported_unit", "Input-unit support is not available in V1.")
+                candidate = "manual_required"
+
+    if answer_format in {"single_choice", "multiple_choice"}:
+        option_keys = {option.option_key for option in methodology.choice_options}
+        if not option_keys:
+            issue("choice_options", "missing_choice_options", "Choice automation requires an authored catalogue.")
+        for index, answer in enumerate(typed):
+            unknown = set(answer.option_keys) - option_keys
+            if unknown:
+                issue(f"accepted_answers.{index}.option_keys", "unknown_choice_option", "Accepted set references an unknown option.")
+        policy = methodology.choice_scoring_policy
+        if policy is None:
+            issue("choice_scoring_policy", "missing_choice_scoring_policy", "An explicit versioned choice policy is required.")
+        elif policy.mode == "per_option":
+            correct = [rule for rule in policy.option_rules if rule.role == "correct"]
+            if (answer_format != "multiple_choice" or
+                    sum((rule.weight for rule in correct), Decimal(0)) != Decimal("1.000000") or
+                    any(rule.weight <= 0 for rule in correct) or
+                    any(rule.weight >= 0 for rule in policy.option_rules if rule.role == "distractor")):
+                issue("choice_scoring_policy.option_rules", "invalid_weighted_policy", "Weighted policy roles and weights are invalid.")
+
+    ready = not reasons
+    return AutomationReadinessDTO(ready, candidate, READINESS_VERSION, tuple(reasons), tuple(issues))
 
 
 class ApplicationError(Exception):
@@ -1005,6 +1078,8 @@ class SaveMethodologyService:
             details = []
             expected_kinds = {"short_text": "text", "number": "decimal", "expression": "expression", "single_choice": "choice_set", "multiple_choice": "choice_set"}
             keys = {x.option_key for x in command.choice_options}
+            if command.choice_scoring_policy and command.choice_scoring_policy.mode == "per_option" and version.answer_format != "multiple_choice":
+                details.append(ValidationDetail("choice_scoring_policy.mode", "not_allowed", "Weighted policy is available only for multiple_choice."))
             for index, answer in enumerate(command.accepted_answers):
                 if answer.value_kind != "legacy_untyped" and (version.answer_format == "long_text" or answer.value_kind != expected_kinds.get(version.answer_format)):
                     details.append(ValidationDetail(f"accepted_answers.{index}.value_kind", "incompatible", "Тип принятого ответа несовместим с форматом задания."))
@@ -1060,6 +1135,15 @@ class SaveMethodologyService:
             if (answer.normalization_policy_code is None) != (answer.normalization_policy_version is None): details.append(ValidationDetail(f"accepted_answers.{i}.normalization_policy_version", "pair", "Policy code и version задаются вместе."))
             if answer.value_kind == "decimal" and answer.canonical_decimal is None: details.append(ValidationDetail(f"accepted_answers.{i}.canonical_decimal", "required", "Укажите canonical decimal."))
             if answer.value_kind in {"text", "expression"} and answer.canonical_text is None: details.append(ValidationDetail(f"accepted_answers.{i}.canonical_text", "required", "Укажите canonical text."))
+            incompatible = {
+                "legacy_untyped": any((answer.canonical_text is not None, answer.canonical_decimal is not None, bool(answer.option_keys), answer.absolute_tolerance is not None, answer.relative_tolerance is not None, answer.unit_code is not None, answer.normalization_policy_code is not None)),
+                "text": any((answer.canonical_decimal is not None, bool(answer.option_keys), answer.absolute_tolerance is not None, answer.relative_tolerance is not None, answer.unit_code is not None)),
+                "expression": any((answer.canonical_decimal is not None, bool(answer.option_keys), answer.absolute_tolerance is not None, answer.relative_tolerance is not None, answer.unit_code is not None)),
+                "decimal": answer.canonical_text is not None or bool(answer.option_keys),
+                "choice_set": any((answer.canonical_text is not None, answer.canonical_decimal is not None, answer.absolute_tolerance is not None, answer.relative_tolerance is not None, answer.unit_code is not None, answer.normalization_policy_code is not None)),
+            }.get(answer.value_kind, False)
+            if incompatible: details.append(ValidationDetail(f"accepted_answers.{i}.value_kind", "incompatible_fields", "Typed fields are incompatible with value_kind."))
+            if answer.unit_code is not None and not __import__("re").fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:/-]{0,63}", answer.unit_code): details.append(ValidationDetail(f"accepted_answers.{i}.unit_code", "format", "Invalid canonical unit code."))
             answers.append((answer.answer_value.strip().casefold(), answer.tolerance, answer.unit, answer.normalization_rule, answer.value_kind, answer.canonical_text, answer.canonical_decimal, answer.option_keys))
         if len(answers) != len(set(answers)): details.append(ValidationDetail("accepted_answers", "duplicate", "Допустимые ответы не должны повторяться."))
         option_keys = [x.option_key for x in command.choice_options]
@@ -1076,6 +1160,14 @@ class SaveMethodologyService:
             if policy.mode == "all_or_nothing" and policy.option_rules: details.append(ValidationDetail("choice_scoring_policy.option_rules", "not_allowed", "Для all_or_nothing правила не задаются."))
             if policy.mode == "per_option" and (set(rule_keys) != set(option_keys) or len(rule_keys) != len(set(rule_keys))): details.append(ValidationDetail("choice_scoring_policy.option_rules", "invalid_relation", "Per-option policy должна задавать одно правило для каждой опции."))
             if any(not x.weight.is_finite() for x in policy.option_rules): details.append(ValidationDetail("choice_scoring_policy.option_rules", "range", "Вес должен быть конечным Decimal."))
+            accepted_keys = {key for answer in command.accepted_answers if answer.value_kind == "choice_set" for key in answer.option_keys}
+            if policy.mode == "per_option":
+                correct = [rule for rule in policy.option_rules if rule.role == "correct"]
+                distractors = [rule for rule in policy.option_rules if rule.role == "distractor"]
+                if any(rule.role not in {"correct", "distractor"} for rule in policy.option_rules): details.append(ValidationDetail("choice_scoring_policy.option_rules", "invalid_role", "Role must be correct or distractor."))
+                if {rule.option_key for rule in correct} != accepted_keys: details.append(ValidationDetail("choice_scoring_policy.option_rules", "role_mismatch", "Accepted options must have role correct and all others distractor."))
+                if any(rule.weight <= 0 for rule in correct) or sum((rule.weight for rule in correct), Decimal(0)) != Decimal("1.000000"): details.append(ValidationDetail("choice_scoring_policy.option_rules", "invalid_weight_sum", "Positive correct weights must sum to 1.000000."))
+                if any(rule.weight >= 0 for rule in distractors): details.append(ValidationDetail("choice_scoring_policy.option_rules", "invalid_distractor_penalty", "Distractor weights must be negative penalties."))
         levels = [hint.level for hint in command.hints]
         for i, hint in enumerate(command.hints): text_required(hint.hint_text, f"hints.{i}.hint_text")
         if levels != list(range(1, len(levels) + 1)): details.append(ValidationDetail("hints", "sequence", "Уровни подсказок должны образовывать последовательность 1..N."))

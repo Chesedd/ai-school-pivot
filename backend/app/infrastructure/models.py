@@ -261,6 +261,7 @@ class ChoiceOptionRule(Base):
     policy_id: Mapped[UUID] = mapped_column(uuid_type)
     choice_option_id: Mapped[UUID] = mapped_column(uuid_type)
     task_version_id: Mapped[UUID] = mapped_column(uuid_type)
+    role: Mapped[str] = mapped_column(String(16))
     weight: Mapped[Decimal] = mapped_column(Numeric)
 
 

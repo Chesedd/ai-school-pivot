@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from dataclasses import replace
 from decimal import Decimal
 from types import TracebackType
 from uuid import UUID
@@ -11,7 +12,7 @@ from sqlalchemy import String, and_, bindparam, delete, func, select, update, te
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
-from app.application.content_bank import AcceptedAnswerDTO, ChoiceOptionDTO, ChoiceOptionRuleDTO, ChoiceScoringPolicyDTO, ActorContext, ArchiveResult, AuditEventDTO, AuditEventRecord, AuditPage, CatalogRecord, CatalogRef, ConflictError, CreateTaskCommand, DUPLICATE_CANDIDATE_THRESHOLD, DuplicateCandidate, DuplicateCandidateRecord, DuplicateQuery, EMPTY_METHODOLOGY, ExpectedSolutionDTO, HintDTO, LockedVersion, MethodologyDTO, RubricDTO, RubricItemDTO, SaveMethodologyCommand, SkillLinkDTO, TagRefDTO, TaskCard, TaskCardVersion, TaskDTO, TaskListItem, TaskListPage, TaskListQuery, TaskVersionDTO, TaskVersionSummary, TypicalErrorDTO, VersionState
+from app.application.content_bank import AcceptedAnswerDTO, ChoiceOptionDTO, ChoiceOptionRuleDTO, ChoiceScoringPolicyDTO, ActorContext, assess_automation_readiness, ArchiveResult, AuditEventDTO, AuditEventRecord, AuditPage, CatalogRecord, CatalogRef, ConflictError, CreateTaskCommand, DUPLICATE_CANDIDATE_THRESHOLD, DuplicateCandidate, DuplicateCandidateRecord, DuplicateQuery, EMPTY_METHODOLOGY, ExpectedSolutionDTO, HintDTO, LockedVersion, MethodologyDTO, RubricDTO, RubricItemDTO, SaveMethodologyCommand, SkillLinkDTO, TagRefDTO, TaskCard, TaskCardVersion, TaskDTO, TaskListItem, TaskListPage, TaskListQuery, TaskVersionDTO, TaskVersionSummary, TypicalErrorDTO, VersionState
 from app.infrastructure.models import AcceptedAnswer, AcceptedAnswerOption, ChoiceOption, ChoiceOptionRule, ChoiceScoringPolicy, AuditLog, FolderAuditLog, TaskFolder, ExpectedSolution, Grade, Hint, ImportPreview, Rubric, RubricItem, Skill, Subject, Subtopic, Tag, TagCategory, Task, TaskErrorLink, TaskSkillLink, TaskVersion, TaskVersionTag, Topic, TypicalError
 from app.application.folders import FolderSummaryDTO, FolderTreeNodeDTO, TaskLocationDTO
 from app.application.content_bank import ImportCatalogContext, ImportIssue, ImportPreviewRecord, ImportPreviewRow, ImportResolvedTag, ImportTagRecord, SkillLinkInput, VersionContentInput
@@ -274,7 +275,7 @@ class SQLAlchemyContentBankRepository:
         tag_map=await self._tags_for_versions([r[-1].id for r in rows])
         summaries = tuple(TaskVersionSummary(version.id, version.version_no, version.status, version.created_at, version.approved_at,tag_map.get(version.id,())) for *_, version in rows)
         approved = next((summary for summary in summaries if summary.approved_at is not None), None)
-        methodology = await self._get_methodology(latest.id)
+        methodology = await self._get_methodology(latest.id, latest.answer_format)
         return TaskCard(
             task.id, CatalogRef(subject.id, subject.name), CatalogRef(grade.id, grade.name),
             CatalogRef(topic.id, topic.name), CatalogRef(subtopic.id, subtopic.name) if subtopic else None,
@@ -319,7 +320,7 @@ class SQLAlchemyContentBankRepository:
             version.answer_format, version.created_at, version.created_by, version.approved_at, version.approved_by,
             task.archived_at, version.version_no == latest_no,
             tuple(SkillLinkDTO(link.id, skill.id, skill.name, link.weight, link.is_primary) for link, skill in links),
-            await self._get_methodology(version.id), classification_valid)
+            await self._get_methodology(version.id, version.answer_format), classification_valid)
 
     async def set_version_status(self, task_version_id: UUID, status: str, approved_at: datetime | None = None, approved_by: UUID | None = None) -> None:
         version = await self.session.get(TaskVersion, task_version_id)
@@ -371,7 +372,7 @@ class SQLAlchemyContentBankRepository:
         policy=await self.session.scalar(select(ChoiceScoringPolicy).options(selectinload(ChoiceScoringPolicy.option_rules)).where(ChoiceScoringPolicy.task_version_id==source.id))
         if policy:
             copied_policy=ChoiceScoringPolicy(task_version_id=target.id,mode=policy.mode,policy_version=policy.policy_version); self.session.add(copied_policy); await self.session.flush()
-            self.session.add_all([ChoiceOptionRule(policy_id=copied_policy.id,choice_option_id=option_map[r.choice_option_id],task_version_id=target.id,weight=r.weight) for r in policy.option_rules])
+            self.session.add_all([ChoiceOptionRule(policy_id=copied_policy.id,choice_option_id=option_map[r.choice_option_id],task_version_id=target.id,role=r.role,weight=r.weight) for r in policy.option_rules])
         errors = (await self.session.scalars(select(TaskErrorLink).where(TaskErrorLink.task_version_id == source.id))).all()
         self.session.add_all([TaskErrorLink(task_version_id=target.id, typical_error_id=x.typical_error_id, detection_hint=x.detection_hint) for x in errors])
         hints = (await self.session.scalars(select(Hint).where(Hint.task_version_id == source.id))).all()
@@ -440,7 +441,7 @@ class SQLAlchemyContentBankRepository:
             self.session.add_all([AcceptedAnswerOption(accepted_answer_id=answer.id,choice_option_id=option_by_key[k].id,task_version_id=version_id) for k in x.option_keys])
         if command.choice_scoring_policy:
             p=command.choice_scoring_policy; policy=ChoiceScoringPolicy(task_version_id=version_id,mode=p.mode,policy_version=p.policy_version); self.session.add(policy); await self.session.flush()
-            self.session.add_all([ChoiceOptionRule(policy_id=policy.id,choice_option_id=option_by_key[r.option_key].id,task_version_id=version_id,weight=r.weight) for r in p.option_rules])
+            self.session.add_all([ChoiceOptionRule(policy_id=policy.id,choice_option_id=option_by_key[r.option_key].id,task_version_id=version_id,role=r.role,weight=r.weight) for r in p.option_rules])
         for value in command.typical_errors:
             existing = await self.session.scalar(select(TypicalError).where(TypicalError.skill_id == value.skill_id, TypicalError.code == value.code.strip()))
             definition = (value.title.strip(), value.description.strip(), value.severity, value.remediation_hint)
@@ -456,7 +457,7 @@ class SQLAlchemyContentBankRepository:
         await self.session.flush()
         return await self._get_methodology(version_id)
 
-    async def _get_methodology(self, version_id: UUID) -> MethodologyDTO:
+    async def _get_methodology(self, version_id: UUID, answer_format: str | None = None) -> MethodologyDTO:
         solution = await self.session.scalar(select(ExpectedSolution).where(ExpectedSolution.task_version_id == version_id))
         rubric = await self.session.scalar(select(Rubric).options(selectinload(Rubric.items)).where(Rubric.task_version_id == version_id))
         options = (await self.session.scalars(select(ChoiceOption).where(ChoiceOption.task_version_id == version_id).order_by(ChoiceOption.order_index))).all()
@@ -466,16 +467,21 @@ class SQLAlchemyContentBankRepository:
         errors = (await self.session.execute(select(TaskErrorLink, TypicalError).join(TypicalError).where(TaskErrorLink.task_version_id == version_id).order_by(TaskErrorLink.id))).all()
         hints = (await self.session.scalars(select(Hint).where(Hint.task_version_id == version_id).order_by(Hint.level))).all()
         if not any((solution, rubric, answers, errors, hints, options, policy)):
-            return EMPTY_METHODOLOGY
-        return MethodologyDTO(
+            if answer_format is None:
+                answer_format = await self.session.scalar(select(TaskVersion.answer_format).where(TaskVersion.id == version_id))
+            return replace(EMPTY_METHODOLOGY, automation_readiness=assess_automation_readiness(answer_format, EMPTY_METHODOLOGY))
+        result = MethodologyDTO(
             ExpectedSolutionDTO(solution.id, solution.solution_text, solution.final_answer, tuple(solution.solution_steps_json)) if solution else None,
             RubricDTO(rubric.id, rubric.grading_mode, rubric.max_score, rubric.notes, tuple(RubricItemDTO(x.id, x.criterion, x.max_points, x.required, x.common_failure, x.order_index) for x in sorted(rubric.items, key=lambda x: x.order_index))) if rubric else None,
-            tuple(AcceptedAnswerDTO(x.id,x.answer_value,x.tolerance,x.unit,x.normalization_rule,x.value_kind,x.canonical_text,x.canonical_decimal,tuple(sorted(option_keys_by_id[l.choice_option_id] for l in x.option_links)),x.absolute_tolerance,x.relative_tolerance,x.unit_code,x.normalization_policy_code,x.normalization_policy_version) for x in answers),
+            tuple(AcceptedAnswerDTO(x.id,x.answer_value,x.tolerance,x.unit,x.normalization_rule,x.value_kind,x.canonical_text,x.canonical_decimal,tuple(sorted(option_keys_by_id[l.choice_option_id] for l in x.option_links)),x.absolute_tolerance,x.relative_tolerance,x.unit_code,x.normalization_policy_code,x.normalization_policy_version,tuple(sorted((l.choice_option_id for l in x.option_links), key=str))) for x in answers),
             tuple(TypicalErrorDTO(x.id, x.skill_id, x.code, x.title, x.description, x.severity, x.remediation_hint, link.detection_hint) for link, x in errors),
             tuple(HintDTO(x.id, x.level, x.hint_text) for x in hints),
             tuple(ChoiceOptionDTO(x.id,x.option_key,x.content,x.order_index) for x in options),
-            ChoiceScoringPolicyDTO(policy.mode,policy.policy_version,tuple(ChoiceOptionRuleDTO(option_keys_by_id[r.choice_option_id],r.weight) for r in policy.option_rules)) if policy else None,
+            ChoiceScoringPolicyDTO(policy.mode,policy.policy_version,tuple(ChoiceOptionRuleDTO(option_keys_by_id[r.choice_option_id],r.role,r.weight) for r in policy.option_rules)) if policy else None,
         )
+        if answer_format is None:
+            answer_format = await self.session.scalar(select(TaskVersion.answer_format).where(TaskVersion.id == version_id))
+        return replace(result, automation_readiness=assess_automation_readiness(answer_format, result))
 
     async def catalog(self, name: str) -> list[CatalogRecord]:
         if name == "subjects":
