@@ -68,3 +68,16 @@ async def test_tolerance_is_number_only_and_skill_must_be_linked():
     with pytest.raises(ApplicationError) as caught: await SaveMethodologyService(uow).save(cmd, ACTOR)
     assert {x.code for x in caught.value.details} == {"not_allowed", "invalid_relation"}
     assert not uow.committed
+
+async def test_typed_decimal_requires_allowlisted_policy():
+    cmd, skill = command(accepted_answers=(AcceptedAnswerInput("1e-3", None, None, None, "decimal", canonical_decimal=Decimal(".001"), normalization_policy_code="dynamic", normalization_policy_version=1),))
+    uow = Uow(LockedVersion(cmd.task_version_id, "number", "draft", True, frozenset({skill})))
+    with pytest.raises(ApplicationError) as caught: await SaveMethodologyService(uow).save(cmd, ACTOR)
+    assert any(x.field.endswith("normalization_policy_code") and x.code == "unsupported_policy" for x in caught.value.details)
+
+async def test_choice_answer_must_reference_own_catalogue():
+    from app.application.content_bank import ChoiceOptionInput
+    cmd, skill = command(accepted_answers=(AcceptedAnswerInput("legacy display",None,None,None,"choice_set",option_keys=("missing",)),), choice_options=(ChoiceOptionInput("a","A",0),))
+    uow=Uow(LockedVersion(cmd.task_version_id,"single_choice","draft",True,frozenset({skill})))
+    with pytest.raises(ApplicationError) as caught: await SaveMethodologyService(uow).save(cmd,ACTOR)
+    assert any(x.field.endswith("option_keys") for x in caught.value.details)

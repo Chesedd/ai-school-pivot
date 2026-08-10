@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from app.application.folders import CreateFolderCommand, RenameFolderCommand, MoveFolderCommand, DeleteFolderCommand, MoveTaskCommand, FolderService, GetFolderTreeService
-from app.application.content_bank import AcceptedAnswerInput, ActorContext, ApplicationError, ArchiveTaskService, CreateTaskCommand, CreateTaskService, CreateVersionCommand, CreateVersionService, DuplicateCheckService, DuplicateQuery, ExpectedSolutionInput, GetAuditService, GetTaskCardService, HintInput, ImportCommitService, ImportPreviewService, ImportRow, ListTasksService, RubricInput, RubricItemInput, SaveMethodologyCommand, SaveMethodologyService, SkillLinkInput, StatusCycleService, TaskListQuery, TypicalErrorInput, ValidationDetail, VersionContentInput
+from app.application.content_bank import AcceptedAnswerInput, ChoiceOptionInput, ChoiceOptionRuleInput, ChoiceScoringPolicyInput, ActorContext, ApplicationError, ArchiveTaskService, CreateTaskCommand, CreateTaskService, CreateVersionCommand, CreateVersionService, DuplicateCheckService, DuplicateQuery, ExpectedSolutionInput, GetAuditService, GetTaskCardService, HintInput, ImportCommitService, ImportPreviewService, ImportRow, ListTasksService, RubricInput, RubricItemInput, SaveMethodologyCommand, SaveMethodologyService, SkillLinkInput, StatusCycleService, TaskListQuery, TypicalErrorInput, ValidationDetail, VersionContentInput
 from app.config import Settings, get_settings
 from app.db.session import async_session_factory
 from app.infrastructure.repository import SQLAlchemyContentBankRepository, SQLAlchemyUnitOfWork
@@ -86,9 +86,11 @@ async def put_methodology(task_version_id: UUID, payload: MethodologyPutRequest,
         task_version_id,
         ExpectedSolutionInput(expected.solution_text, expected.final_answer, tuple(expected.solution_steps)) if expected else None,
         RubricInput(rubric.grading_mode, rubric.notes, tuple(RubricItemInput(x.criterion, x.max_points, x.required, x.common_failure) for x in rubric.items)) if rubric else None,
-        tuple(AcceptedAnswerInput(x.answer_value, x.tolerance, x.unit, x.normalization_rule) for x in payload.accepted_answers),
+        tuple(AcceptedAnswerInput(x.answer_value, x.tolerance, x.unit, x.normalization_rule, x.value_kind, x.canonical_text, x.canonical_decimal, tuple(x.option_keys), x.absolute_tolerance, x.relative_tolerance, x.unit_code, x.normalization_policy_code, x.normalization_policy_version) for x in payload.accepted_answers),
         tuple(TypicalErrorInput(x.skill_id, x.code, x.title, x.description, x.severity, x.remediation_hint, x.detection_hint) for x in payload.typical_errors),
         tuple(HintInput(x.level, x.hint_text) for x in payload.hints),
+        tuple(ChoiceOptionInput(x.option_key, x.content, x.order_index) for x in payload.choice_options),
+        ChoiceScoringPolicyInput(payload.choice_scoring_policy.mode, payload.choice_scoring_policy.policy_version, tuple(ChoiceOptionRuleInput(x.option_key, x.weight) for x in payload.choice_scoring_policy.option_rules)) if payload.choice_scoring_policy else None,
     )
     return await SaveMethodologyService(SQLAlchemyUnitOfWork(async_session_factory)).save(command, ActorContext(settings.content_bank_dev_actor_id))
 
