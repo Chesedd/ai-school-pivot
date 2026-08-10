@@ -1,5 +1,7 @@
 # Документация
 
+- [Проверка Checking intake Phase 4.2](checking-intake-phase42-verification.md) — детерминированный исторический snapshot, хеши, транзакция и privacy boundary.
+
 - [Проверка Checking DB Foundation](checking-engine-db-foundation-verification.md) —
   схема, PostgreSQL invariants, migration lifecycle и локальный gate Phase 4.1.
 - [Checking Engine v1: контракт и gap audit](checking-engine-v1-contract.md) —
