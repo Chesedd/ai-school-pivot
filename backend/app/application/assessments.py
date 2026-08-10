@@ -106,6 +106,16 @@ class PublicationRecord:
     assessment: AssessmentRecord
     assignment: AssignmentRecord
 
+@dataclass(frozen=True)
+class ClassGroupSummary:
+    id: UUID; name: str; active_student_count: int
+
+@dataclass(frozen=True)
+class AssignmentSummary:
+    id: UUID; assessment_id: UUID; class_group_id: UUID; class_group_name: str
+    status: str; start_at: datetime; due_at: datetime; max_attempts: int
+    participant_count: int; created_at: datetime; closed_at: datetime | None
+
 
 @dataclass(frozen=True)
 class HistoricalTaskVersion:
@@ -141,6 +151,8 @@ class AssessmentRepository(Protocol):
     async def update_item_points(self, variant_id: UUID, item_id: UUID, points: Decimal): ...
     async def touch(self, assessment_id: UUID): ...
     async def append_audit(self, assessment_id: UUID, event: str, actor_id: UUID, details: dict[str, object]): ...
+    async def list_class_groups(self, offset: int, limit: int): ...
+    async def list_assignments(self, assessment_id: UUID, offset: int, limit: int): ...
 
 
 class AssessmentUnitOfWork(Protocol):
@@ -172,6 +184,16 @@ class AssessmentService:
     async def list(self, status: str | None, offset: int, limit: int, actor: ActorContext):
         async with self.uow:
             return await self.uow.repository.list(status, offset, limit)
+
+    async def list_class_groups(self, offset: int, limit: int, actor: ActorContext):
+        async with self.uow:
+            return await self.uow.repository.list_class_groups(offset, limit)
+
+    async def list_assignments(self, assessment_id: UUID, offset: int, limit: int, actor: ActorContext):
+        async with self.uow:
+            if await self.uow.repository.get(assessment_id) is None:
+                raise AssessmentError("assessment_not_found", "Работа не найдена.", 404)
+            return await self.uow.repository.list_assignments(assessment_id, offset, limit)
 
     async def get(self, assessment_id: UUID, actor: ActorContext):
         async with self.uow:

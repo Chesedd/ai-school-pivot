@@ -121,6 +121,20 @@ class AssessmentListPage(StrictModel):
     offset: int
     limit: int
 
+class AssessmentClassGroupSummary(StrictModel):
+    id: UUID; name: str; active_student_count: int
+
+class AssessmentClassGroupPage(StrictModel):
+    items: list[AssessmentClassGroupSummary]; total: int; offset: int; limit: int
+
+class TeacherAssignmentSummary(StrictModel):
+    id: UUID; assessment_id: UUID; class_group_id: UUID; class_group_name: str
+    status: Literal["open", "closed"]; start_at: datetime; due_at: datetime; max_attempts: int
+    participant_count: int; created_at: datetime; closed_at: datetime | None
+
+class TeacherAssignmentPage(StrictModel):
+    items: list[TeacherAssignmentSummary]; total: int; offset: int; limit: int
+
 
 class PublishAssessmentRequest(StrictModel):
     class_group_id: UUID

@@ -41,6 +41,9 @@ class StudentAssignmentSummary(StrictModel):
 class StudentAssignmentPage(StrictModel):
     items: list[StudentAssignmentSummary]; total: int; offset: int; limit: int
 
+class SubmittedAttemptSummary(StrictModel):
+    id: UUID; attempt_no: int; submitted_at: datetime
+
 class StudentAssignmentDetail(StudentAssignmentSummary):
     description: str | None; participant_id: UUID; current_draft_attempt_id: UUID | None
-    submitted_attempt_count: int
+    submitted_attempt_count: int; submitted_attempts: list[SubmittedAttemptSummary]

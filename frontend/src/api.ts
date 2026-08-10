@@ -81,10 +81,21 @@ export const deleteAssessmentItem=(id:string,variantId:string,itemId:string):Pro
 export const reorderAssessmentItems=(id:string,variantId:string,item_ids:string[],expected_updated_at:string):Promise<AssessmentVariant>=>request(`${assessmentRoot}/${enc(id)}/variants/${enc(variantId)}/item-order`,body("PUT",{item_ids,expected_updated_at}));
 export const patchAssessmentItem=(id:string,variantId:string,itemId:string,points:string,expected_updated_at:string):Promise<AssessmentItem>=>request(`${assessmentRoot}/${enc(id)}/variants/${enc(variantId)}/items/${enc(itemId)}`,body("PATCH",{points,expected_updated_at}));
 export const searchApprovedTasks=(params:URLSearchParams,signal?:AbortSignal):Promise<ContentBankTaskPage>=>{const approved=new URLSearchParams(params);approved.set("status","approved");return request(`/api/content-bank/tasks?${approved}`,{signal})};
+export type AssessmentClassGroupSummary={id:string;name:string;active_student_count:number};
+export type AssessmentClassGroupPage={items:AssessmentClassGroupSummary[];total:number;offset:number;limit:number};
+export type TeacherAssignmentSummary={id:string;assessment_id:string;class_group_id:string;class_group_name:string;status:"open"|"closed";start_at:string;due_at:string;max_attempts:number;participant_count:number;created_at:string;closed_at:string|null};
+export type TeacherAssignmentPage={items:TeacherAssignmentSummary[];total:number;offset:number;limit:number};
+export type TeacherAssignment=Omit<TeacherAssignmentSummary,"class_group_name">&{participant_ids:string[]};
+export type PublicationResponse={assessment:Assessment;assignment:TeacherAssignment};
+export const listAssessmentClassGroups=(offset=0,limit=20,signal?:AbortSignal):Promise<AssessmentClassGroupPage>=>request(`/api/assessment-core/class-groups?${new URLSearchParams({offset:String(offset),limit:String(limit)})}`,{signal});
+export const listAssessmentAssignments=(id:string,offset=0,limit=20,signal?:AbortSignal):Promise<TeacherAssignmentPage>=>request(`${assessmentRoot}/${enc(id)}/assignments?${new URLSearchParams({offset:String(offset),limit:String(limit)})}`,{signal});
+export const publishAndAssignAssessment=(id:string,value:{class_group_id:string;start_at:string;due_at:string;max_attempts:number}):Promise<PublicationResponse>=>request(`${assessmentRoot}/${enc(id)}/publish-and-assign`,body("POST",value));
+export const getTeacherAssignment=(id:string,signal?:AbortSignal):Promise<TeacherAssignment>=>request(`/api/assessment-core/assignments/${enc(id)}`,{signal});
+export const closeTeacherAssignment=(id:string):Promise<TeacherAssignment>=>request(`/api/assessment-core/assignments/${enc(id)}/close`,body("POST",{}));
 
 export type StudentAssignmentSummary={assignment_id:string;assessment_id:string;title:string;status:"open"|"closed";start_at:string;due_at:string;max_attempts:number;assigned_variant_id:string|null;attempt_count:number};
 export type StudentAssignmentPage={items:StudentAssignmentSummary[];total:number;offset:number;limit:number};
-export type StudentAssignmentDetail=StudentAssignmentSummary&{description:string|null;participant_id:string;current_draft_attempt_id:string|null;submitted_attempt_count:number};
+export type StudentAssignmentDetail=StudentAssignmentSummary&{description:string|null;participant_id:string;current_draft_attempt_id:string|null;submitted_attempt_count:number;submitted_attempts:{id:string;attempt_no:number;submitted_at:string}[]};
 export type StudentExecutionItem={id:string;task_version_id:string;position:number;points:string;title:string|null;statement:string;task_type:string;answer_format:"single_choice"|"multiple_choice"|"short_text"|"number"|"expression"|"long_text"};
 export type StudentRawAnswer=string|string[]|null|boolean|number|Record<string,unknown>;
 export type StudentAnswer={item_id:string;raw_answer:StudentRawAnswer;normalized_answer:unknown;created_at:string;updated_at:string};

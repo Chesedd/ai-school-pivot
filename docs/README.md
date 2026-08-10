@@ -1,5 +1,7 @@
 # Документация
 
+- [Финальная приёмка Assessment Core Phase 3](phase3-assessment-core-acceptance.md).
+
 - [Пользовательский гайд Content Bank](content-bank-user-guide.md) —
   возможности интерфейса, ограничения, локальный запуск и безопасная проверка.
 - [Контракты Content Bank](content-bank-contracts.md).

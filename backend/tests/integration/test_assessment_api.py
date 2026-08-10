@@ -1,7 +1,7 @@
 """Real PostgreSQL API, atomicity, CAS, and locking regression tests."""
 import asyncio
 import os
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -60,6 +60,60 @@ async def create(client, title="Работа"):
     return response.json()
 
 
+async def test_teacher_read_catalogues_are_ordered_scoped_and_private(client, database):
+    engine, factory = database
+    actor_id = uuid4()
+    group_a_id, group_a2_id, group_b_id, archived_id = sorted([uuid4(), uuid4(), uuid4(), uuid4()])
+    assessment_id, foreign_assessment_id = uuid4(), uuid4()
+    first_assignment_id, second_assignment_id, foreign_assignment_id = uuid4(), uuid4(), uuid4()
+    now = datetime.now(timezone.utc)
+    async with engine.begin() as connection:
+        await connection.execute(text("INSERT INTO class_groups(id,name,external_ref,created_by,archived_at) VALUES "
+            "(:a,'A','private-a',:actor,NULL),(:a2,'A','private-a2',:actor,NULL),"
+            "(:b,'B','private-b',:actor,NULL),(:archived,'0 archived','private-x',:actor,clock_timestamp())"),
+            {"a": group_a_id, "a2": group_a2_id, "b": group_b_id, "archived": archived_id, "actor": actor_id})
+        students = [{"id": uuid4(), "group": group_a_id, "name": "Active A", "archived": None},
+                    {"id": uuid4(), "group": group_a_id, "name": "Archived A", "archived": now},
+                    {"id": uuid4(), "group": group_b_id, "name": "Active B1", "archived": None},
+                    {"id": uuid4(), "group": group_b_id, "name": "Active B2", "archived": None}]
+        for student in students:
+            await connection.execute(text("INSERT INTO students(id,class_group_id,display_name,archived_at) "
+                "VALUES (:id,:group,:name,:archived)"), student)
+        await connection.execute(text("INSERT INTO assessments(id,title,created_by) VALUES "
+            "(:assessment,'Own',:actor),(:foreign,'Foreign',:actor)"),
+            {"assessment": assessment_id, "foreign": foreign_assessment_id, "actor": actor_id})
+        for assignment_id, target_assessment, created_at in (
+            (second_assignment_id, assessment_id, now + timedelta(seconds=1)),
+            (first_assignment_id, assessment_id, now),
+            (foreign_assignment_id, foreign_assessment_id, now)):
+            await connection.execute(text("INSERT INTO assignments(id,assessment_id,class_group_id,start_at,due_at,"
+                "created_at,created_by) VALUES (:id,:assessment,:group,:start,:due,:created,:actor)"),
+                {"id": assignment_id, "assessment": target_assessment, "group": group_a_id,
+                 "start": now, "due": now + timedelta(days=1), "created": created_at, "actor": actor_id})
+        await connection.execute(text("INSERT INTO assignment_participants(assignment_id,student_id) VALUES "
+            "(:first,:student),(:second,:student)"),
+            {"first": first_assignment_id, "second": second_assignment_id, "student": students[0]["id"]})
+
+    groups = (await client.get("/api/assessment-core/class-groups?offset=0&limit=20")).json()
+    assert [(row["name"], UUID(row["id"])) for row in groups["items"]] == [
+        ("A", group_a_id), ("A", group_a2_id), ("B", group_b_id)]
+    assert [row["active_student_count"] for row in groups["items"]] == [1, 0, 2]
+    assert str(archived_id) not in str(groups)
+    for row in groups["items"]:
+        assert set(row) == {"id", "name", "active_student_count"}
+        assert "external_ref" not in row and "students" not in row
+
+    assignments = (await client.get(
+        f"/api/assessment-core/assessments/{assessment_id}/assignments?offset=0&limit=20")).json()
+    assert [row["id"] for row in assignments["items"]] == [str(first_assignment_id), str(second_assignment_id)]
+    assert all(row["assessment_id"] == str(assessment_id) for row in assignments["items"])
+    assert str(foreign_assignment_id) not in str(assignments)
+    assert all(row["class_group_name"] == "A" and row["participant_count"] == 1
+               for row in assignments["items"])
+    for row in assignments["items"]:
+        assert "participant_ids" not in row and "answers" not in row
+
+
 async def content_version(engine, status="approved", archived=False):
     values = {key: uuid4() for key in ("actor", "subject", "grade", "topic", "task", "version")}
     async with engine.begin() as connection:
@@ -100,6 +154,10 @@ async def test_publish_assignment_snapshot_get_close_and_no_partial_failures(cli
         group_id, active_id, second_active_id = group.id, active.id, second_active.id
     payload = {"class_group_id": str(group_id), "start_at": "2026-08-01T09:00:00Z",
                "due_at": "2099-09-01T10:00:00Z", "max_attempts": 2}
+    groups = await client.get("/api/assessment-core/class-groups?offset=0&limit=20")
+    assert groups.status_code == 200
+    assert groups.json()["items"] == [{"id": str(group_id), "name": "9А", "active_student_count": 2}]
+    assert not ({"external_ref", "students", "participant_ids"} & groups.json()["items"][0].keys())
     published = await client.post(
         f"/api/assessment-core/assessments/{assessment['id']}/publish-and-assign", json=payload)
     assert published.status_code == 201
@@ -108,6 +166,14 @@ async def test_publish_assignment_snapshot_get_close_and_no_partial_failures(cli
     assert body["assessment"]["status"] == "published"
     assert body["assignment"]["participant_count"] == 2
     assert body["assignment"]["participant_ids"] == sorted([str(active_id), str(second_active_id)])
+    discovered = await client.get(f"/api/assessment-core/assessments/{assessment['id']}/assignments")
+    assert discovered.status_code == 200
+    assert discovered.json()["items"][0] == {
+        "id": assignment_id, "assessment_id": assessment["id"], "class_group_id": str(group_id),
+        "class_group_name": "9А", "status": "open", "start_at": "2026-08-01T09:00:00Z",
+        "due_at": "2099-09-01T10:00:00Z", "max_attempts": 2, "participant_count": 2,
+        "created_at": body["assignment"]["created_at"], "closed_at": None}
+    assert "participant_ids" not in discovered.json()["items"][0]
     async with factory() as session:
         participant = await session.scalar(select(AssignmentParticipant).where(
             AssignmentParticipant.assignment_id == UUID(assignment_id)))
@@ -123,6 +189,7 @@ async def test_publish_assignment_snapshot_get_close_and_no_partial_failures(cli
     assert duplicate.status_code == 409 and duplicate.json()["error"]["code"] == "assessment_immutable"
     closed = await client.post(f"/api/assessment-core/assignments/{assignment_id}/close", json={})
     assert closed.status_code == 200 and closed.json()["status"] == "closed"
+    assert (await client.get(f"/api/assessment-core/assessments/{assessment['id']}/assignments")).json()["items"][0]["status"] == "closed"
     repeated = await client.post(f"/api/assessment-core/assignments/{assignment_id}/close", json={})
     assert repeated.status_code == 409 and repeated.json()["error"]["code"] == "invalid_status_transition"
     async with engine.connect() as connection:

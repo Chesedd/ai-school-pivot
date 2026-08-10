@@ -182,6 +182,44 @@ async def test_student_reads_snapshot_ownership_and_spoofing(client, database):
     assert (await client.get(f"/api/assessment-core/student/assignments/{ids['assignment']}")).status_code == 200
 
 
+async def test_submitted_attempt_history_is_owned_sorted_bounded_and_answer_free(client, database):
+    engine, _ = database
+    ids = await scenario(database, max_attempts=3)
+    async with engine.begin() as connection:
+        timestamps = (await connection.execute(text(
+            "SELECT clock_timestamp()-interval '3 hours' AS first, "
+            "clock_timestamp()-interval '2 hours' AS draft, clock_timestamp()-interval '1 hour' AS third"))).mappings().one()
+        submission_ids = {"first": uuid4(), "draft": uuid4(), "third": uuid4(), "foreign": uuid4()}
+        await connection.execute(text("INSERT INTO student_submissions"
+            "(id,assignment_participant_id,attempt_no,status,started_at,submitted_at) VALUES "
+            "(:first,:participant,1,'submitted',:first_at,:first_at),"
+            "(:draft,:participant,2,'draft',:draft_at,NULL),"
+            "(:third,:participant,3,'submitted',:third_at,:third_at),"
+            "(:foreign,:foreign_participant,1,'submitted',:first_at,:first_at)"),
+            {**submission_ids, **ids, "first_at": timestamps["first"], "draft_at": timestamps["draft"],
+             "third_at": timestamps["third"]})
+        await connection.execute(text("INSERT INTO student_answers"
+            "(submission_id,assessment_item_id,raw_answer,normalized_answer) "
+            "VALUES (:submission,:item,CAST(:raw AS jsonb),CAST(:normalized AS jsonb))"),
+            {"submission": submission_ids["first"], "item": ids["item_0"],
+             "raw": '"secret answer"', "normalized": '{"text":"secret answer"}'})
+    detail = await client.get(f"/api/assessment-core/student/assignments/{ids['assignment']}")
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body["submitted_attempt_count"] == len(body["submitted_attempts"]) == 2
+    assert [row["id"] for row in body["submitted_attempts"]] == [
+        str(submission_ids["first"]), str(submission_ids["third"])]
+    assert [row["attempt_no"] for row in body["submitted_attempts"]] == [1, 3]
+    assert [row["submitted_at"] for row in body["submitted_attempts"]] == [
+        timestamps["first"].isoformat().replace("+00:00", "Z"),
+        timestamps["third"].isoformat().replace("+00:00", "Z")]
+    assert body["current_draft_attempt_id"] == str(submission_ids["draft"])
+    serialized = str(body["submitted_attempts"])
+    assert str(submission_ids["draft"]) not in serialized
+    assert str(submission_ids["foreign"]) not in serialized
+    assert "answers" not in serialized and "secret answer" not in serialized
+
+
 async def test_start_new_replay_resume_db_contract(client, database):
     _, factory = database; ids = await scenario(database)
     created = await start(client, ids)
