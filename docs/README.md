@@ -1,5 +1,9 @@
 # Документация
 
+- [Checking Engine v1: контракт и gap audit](checking-engine-v1-contract.md) —
+  решения Phase 4.0 для intake, routing/checkers, результатов, persistence,
+  provider boundary, confidence и следующих implementation prompts; production
+  Checking Engine ещё не реализован.
 - [Финальная приёмка Assessment Core Phase 3](phase3-assessment-core-acceptance.md).
 
 - [Пользовательский гайд Content Bank](content-bank-user-guide.md) —
@@ -13,7 +17,7 @@
   схема, API, импорт, поиск, аудит и границы pilot-доступа.
 - [Финальная техническая приёмка Content Bank](content-bank-stage2-acceptance.md).
 - [Контракт иерархии папок заданий](content-bank-folder-hierarchy-contract.md) —
-  архитектура спроектирована contract-first, но папки ещё не реализованы.
+  исходный contract-first дизайн; backend и frontend папок уже реализованы.
 
 * [Проверка backend иерархии папок](content-bank-folder-hierarchy-backend-verification.md)
 
