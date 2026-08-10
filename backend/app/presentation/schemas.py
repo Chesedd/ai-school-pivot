@@ -223,6 +223,27 @@ class AcceptedAnswerRequest(StrictRequest):
     tolerance: Decimal | None = None
     unit: str | None = None
     normalization_rule: str | None = None
+    value_kind: Literal["legacy_untyped","text","decimal","expression","choice_set"] = "legacy_untyped"
+    canonical_text: str | None = None
+    canonical_decimal: Decimal | None = None
+    option_keys: list[str] = []
+    absolute_tolerance: Decimal | None = None
+    relative_tolerance: Decimal | None = None
+    unit_code: str | None = None
+    normalization_policy_code: str | None = None
+    normalization_policy_version: int | None = None
+
+class ChoiceOptionRequest(StrictRequest):
+    option_key: str
+    content: str
+    order_index: int
+class ChoiceOptionRuleRequest(StrictRequest):
+    option_key: str
+    weight: Decimal
+class ChoiceScoringPolicyRequest(StrictRequest):
+    mode: Literal["all_or_nothing","per_option"]
+    policy_version: int = 1
+    option_rules: list[ChoiceOptionRuleRequest] = []
 
 class TypicalErrorRequest(StrictRequest):
     skill_id: UUID
@@ -243,6 +264,8 @@ class MethodologyPutRequest(StrictRequest):
     accepted_answers: list[AcceptedAnswerRequest]
     typical_errors: list[TypicalErrorRequest]
     hints: list[HintRequest]
+    choice_options: list[ChoiceOptionRequest] = []
+    choice_scoring_policy: ChoiceScoringPolicyRequest | None = None
 
 class ExpectedSolutionResponse(BaseModel):
     id: UUID
@@ -271,6 +294,28 @@ class AcceptedAnswerResponse(BaseModel):
     tolerance: Decimal | None
     unit: str | None
     normalization_rule: str | None
+    value_kind: str
+    canonical_text: str | None
+    canonical_decimal: Decimal | None
+    option_keys: list[str]
+    absolute_tolerance: Decimal | None
+    relative_tolerance: Decimal | None
+    unit_code: str | None
+    normalization_policy_code: str | None
+    normalization_policy_version: int | None
+
+class ChoiceOptionResponse(BaseModel):
+    id: UUID
+    option_key: str
+    content: str
+    order_index: int
+class ChoiceOptionRuleResponse(BaseModel):
+    option_key: str
+    weight: Decimal
+class ChoiceScoringPolicyResponse(BaseModel):
+    mode: str
+    policy_version: int
+    option_rules: list[ChoiceOptionRuleResponse]
 
 class TypicalErrorResponse(BaseModel):
     id: UUID
@@ -293,6 +338,8 @@ class MethodologyResponse(BaseModel):
     accepted_answers: list[AcceptedAnswerResponse]
     typical_errors: list[TypicalErrorResponse]
     hints: list[HintResponse]
+    choice_options: list[ChoiceOptionResponse] = []
+    choice_scoring_policy: ChoiceScoringPolicyResponse | None = None
 
 
 class TaskCardResponse(BaseModel):
