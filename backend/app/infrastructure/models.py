@@ -159,6 +159,8 @@ class TaskVersion(IdMixin, Base):
     expected_solution: Mapped[ExpectedSolution | None] = relationship(back_populates="task_version", cascade="all, delete-orphan", uselist=False)
     rubric: Mapped[Rubric | None] = relationship(back_populates="task_version", cascade="all, delete-orphan", uselist=False)
     accepted_answers: Mapped[list[AcceptedAnswer]] = relationship(back_populates="task_version", cascade="all, delete-orphan")
+    choice_options: Mapped[list[ChoiceOption]] = relationship(back_populates="task_version", cascade="all, delete-orphan")
+    choice_scoring_policy: Mapped[ChoiceScoringPolicy | None] = relationship(back_populates="task_version", cascade="all, delete-orphan", uselist=False)
     error_links: Mapped[list[TaskErrorLink]] = relationship(back_populates="task_version", cascade="all, delete-orphan")
     hints: Mapped[list[Hint]] = relationship(back_populates="task_version", cascade="all, delete-orphan")
     tag_links: Mapped[list[TaskVersionTag]] = relationship(back_populates="task_version", cascade="all, delete-orphan")
@@ -210,13 +212,57 @@ class RubricItem(IdMixin, Base):
 
 class AcceptedAnswer(IdMixin, Base):
     __tablename__ = "accepted_answers"
-    __table_args__ = (CheckConstraint("tolerance IS NULL OR tolerance >= 0", name="ck_accepted_answers_tolerance_nonnegative"), Index("ix_accepted_answers_task_version_id", "task_version_id"))
+    __table_args__ = (CheckConstraint("tolerance IS NULL OR tolerance >= 0", name="ck_accepted_answers_tolerance_nonnegative"), UniqueConstraint("id", "task_version_id", name="uq_accepted_answers_id_version"), Index("ix_accepted_answers_task_version_id", "task_version_id"))
     task_version_id: Mapped[UUID] = mapped_column(ForeignKey("task_versions.id", ondelete="CASCADE", name="fk_accepted_answers_task_version"))
     answer_value: Mapped[str] = mapped_column(Text)
     tolerance: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     unit: Mapped[str | None] = mapped_column(Text, nullable=True)
     normalization_rule: Mapped[str | None] = mapped_column(Text, nullable=True)
+    value_kind: Mapped[str] = mapped_column(String(32), server_default=text("'legacy_untyped'"))
+    canonical_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    canonical_decimal: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    absolute_tolerance: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    relative_tolerance: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    unit_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    normalization_policy_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    normalization_policy_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     task_version: Mapped[TaskVersion] = relationship(back_populates="accepted_answers")
+    option_links: Mapped[list[AcceptedAnswerOption]] = relationship(back_populates="accepted_answer", cascade="all, delete-orphan")
+
+class ChoiceOption(IdMixin, Base):
+    __tablename__ = "choice_options"
+    __table_args__ = (UniqueConstraint("task_version_id", "option_key", name="uq_choice_options_version_key"), UniqueConstraint("task_version_id", "order_index", name="uq_choice_options_version_order"), UniqueConstraint("id", "task_version_id", name="uq_choice_options_id_version"), CheckConstraint("order_index >= 0", name="ck_choice_options_order_nonnegative"), Index("ix_choice_options_version_order", "task_version_id", "order_index"))
+    task_version_id: Mapped[UUID] = mapped_column(ForeignKey("task_versions.id", ondelete="CASCADE", onupdate="RESTRICT"))
+    option_key: Mapped[str] = mapped_column(String(64))
+    content: Mapped[str] = mapped_column(Text)
+    order_index: Mapped[int] = mapped_column(Integer)
+    task_version: Mapped[TaskVersion] = relationship(back_populates="choice_options")
+
+class AcceptedAnswerOption(Base):
+    __tablename__ = "accepted_answer_options"
+    __table_args__ = (PrimaryKeyConstraint("accepted_answer_id", "choice_option_id"), ForeignKeyConstraint(["accepted_answer_id", "task_version_id"], ["accepted_answers.id", "accepted_answers.task_version_id"], ondelete="CASCADE", onupdate="RESTRICT"), ForeignKeyConstraint(["choice_option_id", "task_version_id"], ["choice_options.id", "choice_options.task_version_id"], ondelete="CASCADE", onupdate="RESTRICT"))
+    accepted_answer_id: Mapped[UUID] = mapped_column(uuid_type)
+    choice_option_id: Mapped[UUID] = mapped_column(uuid_type)
+    task_version_id: Mapped[UUID] = mapped_column(uuid_type)
+    accepted_answer: Mapped[AcceptedAnswer] = relationship(back_populates="option_links", foreign_keys=[accepted_answer_id, task_version_id])
+
+class ChoiceScoringPolicy(IdMixin, Base):
+    __tablename__ = "choice_scoring_policies"
+    __table_args__ = (UniqueConstraint("task_version_id", name="uq_choice_scoring_policy_version"), UniqueConstraint("id", "task_version_id", name="uq_choice_scoring_policy_id_version"))
+    task_version_id: Mapped[UUID] = mapped_column(ForeignKey("task_versions.id", ondelete="CASCADE", onupdate="RESTRICT"))
+    mode: Mapped[str] = mapped_column(String(32))
+    policy_version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
+    task_version: Mapped[TaskVersion] = relationship(back_populates="choice_scoring_policy")
+    option_rules: Mapped[list[ChoiceOptionRule]] = relationship(cascade="all, delete-orphan")
+
+class ChoiceOptionRule(Base):
+    __tablename__ = "choice_option_rules"
+    __table_args__ = (PrimaryKeyConstraint("policy_id", "choice_option_id"), ForeignKeyConstraint(["policy_id", "task_version_id"], ["choice_scoring_policies.id", "choice_scoring_policies.task_version_id"], ondelete="CASCADE", onupdate="RESTRICT"), ForeignKeyConstraint(["choice_option_id", "task_version_id"], ["choice_options.id", "choice_options.task_version_id"], ondelete="CASCADE", onupdate="RESTRICT"))
+    policy_id: Mapped[UUID] = mapped_column(uuid_type)
+    choice_option_id: Mapped[UUID] = mapped_column(uuid_type)
+    task_version_id: Mapped[UUID] = mapped_column(uuid_type)
+    role: Mapped[str] = mapped_column(String(16))
+    weight: Mapped[Decimal] = mapped_column(Numeric)
 
 
 class TypicalError(IdMixin, Base):
