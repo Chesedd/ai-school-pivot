@@ -5,10 +5,19 @@ from decimal import Decimal
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 
 Difficulty = Annotated[int, Field(strict=True, ge=1, le=100)]
+
+
+def plain_decimal(value: Decimal | None) -> str | None:
+    """Serialize exact Decimal values without exponent notation or signed zero."""
+    if value is None:
+        return None
+    if value == 0:
+        return "0"
+    return format(value, "f")
 
 
 class StrictRequest(BaseModel):
@@ -223,6 +232,28 @@ class AcceptedAnswerRequest(StrictRequest):
     tolerance: Decimal | None = None
     unit: str | None = None
     normalization_rule: str | None = None
+    value_kind: Literal["legacy_untyped","text","decimal","expression","choice_set"] = "legacy_untyped"
+    canonical_text: str | None = None
+    canonical_decimal: Decimal | None = None
+    option_keys: list[str] = []
+    absolute_tolerance: Decimal | None = None
+    relative_tolerance: Decimal | None = None
+    unit_code: str | None = None
+    normalization_policy_code: str | None = None
+    normalization_policy_version: int | None = None
+
+class ChoiceOptionRequest(StrictRequest):
+    option_key: str
+    content: str
+    order_index: int
+class ChoiceOptionRuleRequest(StrictRequest):
+    option_key: str
+    role: Literal["correct", "distractor"]
+    weight: Decimal
+class ChoiceScoringPolicyRequest(StrictRequest):
+    mode: Literal["all_or_nothing","per_option"]
+    policy_version: int = 1
+    option_rules: list[ChoiceOptionRuleRequest] = []
 
 class TypicalErrorRequest(StrictRequest):
     skill_id: UUID
@@ -243,6 +274,8 @@ class MethodologyPutRequest(StrictRequest):
     accepted_answers: list[AcceptedAnswerRequest]
     typical_errors: list[TypicalErrorRequest]
     hints: list[HintRequest]
+    choice_options: list[ChoiceOptionRequest] = []
+    choice_scoring_policy: ChoiceScoringPolicyRequest | None = None
 
 class ExpectedSolutionResponse(BaseModel):
     id: UUID
@@ -258,6 +291,10 @@ class RubricItemResponse(BaseModel):
     common_failure: str | None
     order_index: int
 
+    @field_serializer("max_points", when_used="json")
+    def serialize_max_points(self, value: Decimal) -> str:
+        return plain_decimal(value)
+
 class RubricResponse(BaseModel):
     id: UUID
     grading_mode: str
@@ -265,12 +302,63 @@ class RubricResponse(BaseModel):
     notes: str | None
     items: list[RubricItemResponse]
 
+    @field_serializer("max_score", when_used="json")
+    def serialize_max_score(self, value: Decimal) -> str:
+        return plain_decimal(value)
+
 class AcceptedAnswerResponse(BaseModel):
     id: UUID
     answer_value: str
     tolerance: Decimal | None
     unit: str | None
     normalization_rule: str | None
+    value_kind: str
+    canonical_text: str | None
+    canonical_decimal: Decimal | None
+    option_keys: list[str]
+    option_ids: list[UUID]
+    absolute_tolerance: Decimal | None
+    relative_tolerance: Decimal | None
+    unit_code: str | None
+    normalization_policy_code: str | None
+    normalization_policy_version: int | None
+
+    @field_serializer(
+        "tolerance", "canonical_decimal", "absolute_tolerance", "relative_tolerance",
+        when_used="json",
+    )
+    def serialize_decimal_fields(self, value: Decimal | None) -> str | None:
+        return plain_decimal(value)
+
+class ChoiceOptionResponse(BaseModel):
+    id: UUID
+    option_key: str
+    content: str
+    order_index: int
+class ChoiceOptionRuleResponse(BaseModel):
+    option_key: str
+    role: str
+    weight: Decimal
+
+    @field_serializer("weight", when_used="json")
+    def serialize_weight(self, value: Decimal) -> str:
+        return plain_decimal(value)
+class ChoiceScoringPolicyResponse(BaseModel):
+    mode: str
+    policy_version: int
+    option_rules: list[ChoiceOptionRuleResponse]
+
+class ReadinessIssueResponse(BaseModel):
+    field: str
+    code: str
+    message: str
+
+class AutomationReadinessResponse(BaseModel):
+    ready: bool
+    checker_candidate: str
+    contract_version: str
+    reason_codes: list[str]
+    issues: list[ReadinessIssueResponse]
 
 class TypicalErrorResponse(BaseModel):
     id: UUID
@@ -293,6 +381,9 @@ class MethodologyResponse(BaseModel):
     accepted_answers: list[AcceptedAnswerResponse]
     typical_errors: list[TypicalErrorResponse]
     hints: list[HintResponse]
+    choice_options: list[ChoiceOptionResponse] = []
+    choice_scoring_policy: ChoiceScoringPolicyResponse | None = None
+    automation_readiness: AutomationReadinessResponse | None = None
 
 
 class TaskCardResponse(BaseModel):
