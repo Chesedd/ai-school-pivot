@@ -35,10 +35,12 @@ PostgreSQL created the column-level `unique=True` constraint from `20260810_02` 
 constraint `uq_choice_scoring_policy_version`. Revision `20260810_04` performs one
 transactional `ALTER TABLE ... RENAME CONSTRAINT` in each direction. It neither drops
 uniqueness nor creates a second constraint, rewrites no rows, and retains the backing
-unique index. At head, `pg_constraint` must expose exactly one unique constraint on
-`choice_scoring_policies(task_version_id)`, named
-`uq_choice_scoring_policy_version`; downgrade to `20260810_03` must restore the old
-implicit name and preserve duplicate rejection.
+unique index. At head, `pg_constraint` must expose exactly one single-column
+unique constraint on `choice_scoring_policies(task_version_id)`, named
+`uq_choice_scoring_policy_version`, while retaining the intentional composite unique
+constraint `uq_choice_scoring_policy_id_version` on `(id, task_version_id)`.
+Downgrade to `20260810_03` must restore only the old implicit single-column name and
+must preserve the composite constraint and duplicate rejection.
 
 ## Schema inventory and invariants
 
@@ -156,72 +158,111 @@ metadata and yields manual readiness until input-unit support exists.
 
 ## PowerShell constraint-name continuation from `20260810_03`
 
-The existing disposable database that completed the previous lifecycle can continue
-from `20260810_03`: upgrade to head, inspect `pg_constraint`, test duplicate rejection,
-downgrade and inspect the restored implicit name, then always recover to head in a
-`finally` block before `alembic check/current/heads` and the focused PostgreSQL suite.
-The complete command block is included in the corrective report; the broader fresh
-`20260810_01` lifecycle remains below for full recovery.
-
-## PowerShell continuation and Docker Hub TLS recovery
+This gate uses only the existing disposable `ai_school_41m_gate_test` database. The
+catalog query expands `pg_constraint.conkey` with ordinality, so assertions compare
+ordered column sets rather than unspecified result order or all UNIQUE constraints
+on the table. It proves the canonical single-column constraint and intentional
+composite constraint independently in both migration states, preserves representative
+data, checks duplicate rejection, and always recovers to `20260810_04`.
 
 ```powershell
 $ErrorActionPreference = 'Stop'
 $repo = (Get-Location).Path
-$dbName = 'ai_school_test'
+$dbName = 'ai_school_41m_gate_test'
 $dbUser = $env:POSTGRES_USER
 $dbPassword = $env:POSTGRES_PASSWORD
 if (-not $dbUser) { $dbUser = 'content_bank' }
 if (-not $dbPassword) { $dbPassword = 'change-me-for-local-development' }
+if (-not $dbName.EndsWith('_test')) { throw 'Refusing a non-test database.' }
 $db = "postgresql+asyncpg://${dbUser}:${dbPassword}@postgres:5432/${dbName}"
-$exists = docker compose exec -T postgres psql -U $dbUser -d postgres -Atc "SELECT 1 FROM pg_database WHERE datname='$dbName'"
-if ($exists -ne '1') { docker compose exec -T postgres createdb -U $dbUser $dbName }
+
 $built = $false
 try { docker compose build backend; $built = $true }
-catch { Write-Warning 'Build unavailable (for example Docker Hub TLS timeout); the backend container will not be recreated from an old image.' }
+catch { Write-Warning 'Build unavailable; refusing to recreate backend from a stale image.' }
 if ($built) { docker compose up -d --no-deps backend }
 else {
   $cid = docker compose ps -q backend
-  if (-not $cid) { throw 'No existing backend container; refusing an unproven fallback.' }
-  docker cp "$repo/backend/app/." "${cid}:/app/app/"
-  docker cp "$repo/backend/alembic/." "${cid}:/app/alembic/"
-  docker cp "$repo/backend/tests/." "${cid}:/app/tests/"
+  if (-not $cid) { throw 'No running backend container for the verified docker-cp fallback.' }
+  docker cp "$repo/backend/alembic/versions/20260810_04_typed_methodology_constraint_name.py" "${cid}:/app/alembic/versions/20260810_04_typed_methodology_constraint_name.py"
+  docker cp "$repo/backend/tests/unit/test_typed_methodology_migration_sql.py" "${cid}:/app/tests/unit/test_typed_methodology_migration_sql.py"
+  docker cp "$repo/backend/tests/integration/test_typed_methodology_database.py" "${cid}:/app/tests/integration/test_typed_methodology_database.py"
 }
 $cid = docker compose ps -q backend
-$hostHash = (Get-FileHash "$repo/backend/app/application/content_bank.py" -Algorithm SHA256).Hash.ToLower()
-$containerHash = (docker compose exec -T backend sha256sum /app/app/application/content_bank.py).Split(' ')[0]
-if ($hostHash -ne $containerHash) { throw 'Container backend content does not match workspace.' }
-docker compose exec -T backend test -f /app/tests/integration/test_typed_methodology_database.py
+$hostMigrationHash = (Get-FileHash "$repo/backend/alembic/versions/20260810_04_typed_methodology_constraint_name.py" -Algorithm SHA256).Hash.ToLower()
+$containerMigrationHash = (docker compose exec -T backend sha256sum /app/alembic/versions/20260810_04_typed_methodology_constraint_name.py).Split(' ')[0]
+if ($hostMigrationHash -ne $containerMigrationHash) { throw 'Container migration differs from the workspace.' }
+$hostHash = (Get-FileHash "$repo/backend/tests/integration/test_typed_methodology_database.py" -Algorithm SHA256).Hash.ToLower()
+$containerHash = (docker compose exec -T backend sha256sum /app/tests/integration/test_typed_methodology_database.py).Split(' ')[0]
+if ($hostHash -ne $containerHash) { throw 'Container test differs from the workspace.' }
 
-docker compose exec -T -e DATABASE_URL=$db backend alembic downgrade 20260810_01
-@'
-INSERT INTO subjects(id,code,name) VALUES ('10000000-0000-4000-8000-000000000001','lifecycle','Lifecycle');
-INSERT INTO grades(id,number,name) VALUES ('10000000-0000-4000-8000-000000000002',7,'7');
-INSERT INTO topics(id,subject_id,grade_id,code,name) VALUES ('10000000-0000-4000-8000-000000000003','10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000002','life','Lifecycle');
-INSERT INTO tasks(id,subject_id,grade_id,topic_id,created_by) VALUES ('10000000-0000-4000-8000-000000000004','10000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000003','10000000-0000-4000-8000-000000000005');
-INSERT INTO task_versions(id,task_id,version_no,statement,task_type,answer_format,difficulty,status,created_by) VALUES ('10000000-0000-4000-8000-000000000006','10000000-0000-4000-8000-000000000004',1,'Legacy','calculation','number',10,'draft','10000000-0000-4000-8000-000000000005');
-INSERT INTO accepted_answers(id,task_version_id,answer_value,tolerance,unit,normalization_rule) VALUES ('10000000-0000-4000-8000-000000000007','10000000-0000-4000-8000-000000000006',E'  A\r\nB  ',0.125,' kg ','opaque (.*)');
-'@ | docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U $dbUser -d $dbName
-try {
-  docker compose exec -T -e DATABASE_URL=$db backend alembic upgrade head
-  $upgraded = docker compose exec -T postgres psql -U $dbUser -d $dbName -Atc "SELECT value_kind||'|'||encode(convert_to(answer_value,'UTF8'),'hex')||'|'||tolerance::text||'|'||unit||'|'||normalization_rule FROM accepted_answers WHERE id='10000000-0000-4000-8000-000000000007'"
-  if ($upgraded -ne 'legacy_untyped|2020410d0a422020|0.125| kg |opaque (.*)') { throw 'Legacy upgrade/backfill proof failed.' }
-  docker compose exec -T -e TEST_DATABASE_URL=$db -e DATABASE_URL=$db backend pytest -q tests/integration/test_typed_methodology_database.py
-  # Reinsert a downgrade sentinel after destructive focused fixtures.
-  @'
-INSERT INTO accepted_answers(id,task_version_id,answer_value,tolerance,unit,normalization_rule) SELECT '10000000-0000-4000-8000-000000000017',id,E'  D\r\nE  ',0.250,' m ','opaque downgrade' FROM task_versions LIMIT 1;
-'@ | docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U $dbUser -d $dbName
-  docker compose exec -T -e DATABASE_URL=$db backend alembic downgrade 20260810_01
-  $down = docker compose exec -T postgres psql -U $dbUser -d $dbName -Atc "SELECT encode(convert_to(answer_value,'UTF8'),'hex')||'|'||tolerance::text||'|'||unit||'|'||normalization_rule FROM accepted_answers WHERE id='10000000-0000-4000-8000-000000000017'"
-  if ($down -ne '2020440d0a452020|0.250| m |opaque downgrade') { throw 'Legacy downgrade preservation proof failed.' }
-} finally {
-  docker compose exec -T -e DATABASE_URL=$db backend alembic upgrade head
+$current = docker compose exec -T -e DATABASE_URL=$db backend alembic current
+if ($current -notmatch '20260810_03') { throw "Expected 20260810_03, got: $current" }
+
+$policy = docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U $dbUser -d $dbName -Atc @'
+WITH existing AS (
+  SELECT id,task_version_id,mode,policy_version FROM choice_scoring_policies ORDER BY id LIMIT 1
+), inserted AS (
+  INSERT INTO choice_scoring_policies(task_version_id,mode,policy_version)
+  SELECT v.id,'all_or_nothing',1 FROM task_versions v
+  WHERE NOT EXISTS (SELECT 1 FROM existing)
+  ORDER BY v.id LIMIT 1
+  RETURNING id,task_version_id,mode,policy_version
+)
+SELECT id::text||'|'||task_version_id::text||'|'||mode||'|'||policy_version::text FROM existing
+UNION ALL
+SELECT id::text||'|'||task_version_id::text||'|'||mode||'|'||policy_version::text FROM inserted;
+'@
+if (-not $policy) { throw 'No representative policy and no task version available.' }
+$policyParts = $policy.Split('|')
+$policyId = $policyParts[0]
+$taskVersionId = $policyParts[1]
+
+$constraintSql = @'
+SELECT c.conname||'|'||string_agg(a.attname,',' ORDER BY k.ordinality)
+FROM pg_constraint c
+JOIN pg_class r ON r.oid=c.conrelid
+JOIN pg_namespace n ON n.oid=r.relnamespace
+CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY k(attnum,ordinality)
+JOIN pg_attribute a ON a.attrelid=c.conrelid AND a.attnum=k.attnum
+WHERE n.nspname=current_schema() AND r.relname='choice_scoring_policies' AND c.contype='u'
+GROUP BY c.conname
+ORDER BY c.conname;
+'@
+function Get-PolicyConstraints {
+  return @(docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U $dbUser -d $dbName -Atc $constraintSql)
 }
+function Assert-ConstraintState([string[]]$rows,[string]$singleName) {
+  $single = @($rows | Where-Object { $_ -eq "$singleName|task_version_id" })
+  if ($single.Count -ne 1) { throw "Expected exactly one $singleName single-column constraint: $rows" }
+  if (-not ($rows -contains 'uq_choice_scoring_policy_id_version|id,task_version_id')) { throw "Composite constraint missing: $rows" }
+  $otherName = if ($singleName -eq 'uq_choice_scoring_policy_version') { 'choice_scoring_policies_task_version_id_key' } else { 'uq_choice_scoring_policy_version' }
+  if ($rows | Where-Object { $_ -like "$otherName|*" }) { throw "Unexpected alternate single-column name: $rows" }
+}
+function Assert-DuplicateRejected {
+  $sql = "DO `$`$ BEGIN BEGIN INSERT INTO choice_scoring_policies(task_version_id,mode,policy_version) VALUES ('$taskVersionId','all_or_nothing',1); RAISE EXCEPTION 'duplicate accepted'; EXCEPTION WHEN unique_violation THEN NULL; END; END `$`$;"
+  docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U $dbUser -d $dbName -c $sql
+}
+
+try {
+  docker compose exec -T -e DATABASE_URL=$db backend alembic upgrade 20260810_04
+  Assert-ConstraintState (Get-PolicyConstraints) 'uq_choice_scoring_policy_version'
+  $after = docker compose exec -T postgres psql -U $dbUser -d $dbName -Atc "SELECT id::text||'|'||task_version_id::text||'|'||mode||'|'||policy_version::text FROM choice_scoring_policies WHERE id='$policyId'"
+  if ($after -ne $policy) { throw 'Representative policy changed during upgrade.' }
+  Assert-DuplicateRejected
+
+  docker compose exec -T -e DATABASE_URL=$db backend alembic downgrade 20260810_03
+  Assert-ConstraintState (Get-PolicyConstraints) 'choice_scoring_policies_task_version_id_key'
+  Assert-DuplicateRejected
+}
+finally {
+  docker compose exec -T -e DATABASE_URL=$db backend alembic upgrade 20260810_04
+}
+
+Assert-ConstraintState (Get-PolicyConstraints) 'uq_choice_scoring_policy_version'
+docker compose exec -T -e DATABASE_URL=$db backend alembic check
+$finalCurrent = docker compose exec -T -e DATABASE_URL=$db backend alembic current
+$finalHeads = docker compose exec -T -e DATABASE_URL=$db backend alembic heads
+if ($finalCurrent -notmatch '20260810_04') { throw "Unexpected current: $finalCurrent" }
+if ($finalHeads -notmatch '20260810_04') { throw "Unexpected heads: $finalHeads" }
 docker compose exec -T -e TEST_DATABASE_URL=$db -e DATABASE_URL=$db backend pytest -q tests/integration/test_typed_methodology_database.py
-docker compose exec -T -e TEST_DATABASE_URL=$db -e DATABASE_URL=$db backend pytest -q tests/unit/test_typed_methodology.py tests/unit/test_save_methodology.py tests/unit/test_status_cycle.py
-docker compose exec -T -e TEST_DATABASE_URL=$db -e DATABASE_URL=$db backend pytest -q tests/integration/test_checking_database.py tests/integration/test_checking_handoff.py tests/integration/test_phase3_vertical_acceptance.py
-docker compose exec -T -e TEST_DATABASE_URL=$db -e DATABASE_URL=$db backend pytest -q
-docker compose exec -T -e DATABASE_URL=$db backend sh -lc 'alembic check && alembic current && alembic heads'
-npm --prefix frontend test -- --run
-npm --prefix frontend run build
 ```

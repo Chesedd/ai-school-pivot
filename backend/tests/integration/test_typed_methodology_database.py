@@ -57,11 +57,26 @@ async def test_schema_columns_tables_named_policy_constraint_and_corrective_head
         tables=set((await c.scalars(text("SELECT tablename FROM pg_tables WHERE schemaname=current_schema()"))).all())
         assert {"choice_options","accepted_answer_options","choice_scoring_policies","choice_option_rules"}<=tables
         assert await c.scalar(text("SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='choice_option_rules' AND column_name='role')"))
-        names=(await c.scalars(text("""SELECT constraint_name FROM information_schema.table_constraints
-            WHERE table_schema=current_schema() AND table_name='choice_scoring_policies'
-              AND constraint_type='UNIQUE'"""))).all()
-        assert names == ["uq_choice_scoring_policy_version"]
-        assert "choice_scoring_policies_task_version_id_key" not in names
+        rows=(await c.execute(text("""SELECT constraint_row.conname,
+                array_agg(attribute.attname ORDER BY constraint_column.ordinality) AS column_names
+            FROM pg_constraint AS constraint_row
+            JOIN pg_class AS relation ON relation.oid=constraint_row.conrelid
+            JOIN pg_namespace AS namespace ON namespace.oid=relation.relnamespace
+            CROSS JOIN LATERAL unnest(constraint_row.conkey)
+                WITH ORDINALITY AS constraint_column(attnum, ordinality)
+            JOIN pg_attribute AS attribute
+              ON attribute.attrelid=constraint_row.conrelid
+             AND attribute.attnum=constraint_column.attnum
+            WHERE namespace.nspname=current_schema()
+              AND relation.relname='choice_scoring_policies'
+              AND constraint_row.contype='u'
+            GROUP BY constraint_row.conname
+            ORDER BY constraint_row.conname"""))).all()
+        constraints={row.conname:list(row.column_names) for row in rows}
+        assert sorted(name for name,columns in constraints.items() if columns==["task_version_id"]) == ["uq_choice_scoring_policy_version"]
+        assert constraints["uq_choice_scoring_policy_version"] == ["task_version_id"]
+        assert constraints["uq_choice_scoring_policy_id_version"] == ["id","task_version_id"]
+        assert "choice_scoring_policies_task_version_id_key" not in constraints
 
     async with engine.begin() as c:
         policy=await c.scalar(text("INSERT INTO choice_scoring_policies(task_version_id,mode) VALUES (:v,'all_or_nothing') RETURNING id"),{"v":seeded["v2"]})
