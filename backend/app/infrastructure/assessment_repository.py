@@ -11,7 +11,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
-from app.application.assessments import AssignmentRecord, AssessmentItemRecord, AssessmentRecord, AssessmentVariantRecord, CreateAssessmentCommand, HistoricalTaskVersion
+from app.application.assessments import (AssignmentRecord, AssignmentSummary, AssessmentItemRecord,
+    AssessmentRecord, AssessmentVariantRecord, ClassGroupSummary, CreateAssessmentCommand, HistoricalTaskVersion)
 from app.infrastructure.assessment_models import (Assignment, AssignmentParticipant, Assessment, AssessmentAuditLog,
     AssessmentItem, AssessmentVariant, ClassGroup, Student)
 from app.infrastructure.models import Task, TaskVersion
@@ -98,6 +99,33 @@ class SQLAlchemyAssessmentRepository:
         total = await self.session.scalar(select(func.count()).select_from(base.order_by(None).subquery()))
         rows = (await self.session.execute(base.options(*self._options()).order_by(Assessment.created_at.desc(), Assessment.id).offset(offset).limit(limit))).scalars().all()
         return {"items": [self._record(row) for row in rows], "total": total or 0, "offset": offset, "limit": limit}
+
+    async def list_class_groups(self, offset: int, limit: int):
+        active = select(ClassGroup).where(ClassGroup.archived_at.is_(None))
+        total = await self.session.scalar(select(func.count()).select_from(active.subquery())) or 0
+        counts = (select(Student.class_group_id, func.count(Student.id).label("student_count"))
+                  .where(Student.archived_at.is_(None)).group_by(Student.class_group_id).subquery())
+        rows = (await self.session.execute(select(ClassGroup, func.coalesce(counts.c.student_count, 0))
+            .outerjoin(counts, counts.c.class_group_id == ClassGroup.id)
+            .where(ClassGroup.archived_at.is_(None)).order_by(ClassGroup.name, ClassGroup.id)
+            .offset(offset).limit(limit))).all()
+        return {"items": [ClassGroupSummary(group.id, group.name, count) for group, count in rows],
+                "total": total, "offset": offset, "limit": limit}
+
+    async def list_assignments(self, assessment_id: UUID, offset: int, limit: int):
+        base = select(Assignment).where(Assignment.assessment_id == assessment_id)
+        total = await self.session.scalar(select(func.count()).select_from(base.subquery())) or 0
+        counts = (select(AssignmentParticipant.assignment_id, func.count().label("participant_count"))
+                  .group_by(AssignmentParticipant.assignment_id).subquery())
+        rows = (await self.session.execute(select(Assignment, ClassGroup.name,
+                func.coalesce(counts.c.participant_count, 0))
+            .join(ClassGroup, ClassGroup.id == Assignment.class_group_id)
+            .outerjoin(counts, counts.c.assignment_id == Assignment.id)
+            .where(Assignment.assessment_id == assessment_id)
+            .order_by(Assignment.created_at, Assignment.id).offset(offset).limit(limit))).all()
+        return {"items": [AssignmentSummary(a.id, a.assessment_id, a.class_group_id, name, a.status,
+                    a.start_at, a.due_at, a.max_attempts, count, a.created_at, a.closed_at)
+                for a, name, count in rows], "total": total, "offset": offset, "limit": limit}
 
     async def get(self, assessment_id: UUID):
         row = (await self.session.execute(select(Assessment).options(*self._options()).where(Assessment.id == assessment_id))).scalar_one_or_none()

@@ -73,10 +73,13 @@ class StudentAssessmentService:
         async with self.factory() as s:
             p=await self._own_participant(s,assignment_id,student_id)
             a=await s.get(Assignment,assignment_id); x=await s.get(Assessment,a.assessment_id)
-            submissions=(await s.scalars(select(StudentSubmission).where(StudentSubmission.assignment_participant_id==p.id))).all()
+            submissions=(await s.scalars(select(StudentSubmission).where(StudentSubmission.assignment_participant_id==p.id)
+                .order_by(StudentSubmission.attempt_no))).all()
+            submitted=[{"id":v.id,"attempt_no":v.attempt_no,"submitted_at":v.submitted_at}
+                for v in submissions if v.status=="submitted"]
             result=self._assignment_summary(p,a,x,len(submissions)); result.update(description=x.description,participant_id=p.id,
                 current_draft_attempt_id=next((v.id for v in submissions if v.status=="draft"),None),
-                submitted_attempt_count=sum(v.status=="submitted" for v in submissions))
+                submitted_attempt_count=len(submitted), submitted_attempts=submitted)
             return result
 
     async def _materialize(self,s,submission,resumed=False):

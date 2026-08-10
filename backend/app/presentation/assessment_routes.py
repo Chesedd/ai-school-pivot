@@ -13,7 +13,8 @@ from app.db.session import async_session_factory
 from app.infrastructure.assessment_repository import SQLAlchemyAssessmentUnitOfWork
 from app.presentation.assessment_schemas import (AssessmentCreateRequest, AssessmentItemCreateRequest,
     AssessmentItemOrderRequest, AssessmentItemPatchRequest, AssessmentItemResponse,
-    AssessmentListPage, AssessmentPatchRequest, AssessmentResponse, VariantCreateRequest, VariantResponse)
+    AssessmentClassGroupPage, AssessmentListPage, AssessmentPatchRequest, AssessmentResponse,
+    TeacherAssignmentPage, VariantCreateRequest, VariantResponse)
 from app.presentation.assessment_schemas import (AssignmentResponse, EmptyRequest,
     PublicationResponse, PublishAssessmentRequest)
 
@@ -26,6 +27,17 @@ def service() -> AssessmentService:
 
 def actor(settings: Settings = Depends(get_settings)) -> ActorContext:
     return ActorContext(settings.content_bank_dev_actor_id)
+
+@router.get("/class-groups", response_model=AssessmentClassGroupPage)
+async def list_class_groups(context: Annotated[ActorContext, Depends(actor)],
+        offset: Annotated[int, Query(ge=0)] = 0, limit: Annotated[int, Query(ge=1, le=100)] = 20):
+    return await service().list_class_groups(offset, limit, context)
+
+@router.get("/assessments/{assessment_id}/assignments", response_model=TeacherAssignmentPage)
+async def list_assessment_assignments(assessment_id: UUID,
+        context: Annotated[ActorContext, Depends(actor)], offset: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int, Query(ge=1, le=100)] = 20):
+    return await service().list_assignments(assessment_id, offset, limit, context)
 
 
 def assessment_view(row):

@@ -505,3 +505,21 @@ seed/admin-operational work outside this API; Phase 3 создаёт перво�
 атомарно с publication, но schema поддерживает 0..N assignments на assessment.
 Изменение любого из этих решений требует новой версии контракта до
 миграции, а не скрытого implementation choice.
+
+## Phase 3.9 hardening amendment
+
+Это минимальное read-only расширение для UX discovery, а не новый lifecycle: публикация
+по-прежнему атомарна только через первый `publish-and-assign`, assessment сохраняет 1:N
+историю assignments, повторной mutation назначения и reopen нет.
+
+* `GET /api/assessment-core/class-groups?offset=0&limit=20` возвращает страницу только
+  активных групп (`id`, `name`, `active_student_count`), упорядоченных по `name ASC, id ASC`;
+  identities учеников и `external_ref` не раскрываются.
+* `GET /api/assessment-core/assessments/{assessment_id}/assignments?offset=0&limit=20`
+  возвращает страницу исторических назначений (`id`, assessment/group IDs, `class_group_name`,
+  status, window, max attempts, participant count, created/closed timestamps), по
+  `created_at ASC, id ASC`; неизвестная работа даёт `assessment_not_found`.
+* `GET /api/assessment-core/student/assignments/{id}` дополнительно возвращает
+  `submitted_attempts: [{id, attempt_no, submitted_at}]` только текущего participant,
+  только submitted, по `attempt_no ASC`. `submitted_attempt_count` равен длине списка;
+  answers и чужие попытки отсутствуют.
