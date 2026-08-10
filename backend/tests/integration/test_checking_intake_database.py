@@ -22,7 +22,7 @@ pytestmark=[pytest.mark.asyncio,pytest.mark.skipif(not URL,reason="TEST_DATABASE
 @pytest_asyncio.fixture
 async def context():
     engine=create_async_engine(URL); factory=async_sessionmaker(engine,expire_on_commit=False)
-    names=("actor","subject","grade","topic","subtopic","skill","task","version","new_version","group","student",
+    names=("actor","subject","grade","topic","subtopic","skill","task","second_task","version","second_version","new_version","group","student",
            "assessment","variant","item","item2","assignment","participant","submission")
     ids={x:uuid4() for x in names}
     async with engine.begin() as c:
@@ -32,14 +32,14 @@ async def context():
           "INSERT INTO topics(id,subject_id,grade_id,code,name) VALUES (:topic,:subject,:grade,'i','I')",
           "INSERT INTO subtopics(id,topic_id,code,name) VALUES (:subtopic,:topic,'i','I')",
           "INSERT INTO skills(id,subtopic_id,code,name) VALUES (:skill,:subtopic,'s','Skill')",
-          "INSERT INTO tasks(id,subject_id,grade_id,topic_id,created_by) VALUES (:task,:subject,:grade,:topic,:actor)",
-          "INSERT INTO task_versions(id,task_id,version_no,statement,task_type,answer_format,difficulty,status,created_by) VALUES (:version,:task,1,'Exact historical','problem','short_text',50,'approved',:actor)",
-          "INSERT INTO task_skill_links(task_version_id,skill_id,weight,is_primary) VALUES (:version,:skill,1,true)",
+          "INSERT INTO tasks(id,subject_id,grade_id,topic_id,created_by) VALUES (:task,:subject,:grade,:topic,:actor),(:second_task,:subject,:grade,:topic,:actor)",
+          "INSERT INTO task_versions(id,task_id,version_no,statement,task_type,answer_format,difficulty,status,created_by) VALUES (:version,:task,1,'Exact historical answered','problem','short_text',50,'approved',:actor),(:second_version,:second_task,1,'Exact historical unanswered','problem','short_text',50,'approved',:actor)",
+          "INSERT INTO task_skill_links(task_version_id,skill_id,weight,is_primary) VALUES (:version,:skill,1,true),(:second_version,:skill,1,true)",
           "INSERT INTO class_groups(id,name,created_by) VALUES (:group,'G',:actor)",
           "INSERT INTO students(id,class_group_id,display_name) VALUES (:student,:group,'PII name')",
           "INSERT INTO assessments(id,title,created_by) VALUES (:assessment,'A',:actor)",
           "INSERT INTO assessment_variants(id,assessment_id,name,position) VALUES (:variant,:assessment,'V',1)",
-          "INSERT INTO assessment_items(id,variant_id,task_version_id,position,points) VALUES (:item,:variant,:version,1,2.50),(:item2,:variant,:version,2,3.75)",
+          "INSERT INTO assessment_items(id,variant_id,task_version_id,position,points) VALUES (:item,:variant,:version,1,2.50),(:item2,:variant,:second_version,2,3.75)",
           "INSERT INTO assignments(id,assessment_id,class_group_id,start_at,due_at,created_by) VALUES (:assignment,:assessment,:group,clock_timestamp(),clock_timestamp()+interval '1 hour',:actor)",
           "INSERT INTO assignment_participants(id,assignment_id,student_id,assigned_variant_id) VALUES (:participant,:assignment,:student,:variant)",
           "INSERT INTO student_submissions(id,assignment_participant_id,attempt_no,status,submitted_at) VALUES (:submission,:participant,1,'submitted',clock_timestamp())",
@@ -78,7 +78,7 @@ async def test_submitted_snapshot_event_privacy_and_handoff_parity_without_norma
     assert snapshot["items"][0]["normalized_answer"]=={"stored":["A",2]}
     assert snapshot["items"][1]["raw_answer"] is None and snapshot["items"][1]["normalized_answer"] is None
     encoded=str(snapshot)
-    for permitted in (ids["submission"],ids["item"],ids["item2"],ids["version"]): assert str(permitted) in encoded
+    for permitted in (ids["submission"],ids["item"],ids["item2"],ids["version"],ids["second_version"]): assert str(permitted) in encoded
     for forbidden in (ids["student"],ids["participant"],ids["assignment"],ids["actor"]): assert str(forbidden) not in encoded
     for name in ("student_id","participant_id","assignment_id","actor_id","created_by"): assert name not in encoded
     assert len(events)==1 and all("raw_answer" not in x and "normalized_answer" not in x for x in events)
@@ -117,8 +117,8 @@ async def test_archive_close_later_version_rerun_preserves_history(context):
     original_snapshot=copy.deepcopy(original.input_snapshot)
     await terminalize(factory,first.id)
     async with engine.begin() as c:
-        await c.execute(text("UPDATE tasks SET archived_at=clock_timestamp() WHERE id=:task"),ids)
-        await c.execute(text("UPDATE task_versions SET status='archived' WHERE id=:version"),ids)
+        await c.execute(text("UPDATE tasks SET archived_at=clock_timestamp() WHERE id IN (:task,:second_task)"),ids)
+        await c.execute(text("UPDATE task_versions SET status='archived' WHERE id IN (:version,:second_version)"),ids)
         await c.execute(text("UPDATE assignments SET status='closed',closed_at=clock_timestamp() WHERE id=:assignment"),ids)
         await c.execute(text("INSERT INTO task_versions(id,task_id,version_no,statement,task_type,answer_format,difficulty,status,created_by) VALUES (:new_version,:task,2,'New truth','problem','number',50,'draft',:actor)"),ids)
     rerun=await intake.create(request(ids,"rerun",supersedes=first.id))
@@ -128,7 +128,8 @@ async def test_archive_close_later_version_rerun_preserves_history(context):
     assert len(rows)==2 and rows[1].attempt_no==2 and rows[1].supersedes_run_id==first.id
     assert rows[0].input_snapshot==original_snapshot and rows[0].input_fingerprint==original.input_fingerprint
     assert rows[1].input_snapshot==original_snapshot and rows[1].input_fingerprint==original.input_fingerprint
-    assert all(x["task_version_id"]==str(ids["version"]) for x in rows[1].input_snapshot["items"])
+    assert [x["task_version_id"] for x in rows[1].input_snapshot["items"]]==[
+        str(ids["version"]),str(ids["second_version"])]
     assert str(ids["new_version"]) not in str(rows[1].input_snapshot)
     assert [x["points"] for x in rows[1].input_snapshot["items"]]==["2.50","3.75"]
     assert rows[1].input_snapshot["items"][1]["raw_answer"] is None
