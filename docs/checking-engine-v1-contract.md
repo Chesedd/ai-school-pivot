@@ -310,12 +310,12 @@ validated structured documents, provider/settings payloads whose schema is versi
 
 | Table | Key columns / constraints / indexes | Mutability and delete |
 |---|---|---|
-| `check_runs` | `id`; `submission_id UUID`; `handoff_version SMALLINT=1`; `input_snapshot JSONB`; `input_fingerprint CHAR(64)` hex; `snapshot_schema_version`; `routing_version`; `checker_set_version`; status enum; `attempt_no`, `retry_count >=0`, `requested_at`, `started_at`, `finished_at`, `heartbeat_at`, failure code/detail; `supersedes_run_id nullable`; UNIQUE `(submission_id, input_fingerprint, checker_set_version, attempt_no)`; partial UNIQUE submission where status pending/running; indexes status/requested, submission/created | Snapshot/fingerprint/versions immutable; status, heartbeat, retry/failure CAS mutable. Submission logical reference (no FK across ownership unless same DB contract chooses RESTRICT). Never delete; future retention tombstones sensitive blobs without falsifying event metadata only by policy. |
-| `check_results` | `id`; `check_run_id FK RESTRICT`; assessment item/task version IDs; `checker_type/version`, `schema_version`; status; score/max/confidence; bounded summaries/reasons/limitations; `validated_result JSONB`; created_at; UNIQUE `(run,item)`; checks statuses/ranges/score consistency; indexes item/created, task_version, review | Entire row immutable after insert. No teacher fields. |
-| `check_findings` | `id`; `check_result_id FK RESTRICT`; type, nullable source IDs/codes, severity, confidence, `evidence JSONB`; created_at; checks allowed types/ranges; indexes result, typical_error, skill | Immutable. IDs are historical references plus snapshot values; no cascade deletion. |
+| `check_runs` | `id`; `submission_id UUID NOT NULL` FK `student_submissions.id` `ON DELETE RESTRICT ON UPDATE RESTRICT`; `request_key VARCHAR(128) NOT NULL`; `request_hash CHAR(64) NOT NULL` with CHECK `request_hash ~ '^[0-9a-f]{64}$'`; `handoff_version SMALLINT=1`; `input_snapshot JSONB`; `input_fingerprint CHAR(64)` hex; `snapshot_schema_version`; `routing_version`; `checker_set_version`; threshold/prompt/model policy versions; status enum; `attempt_no`, `retry_count >=0`, `requested_at`, `started_at`, `finished_at`, `heartbeat_at`, failure code/detail; `supersedes_run_id nullable`; UNIQUE `(submission_id, request_key)`; partial UNIQUE submission where status pending/running; composite indexes `(submission_id, requested_at DESC, id DESC)` for history and `(submission_id, status)` for active lookup (the request-key UNIQUE index serves idempotency lookup); index status/requested | Snapshot/fingerprint/request identity/versions immutable; status, heartbeat, retry/failure CAS mutable. Assessment and Checking share one PostgreSQL schema: the FK proves source existence and prevents deletion required by history without transferring lifecycle ownership or copying PII. Intake still validates `submitted` status in application code; FK is not readiness validation. Never delete; future retention tombstones sensitive blobs without falsifying event metadata only by policy. |
+| `check_results` | `id`; `check_run_id UUID NOT NULL` FK `check_runs.id` `ON DELETE RESTRICT ON UPDATE RESTRICT`; `assessment_item_id UUID NOT NULL` FK `assessment_items.id` `ON DELETE RESTRICT ON UPDATE RESTRICT`; `task_version_id UUID NOT NULL` FK `task_versions.id` `ON DELETE RESTRICT ON UPDATE RESTRICT`; `checker_type/version`, `schema_version`; status; score/max/confidence; bounded summaries/reasons/limitations; `validated_result JSONB`; created_at; UNIQUE `(check_run_id, assessment_item_id)`; checks statuses/ranges/score consistency; indexes item/created, task_version, review | Entire row immutable after insert. Application validator requires both provenance IDs to equal the corresponding item in immutable run snapshot and forbids an item absent from it. Snapshot remains execution truth; FKs provide provenance integrity and never authorize re-reading mutable/latest methodology. No teacher fields. |
+| `check_findings` | `id`; `check_result_id UUID NOT NULL` FK `check_results.id` `ON DELETE RESTRICT ON UPDATE RESTRICT`; type; nullable `rubric_item_id`, `typical_error_id`, `skill_id` provenance UUIDs **without FK**; snapshot code/title/criterion fields in bounded structured finding data; severity, confidence, `evidence JSONB`; created_at; checks allowed types/ranges; indexes result and provenance UUIDs | Immutable and self-contained. Application validator requires every nullable provenance UUID to belong to the result/run snapshot allowlist. Content Bank evolution cannot break finding history; no cascade deletion. |
 | `checker_events` | monotonic UUID/id; `run_id FK RESTRICT`, optional result/item; event type, from/to status, reason code, safe `details JSONB`, occurred_at; indexes run/time, type/time | Append-only immutable audit trail; details forbid raw answer/provider output. Status transitions recorded atomically. |
 | `prompt_versions` | `id`; stable name, semantic version, template hash, output schema version, template encrypted/restricted text, created_at, retired_at; UNIQUE name/version/hash | Immutable content; retirement mutable. No student content. |
-| `model_runs` | `id`; run/item; prompt_version FK RESTRICT; provider/model IDs; settings snapshot JSONB; request fingerprint; provider request ID; status/error taxonomy; attempt_no; timeout/latency; raw output restricted blob/text; validated output JSONB; validation errors JSONB; usage counts; timestamps; UNIQUE `(check_run_id,assessment_item_id,attempt_no)`; indexes status, provider request ID | One immutable attempt record finalized by CAS; raw/validated never ordinary logs. Reattempt inserts row. |
+| `model_runs` | `id`; `check_run_id UUID NOT NULL` FK `check_runs.id` RESTRICT; `assessment_item_id UUID NOT NULL` FK `assessment_items.id` RESTRICT; `prompt_version_id UUID NOT NULL` FK `prompt_versions.id` RESTRICT; nullable `check_result_id UUID` FK `check_results.id` RESTRICT (all FK use `ON DELETE RESTRICT ON UPDATE RESTRICT`); provider/model IDs; settings snapshot JSONB; request fingerprint; provider request ID; status/error taxonomy; attempt_no; timeout/latency; raw output restricted blob/text; validated output JSONB; validation errors JSONB; usage counts; timestamps; UNIQUE `(check_run_id,assessment_item_id,attempt_no)`; indexes status, provider request ID | One immutable attempt record finalized by CAS; raw/validated never ordinary logs. A failed/invalid provider attempt exists without a result, so `check_result_id` is nullable; a successful later result may be linked without erasing the attempt. Reattempt inserts row. |
 | `cost_events` | `id`; model_run FK RESTRICT; provider currency CHAR(3), input/output/cached tokens nonnegative, amount `NUMERIC(18,8)>=0`, pricing version/source, occurred_at; UNIQUE `(model_run_id,pricing_version)` | Append-only accounting estimate, no PII. |
 
 Routing decision (chosen checker/reason/candidates) belongs in immutable per-item
@@ -351,11 +351,24 @@ provider adapter only classifies errors.
 
 Multiple historical runs per submission are allowed. Exactly one active
 (pending/running) run per submission is enforced by partial unique index and
-transaction/advisory lock on submission UUID. Dedup scope is
-`submission_id + input_fingerprint + checker_set_version + explicit request key`;
-a replay of the same request returns the existing run, while an explicit rerun
-creates incremented `attempt_no` and `supersedes_run_id`. New checker/prompt/model
-version always creates a run (and version is in checker set/fingerprint metadata).
+transaction/advisory lock on submission UUID. V1 idempotency identity is exactly
+`(submission_id, request_key)`, where the client/orchestrator supplies a 1..128 byte
+request key scoped to that submission. `request_hash` is lowercase SHA-256 hex over
+the canonical run request containing `submission_id`, `input_fingerprint`,
+`checker_set_version`, routing version, threshold-policy version, requested
+prompt/model policy when selected by the request, and explicit rerun intent/attempt
+semantics. Canonicalization follows §4.
+
+The same `(submission_id, request_key)` and same hash returns the existing run;
+the same key with a different hash returns an idempotency conflict. An explicit
+rerun must use a new request key and creates the next historical `attempt_no` with
+`supersedes_run_id`. A new checker, prompt, model, routing or threshold version does
+not bypass reuse of an old key: it changes the hash and therefore conflicts until a
+new key is supplied. `attempt_no` is only the monotonically assigned historical run
+ordinal for a submission, not an idempotency key. Concurrent claims rely on UNIQUE
+`(submission_id, request_key)` plus transactional insert/conflict handling; the
+active-run constraint is independently enforced. The request key provides no
+exactly-once external provider-call guarantee.
 
 Workers execute at least once. Claim uses `SELECT ... FOR UPDATE SKIP LOCKED`, CAS
 status/version and heartbeat; optional transaction advisory lock prevents concurrent
@@ -498,7 +511,7 @@ choice catalogue; do not mix Checking-owned tables into it.
 
 | Prompt | Prerequisites and exact scope | Forbidden scope | Acceptance proof / decisions implemented |
 |---|---|---|---|
-| 4.1 Checking DB Foundation | This contract; migrations/models for runs/results/findings/events/prompt/model/cost, constraints/indexes only | intake, routes, workers/checkers/provider, teacher tables | upgrade/downgrade/check + PostgreSQL constraint/FK/immutability tests; D-01/02/03/09/14. |
+| 4.1 Checking DB Foundation | This contract; migrations/models for runs/results/findings/events/prompt/model/cost, exact request-key/hash and provenance FKs, constraints/indexes only | intake, routes, workers/checkers/provider, teacher tables; re-deciding request identity/FK policy | upgrade/downgrade/check plus PostgreSQL tests: same key+hash replays one run; same key+different hash conflicts; concurrent same key creates one row; missing submission FK and deletion of source submission are rejected; invalid assessment item/task version FKs and duplicate run/item result are rejected; application validator rejects finding provenance outside snapshot; failed model attempt persists with null result; immutability tests; D-01/02/03/09/14/15/16. |
 | 4.1M Methodology minimum | Content Bank contract amendment; typed values, abs/rel tolerance, unit/policy codes, choice catalogue/scoring policy | checker logic, changing approved history silently | migration round trip, authoring/API validation and historical fixtures; D-05/06. |
 | 4.2 Intake | 4.1; read ports, submitted guard, canonical snapshot/hash, ordered unanswered/history/privacy | Handoff/normalizer/lifecycle changes | unit golden serialization + PostgreSQL archive/close/concurrency test; D-01/02. |
 | 4.3 Routing & Checker Protocol | 4.2; enums/ports/reason matrix/manual/insufficient | actual checker algorithms, LLM heuristics | exhaustive table-driven routing/unknown/conflict tests; D-04. |
@@ -515,19 +528,21 @@ choice catalogue; do not mix Checking-owned tables into it.
 | ID | Question | Chosen decision | Rejected alternatives | Rationale / consequences | Prompt |
 |---|---|---|---|---|---|
 | D-01 | Snapshot or references? | Immutable materialized per-run snapshot plus provenance UUIDs | references only; extend Handoff | repeatability across mutable shared data; storage/privacy burden | 4.1/4.2 |
-| D-02 | Rerun semantics? | New immutable run; exact request replay returns same, explicit/version change creates successor | overwrite; silently reuse latest data | audit/history | 4.1/4.2 |
+| D-02 | Rerun semantics? | New immutable run requires a new request key; exact same-key/hash replay returns existing run; version/policy change with reused key conflicts rather than silently creating | overwrite; silently reuse latest data; version bypass of idempotency | audit/history and unambiguous caller intent | 4.1/4.2 |
 | D-03 | Active uniqueness? | One pending/running per submission, partial unique + lock/CAS | unrestricted active runs | prevents duplicate workers while preserving history | 4.1 |
 | D-04 | Router? | deterministic methodology-only precedence; single choice is multiple-choice mode | LLM heuristic; separate type | auditable stable checker enum | 4.3 |
 | D-05 | Numeric tolerance/units? | Decimal; inclusive abs+rel formula; no conversions V1 | float; ambiguous tolerance; free unit conversion | needs 4.1M typed evolution; unsafe cases manual | 4.1M/4.5 |
 | D-06 | Choice catalogue? | required version-scoped canonical option IDs | infer labels/current strings | current schema is blocker; safe fallback insufficient | 4.1M/4.4 |
 | D-07 | Exact matching? | stored normalized text byte equality, explicit policy, case/space sensitive | fuzzy/casefold/hidden trim | predictable and no false proof | 4.4 |
 | D-08 | Expressions? | explicit syntax canonical identity only; future CAS adapter; otherwise manual | eval/home algebra/claim equivalence | safety and correct epistemic status | 4.6 |
-| D-09 | Result/version/history? | schema major/minor + checker version, immutable rows | mutable JSON/current flag | reproducibility and Phase 5 separation | 4.1 |
+| D-09 | Result/version/history? | schema major/minor + checker version, immutable rows; RESTRICT provenance FKs plus snapshot-consistency validation | mutable JSON/current flag; latest methodology lookup | reproducibility, provenance integrity and Phase 5 separation | 4.1 |
 | D-10 | Provider retries? | 30s, initial+2 jittered retries; at-least-once call/exactly-once DB row | endless retry/exactly-once claim | bounded cost and honest guarantees | 4.7 |
 | D-11 | Raw output retention? | restricted model_runs blob, configurable retention, never logs | discard immediately; ordinary logging | debugging/audit balanced with privacy; Phase 7 policy | 4.7/Phase 7 |
 | D-12 | Confidence? | calibrated/versioned application gate with stored reasons; all LLM review | raw model number/high-confidence final | explainable preliminary result | 4.8/4.9 |
 | D-13 | Score scaling? | validate rubric sum; scale Decimal once to frozen assessment points | require equal scales; alter points; unvalidated clamp | preserves published assessment | 4.8 |
 | D-14 | Immutable history? | correction/new version always new run/result; Phase 5 FK only | update result/override in Phase 4 | complete audit and bounded ownership | 4.1/Phase 5 |
+| D-15 | Run idempotency identity? | UNIQUE `(submission_id, request_key)`; canonical request SHA-256 hash; same hash replay, different hash conflict; rerun needs new key; `attempt_no` is history only | fuzzy compound dedup; version bypass; attempt number as key | exact concurrency-safe replay semantics without claiming exactly-once provider calls | 4.1/4.2 |
+| D-16 | DB and finding provenance? | submission/result/model core IDs use explicit RESTRICT FKs; result IDs must match snapshot; finding Content Bank IDs are nullable no-FK snapshot provenance validated by application | optional submission FK; latest methodology reads; cascading/content-row FKs for findings | source integrity plus immutable, self-contained execution history across Content Bank evolution | 4.1/4.2 |
 
 ## 18. Explicit gaps and non-goals conclusion
 
