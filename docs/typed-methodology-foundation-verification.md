@@ -6,10 +6,24 @@ Phase 4.1M is a Content Bank authoring foundation, not a checker. Historical
 revision `20260810_02` has `down_revision = 20260810_01` and introduced the typed
 answer and choice schema. PostgreSQL acceptance exposed two integrity gaps: weighted
 rules had no authored correct/distractor role, and deleting the last membership
-could bypass the original non-empty-set trigger. The immutable historical revision
-was not edited. Corrective revision `20260810_03` has
+could bypass the original non-empty-set trigger. Its schema semantics remain
+immutable; only the narrowly proven asyncpg execution packaging in `20260810_02`
+was repaired by splitting top-level commands. Corrective revision `20260810_03` has
 `down_revision = 20260810_02`; it adds `choice_option_rules.role` and deferred
 version-wide integrity triggers. The expected head is therefore `20260810_03`.
+
+## Asyncpg execution compatibility repair
+
+A PostgreSQL 17 lifecycle run proved that asyncpg rejects a prepared statement
+containing multiple completed top-level SQL commands. Historical revision
+`20260810_02` previously sent two `CREATE FUNCTION` and two `CREATE TRIGGER`
+commands in one `op.execute()`. Revision `20260810_03` likewise combined two
+`CREATE FUNCTION` commands and one `DO` block. Each command is now issued by its
+own Alembic execution call; PL/pgSQL semicolons remain inside their single
+`$$ ... $$` function or `DO` body. Revision identity, DDL names, ordering,
+transactional behavior, constraints, deferred triggers, and downgrade schema are
+unchanged. A source-level regression parses every `execute` call and distinguishes
+top-level separators from semicolons inside dollar-quoted bodies.
 
 ## Schema inventory and invariants
 

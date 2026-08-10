@@ -19,8 +19,7 @@ def upgrade() -> None:
     ) THEN 'correct' ELSE 'distractor' END""")
     op.alter_column("choice_option_rules", "role", nullable=False)
     op.create_check_constraint("ck_choice_option_rules_role", "choice_option_rules", "role IN ('correct','distractor')")
-    op.execute("""
-CREATE FUNCTION methodology_validate_version(p_version uuid) RETURNS void LANGUAGE plpgsql AS $$
+    op.execute("""CREATE FUNCTION methodology_validate_version(p_version uuid) RETURNS void LANGUAGE plpgsql AS $$
 DECLARE p_mode text; p_format text;
 BEGIN
   SELECT p.mode, v.answer_format::text INTO p_mode, p_format
@@ -56,8 +55,8 @@ BEGIN
       RAISE EXCEPTION 'correct option weights must sum to 1.000000';
     END IF;
   END IF;
-END $$;
-CREATE FUNCTION methodology_integrity_trigger() RETURNS trigger LANGUAGE plpgsql AS $$
+END $$""")
+    op.execute("""CREATE FUNCTION methodology_integrity_trigger() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE v uuid;
 BEGIN
   IF TG_TABLE_NAME='choice_scoring_policies' THEN v=COALESCE(NEW.task_version_id,OLD.task_version_id);
@@ -66,11 +65,10 @@ BEGIN
   ELSIF TG_TABLE_NAME='accepted_answer_options' THEN v=COALESCE(NEW.task_version_id,OLD.task_version_id);
   ELSE v=COALESCE(NEW.task_version_id,OLD.task_version_id); END IF;
   PERFORM methodology_validate_version(v); RETURN NULL;
-END $$;
-DO $$ DECLARE v uuid; BEGIN FOR v IN SELECT task_version_id FROM choice_scoring_policies LOOP
+END $$""")
+    op.execute("""DO $$ DECLARE v uuid; BEGIN FOR v IN SELECT task_version_id FROM choice_scoring_policies LOOP
   PERFORM methodology_validate_version(v);
-END LOOP; END $$;
-""")
+END LOOP; END $$""")
     for table in ("choice_scoring_policies", "choice_option_rules", "choice_options", "accepted_answer_options", "accepted_answers"):
         op.execute(f"CREATE CONSTRAINT TRIGGER trg_{table}_methodology_integrity AFTER INSERT OR UPDATE OR DELETE ON {table} DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION methodology_integrity_trigger()")
 
