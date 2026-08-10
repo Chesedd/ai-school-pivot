@@ -37,17 +37,22 @@ class CheckingRepository:
     async def transition_run(self, run_id: UUID, expected_version: int, target: str, *, failure_code: str | None = None, failure_detail: str | None = None, details=None) -> CheckRun:
         row = await self.session.get(CheckRun, run_id)
         if row is None: raise InvalidPersistenceCommand("run not found")
-        validate_transition(row.status, target); safe = safe_event_details(details or {})
+        from_status = row.status
+        validate_transition(from_status, target); safe = safe_event_details(details or {})
         now = await self.session.scalar(select(func.clock_timestamp())); values = {"status": target, "row_version": expected_version + 1}
         if target == "running": values.update(started_at=now, heartbeat_at=now)
-        if row.status == "failed_retryable" and target == "pending":
+        if from_status == "failed_retryable" and target == "pending":
             values.update(started_at=None, finished_at=None, heartbeat_at=None,
                           failure_code=None, failure_detail=None, retry_count=row.retry_count + 1)
         if target in {"completed", "completed_with_review_required", "failed_retryable", "failed_terminal"}: values.update(finished_at=now, failure_code=failure_code, failure_detail=failure_detail)
-        if row.status == "pending" and target == "failed_terminal": values["started_at"] = now
-        changed = await self.session.scalar(update(CheckRun).where(CheckRun.id == run_id, CheckRun.row_version == expected_version).values(**values).returning(CheckRun.id))
+        if from_status == "pending" and target == "failed_terminal": values["started_at"] = now
+        changed = await self.session.scalar(update(CheckRun).where(
+            CheckRun.id == run_id, CheckRun.row_version == expected_version,
+            CheckRun.status == from_status,
+        ).values(**values).returning(CheckRun.id))
         if changed is None: raise ConcurrentConflict("stale run version")
-        self.session.add(CheckerEvent(check_run_id=run_id, event_type="run_transition", from_status=row.status, to_status=target, reason_code=failure_code, details=safe)); await self.session.flush()
+        self.session.add(CheckerEvent(check_run_id=run_id, event_type="run_transition",
+            from_status=from_status, to_status=target, reason_code=failure_code, details=safe)); await self.session.flush()
         return await self.session.get(CheckRun, run_id, populate_existing=True)
 
     async def record_result(self, result: CheckResult, findings: tuple[CheckFinding, ...]) -> None:

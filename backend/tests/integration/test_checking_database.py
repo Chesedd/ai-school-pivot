@@ -7,7 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
-from app.application.checking import ActiveRunConflict, CreateRunCommand, IdempotencyConflict
+from app.application.checking import ActiveRunConflict, ConcurrentConflict, CreateRunCommand, IdempotencyConflict
 from app.infrastructure.checking_repository import CheckingRepository
 
 URL=os.environ.get("TEST_DATABASE_URL","")
@@ -69,9 +69,24 @@ async def test_run_transition_is_cas_and_event_is_atomic(engine,seeded):
         async with s.begin():
             running=await CheckingRepository(s).transition_run(run,1,"running")
             assert running.status=="running" and running.row_version==2
+    async with AsyncSession(engine) as s:
+        async with s.begin():
+            with pytest.raises(ConcurrentConflict):
+                await CheckingRepository(s).transition_run(run,1,"completed")
     async with engine.connect() as c:
-        assert await c.scalar(text("SELECT count(*) FROM checker_events WHERE check_run_id=:run AND event_type='run_transition'"),{"run":run})==1
-        await rejected(c,"UPDATE check_runs SET status='completed',finished_at=clock_timestamp() WHERE id=:run",{"run":run})
+        state=(await c.execute(text("SELECT status::text,row_version FROM check_runs WHERE id=:run"),{"run":run})).one()
+        events=(await c.execute(text("SELECT from_status::text,to_status::text FROM checker_events WHERE check_run_id=:run AND event_type='run_transition' ORDER BY occurred_at,id"),{"run":run})).all()
+        assert tuple(state) == ("running",2)
+        assert [tuple(event) for event in events] == [("pending","running")]
+        assert events[0][0] != events[0][1]
+    async with AsyncSession(engine) as s:
+        async with s.begin():
+            completed=await CheckingRepository(s).transition_run(run,2,"completed")
+            assert completed.status=="completed" and completed.row_version==3
+    async with engine.connect() as c:
+        events=(await c.execute(text("SELECT from_status::text,to_status::text FROM checker_events WHERE check_run_id=:run AND event_type='run_transition' ORDER BY occurred_at,id"),{"run":run})).all()
+        assert [tuple(event) for event in events] == [("pending","running"),("running","completed")]
+        assert await c.scalar(text("SELECT count(*) FROM checker_events WHERE check_run_id=:run"),{"run":run})==3
 
 async def test_fk_score_unique_and_immutability_constraints(engine,seeded):
     run=await create(engine,seeded); values={**seeded,"run":run,"result":uuid4(),"missing":uuid4()}
