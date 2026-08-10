@@ -22,7 +22,7 @@ pytestmark=[pytest.mark.asyncio,pytest.mark.skipif(not URL,reason="TEST_DATABASE
 @pytest_asyncio.fixture
 async def context():
     engine=create_async_engine(URL); factory=async_sessionmaker(engine,expire_on_commit=False)
-    names=("actor","subject","grade","topic","skill","task","version","new_version","group","student",
+    names=("actor","subject","grade","topic","subtopic","skill","task","version","new_version","group","student",
            "assessment","variant","item","item2","assignment","participant","submission")
     ids={x:uuid4() for x in names}
     async with engine.begin() as c:
@@ -30,7 +30,8 @@ async def context():
         sqls=("INSERT INTO subjects(id,code,name) VALUES (:subject,'i','Intake')",
           "INSERT INTO grades(id,number,name) VALUES (:grade,7,'7')",
           "INSERT INTO topics(id,subject_id,grade_id,code,name) VALUES (:topic,:subject,:grade,'i','I')",
-          "INSERT INTO skills(id,subtopic_id,code,name) VALUES (:skill,NULL,'s','Skill')",
+          "INSERT INTO subtopics(id,topic_id,code,name) VALUES (:subtopic,:topic,'i','I')",
+          "INSERT INTO skills(id,subtopic_id,code,name) VALUES (:skill,:subtopic,'s','Skill')",
           "INSERT INTO tasks(id,subject_id,grade_id,topic_id,created_by) VALUES (:task,:subject,:grade,:topic,:actor)",
           "INSERT INTO task_versions(id,task_id,version_no,statement,task_type,answer_format,difficulty,status,created_by) VALUES (:version,:task,1,'Exact historical','problem','short_text',50,'approved',:actor)",
           "INSERT INTO task_skill_links(task_version_id,skill_id,weight,is_primary) VALUES (:version,:skill,1,true)",
