@@ -154,7 +154,7 @@ class CheckingIntakeService:
         async with self.uow_factory() as uow:
             handoff=await uow.load_locked_handoff(request.submission_id)
             methods=await uow.load_methodologies(tuple(x.task_version_id for x in handoff.items))
-            snapshot=build_snapshot(handoff,methods); fingerprint=sha256_hex(snapshot)
+            snapshot=_json_value(build_snapshot(handoff,methods)); fingerprint=sha256_hex(snapshot)
             if request.supersedes_run_id: await uow.validate_supersedes(request.supersedes_run_id,request.submission_id)
             request_hash=sha256_hex(canonical_run_request(request,fingerprint))
             run=await uow.create_run(CreateRunCommand(request.submission_id,request.request_key,request_hash,HANDOFF_VERSION,
