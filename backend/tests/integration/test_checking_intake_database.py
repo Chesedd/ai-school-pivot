@@ -41,7 +41,7 @@ async def context():
           "INSERT INTO assessment_variants(id,assessment_id,name,position) VALUES (:variant,:assessment,'V',1)",
           "INSERT INTO assessment_items(id,variant_id,task_version_id,position,points) VALUES (:item,:variant,:version,1,2.50),(:item2,:variant,:second_version,2,3.75)",
           "INSERT INTO assignments(id,assessment_id,class_group_id,start_at,due_at,created_by) VALUES (:assignment,:assessment,:group,clock_timestamp(),clock_timestamp()+interval '1 hour',:actor)",
-          "INSERT INTO assignment_participants(id,assignment_id,student_id,assigned_variant_id) VALUES (:participant,:assignment,:student,:variant)",
+          "INSERT INTO assignment_participants(id,assignment_id,student_id,assigned_variant_id,variant_assigned_at) VALUES (:participant,:assignment,:student,:variant,clock_timestamp())",
           "INSERT INTO student_submissions(id,assignment_participant_id,attempt_no,status,submitted_at) VALUES (:submission,:participant,1,'submitted',clock_timestamp())",
           "INSERT INTO student_answers(submission_id,assessment_item_id,raw_answer,normalized_answer) VALUES (:submission,:item,CAST(:raw AS jsonb),CAST(:normalized AS jsonb))")
         values={**ids,"raw":'{"values":[2,1],"text":" A "}',"normalized":'{"stored":["A",2]}' }
@@ -149,7 +149,7 @@ async def test_explicit_rerun_and_invalid_supersedes_are_atomic(context):
     other={x:uuid4() for x in ("student","participant","submission")}
     async with engine.begin() as c:
         await c.execute(text("INSERT INTO students(id,class_group_id,display_name) VALUES (:student,:group,'Other')"),{**ids,**other})
-        await c.execute(text("INSERT INTO assignment_participants(id,assignment_id,student_id,assigned_variant_id) VALUES (:participant,:assignment,:student,:variant)"),{**ids,**other})
+        await c.execute(text("INSERT INTO assignment_participants(id,assignment_id,student_id,assigned_variant_id,variant_assigned_at) VALUES (:participant,:assignment,:student,:variant,clock_timestamp())"),{**ids,**other})
         await c.execute(text("INSERT INTO student_submissions(id,assignment_participant_id,attempt_no,status,submitted_at) VALUES (:submission,:participant,1,'submitted',clock_timestamp())"),other)
     other_request=request({**ids,"submission":other["submission"]},"other")
     other_run=await intake.create(other_request); await terminalize(factory,other_run.id)
@@ -165,3 +165,4 @@ async def test_typed_materialization_failure_rolls_back(context,monkeypatch):
     monkeypatch.setattr(intake_module,"build_snapshot",fail)
     with pytest.raises(InvalidCheckingInput,match="controlled"): await service(factory).create(request(ids))
     assert await counts(engine)==(0,0)
+
