@@ -1,12 +1,14 @@
+import json
 from datetime import datetime, timezone
 from decimal import Decimal
+from pathlib import Path
 from uuid import UUID
 
 import pytest
 
 from app.application.checking_handoff import CheckingHandoff, CheckingHandoffItem
-from app.application.checking_intake import (CheckingIntakeRequest, InvalidCheckingInput,
-    build_snapshot, canonical_json_bytes, canonical_run_request, sha256_hex)
+from app.application.checking_intake import (CheckingIntakeRequest, CheckingIntakeService,
+    InvalidCheckingInput, build_snapshot, canonical_json_bytes, canonical_run_request, sha256_hex)
 
 SID=UUID("00000000-0000-0000-0000-000000000001")
 IID=UUID("00000000-0000-0000-0000-000000000002")
@@ -29,6 +31,54 @@ def test_golden_snapshot_bytes_and_fingerprint():
     expected=(__import__("pathlib").Path(__file__).parents[1]/"fixtures"/"checking_input_v1_canonical.json").read_bytes()
     assert canonical_json_bytes(snapshot)==expected
     assert sha256_hex(snapshot)=="1c5f8d4e8cca96d4f2ec470860ac1b91d91f3957544185506e4a6e8612befe89"
+
+
+@pytest.mark.asyncio
+async def test_service_persists_the_canonical_json_snapshot_used_for_fingerprint():
+    handoff,methods=data()
+    created_run=object()
+
+    class FakeUow:
+        command=None
+        committed=False
+
+        async def __aenter__(self): return self
+        async def __aexit__(self,exc_type,exc,tb): pass
+        async def load_locked_handoff(self,submission_id):
+            assert submission_id==SID
+            return handoff
+        async def load_methodologies(self,version_ids):
+            assert version_ids==(VID,)
+            return methods
+        async def create_run(self,command):
+            self.command=command
+            return created_run
+        async def commit(self): self.committed=True
+
+    uow=FakeUow()
+    request=CheckingIntakeRequest(SID,"request-key","routing","checkers","threshold","prompt")
+    result=await CheckingIntakeService(lambda:uow).create(request)
+
+    command=uow.command
+    json.dumps(command.input_snapshot,allow_nan=False)
+
+    def contains_rich_value(value):
+        if isinstance(value,(UUID,Decimal,datetime)): return True
+        if isinstance(value,dict): return any(contains_rich_value(item) for item in value.values())
+        if isinstance(value,list): return any(contains_rich_value(item) for item in value)
+        return False
+
+    methodology=command.input_snapshot["items"][0]["methodology"]
+    expected=(Path(__file__).parents[1]/"fixtures"/"checking_input_v1_canonical.json").read_bytes()
+    assert not contains_rich_value(command.input_snapshot)
+    assert methodology["skills"][0]["id"]==str(SKILL)
+    assert methodology["skills"][0]["weight"]=="1"
+    assert canonical_json_bytes(command.input_snapshot)==expected
+    assert sha256_hex(command.input_snapshot)==command.input_fingerprint
+    assert command.input_snapshot["items"][0]["raw_answer"]==handoff.items[0].raw_answer
+    assert command.input_snapshot["items"][0]["normalized_answer"]==handoff.items[0].normalized_answer
+    assert uow.committed
+    assert result is created_run
 
 
 def test_answers_are_forwarded_and_unanswered_retained():
