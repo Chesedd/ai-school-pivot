@@ -12,6 +12,9 @@ from app.application.checking_routing import (
     RoutingDisposition, RoutingInputError, RoutingReason, route_snapshot,
 )
 
+FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures"
+CANONICAL_INPUT_FIXTURE = FIXTURES_DIR / "checking_input_v1_canonical.json"
+
 
 def uid(): return str(uuid4())
 
@@ -196,7 +199,7 @@ def test_deterministic_order_privacy_and_non_mutation():
 
 
 def test_canonical_phase_42_fixture_routes_unanswered_exact():
-    value=json.loads(Path("backend/tests/fixtures/checking_input_v1_canonical.json").read_text())
+    value=json.loads(CANONICAL_INPUT_FIXTURE.read_text(encoding="utf-8"))
     decision=route_snapshot(value)[0]
     assert (decision.checker_type,decision.disposition,decision.execution_required)==(CheckerType.EXACT,RoutingDisposition.UNANSWERED,False)
 
