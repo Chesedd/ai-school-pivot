@@ -11,10 +11,10 @@ from uuid import UUID
 
 from app.application.checking import CreateRunCommand
 from app.application.checking_handoff import CheckingHandoff
+from app.application.checking_routing import ROUTING_CONTRACT_VERSION
 
 SNAPSHOT_SCHEMA_VERSION = "checking_input_v1"
 HANDOFF_VERSION = 1
-ROUTING_CONTRACT_VERSION = "checking_routing_contract_v1"
 
 
 class CheckingIntakeError(Exception): pass
