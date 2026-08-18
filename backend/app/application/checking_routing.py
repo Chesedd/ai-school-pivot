@@ -5,12 +5,14 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from enum import Enum
+from types import MappingProxyType
 from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
 
 SNAPSHOT_SCHEMA_VERSION = "checking_input_v1"
 HANDOFF_VERSION = 1
 ROUTING_CONTRACT_VERSION = "checking_routing_contract_v1"
+_EMPTY_EVIDENCE: Mapping[str, Any] = MappingProxyType({})
 
 
 class CheckerType(str, Enum):
@@ -76,6 +78,28 @@ class CheckerOutcome(str, Enum):
     MANUAL_REQUIRED = "manual_required"
 
 
+class ResultReason(str, Enum):
+    UNANSWERED = "unanswered"
+    EXACT_MATCH = "exact_match"
+    EXACT_MISMATCH = "exact_mismatch"
+    CHOICE_MATCH = "choice_match"
+    CHOICE_MISMATCH = "choice_mismatch"
+    CHOICE_PARTIAL = "choice_partial"
+    UNKNOWN_CHOICE_OPTION = "unknown_choice_option"
+    MALFORMED_NORMALIZED_ANSWER = "malformed_normalized_answer"
+    INVALID_EXACT_METHODOLOGY = "invalid_exact_methodology"
+    INVALID_CHOICE_METHODOLOGY = "invalid_choice_methodology"
+    ROUTING_INSUFFICIENT_RUBRIC = "routing_insufficient_rubric"
+    ROUTING_MANUAL_REQUIRED = "routing_manual_required"
+
+
+class ResultContractError(ValueError):
+    """A bounded, privacy-safe structured-result validation error."""
+    def __init__(self, code: str = "invalid_result_contract"):
+        self.code = code
+        super().__init__(code)
+
+
 @dataclass(frozen=True)
 class RoutingDecision:
     assessment_item_id: str
@@ -99,10 +123,55 @@ class CheckerRequest:
 
 @dataclass(frozen=True)
 class CheckerResultDraft:
+    assessment_item_id: str
+    task_version_id: str
     outcome: CheckerOutcome
     checker_type: CheckerType
     checker_version: str
+    reason_code: ResultReason
+    score_suggested: Decimal | None
+    max_score: Decimal
+    confidence: Decimal
+    summary: str
+    student_feedback_draft: str | None
+    teacher_summary: str | None
+    needs_human_review: bool
+    needs_human_review_reason: str | None
+    model_limitations: tuple[str, ...] = ()
+    evidence: Mapping[str, Any] = _EMPTY_EVIDENCE
     findings: tuple[Mapping[str, Any], ...] = ()
+    schema_version: str = "1.0"
+
+    def __post_init__(self) -> None:
+        try:
+            UUID(self.assessment_item_id); UUID(self.task_version_id)
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise ResultContractError("invalid_result_identity") from exc
+        if self.assessment_item_id != str(UUID(self.assessment_item_id)) or self.task_version_id != str(UUID(self.task_version_id)):
+            raise ResultContractError("invalid_result_identity")
+        if self.schema_version != "1.0" or not self.checker_version.strip() or len(self.checker_version) > 64:
+            raise ResultContractError()
+        if not isinstance(self.max_score, Decimal) or not self.max_score.is_finite() or self.max_score <= 0 or self.max_score.as_tuple().exponent < -2:
+            raise ResultContractError("invalid_max_score")
+        if not isinstance(self.confidence, Decimal) or not self.confidence.is_finite() or not Decimal(0) <= self.confidence <= Decimal(1) or self.confidence.as_tuple().exponent < -4:
+            raise ResultContractError("invalid_confidence")
+        if self.score_suggested is not None and (not isinstance(self.score_suggested, Decimal) or not self.score_suggested.is_finite() or self.score_suggested.as_tuple().exponent < -2):
+            raise ResultContractError("invalid_score")
+        expected = {
+            CheckerOutcome.CORRECT: self.max_score,
+            CheckerOutcome.INCORRECT: Decimal("0.00"),
+        }
+        if self.outcome in expected and self.score_suggested != expected[self.outcome]:
+            raise ResultContractError("invalid_outcome_score")
+        if self.outcome is CheckerOutcome.PARTIALLY_CORRECT and not (self.score_suggested is not None and Decimal("0.00") < self.score_suggested < self.max_score):
+            raise ResultContractError("invalid_outcome_score")
+        if self.outcome in {CheckerOutcome.UNCLEAR, CheckerOutcome.INSUFFICIENT_RUBRIC, CheckerOutcome.MANUAL_REQUIRED} and self.score_suggested is not None:
+            raise ResultContractError("invalid_outcome_score")
+        review_outcomes = {CheckerOutcome.UNCLEAR, CheckerOutcome.INSUFFICIENT_RUBRIC, CheckerOutcome.MANUAL_REQUIRED}
+        if self.needs_human_review != (self.outcome in review_outcomes) or self.needs_human_review != (self.needs_human_review_reason is not None):
+            raise ResultContractError("invalid_review_contract")
+        if not self.summary.strip() or not isinstance(self.model_limitations, tuple) or not isinstance(self.evidence, Mapping) or not isinstance(self.findings, tuple):
+            raise ResultContractError()
 
 
 @runtime_checkable
@@ -256,13 +325,18 @@ def _route_answered(item: Mapping[str, Any], method: Mapping[str, Any], fmt: str
         if not isinstance(options,Sequence) or isinstance(options,(str,bytes)) or not options: return _insufficient(item,candidate,RoutingReason.MISSING_CHOICE_OPTIONS)
         ids,keys,orders=set(),set(),set()
         for option in options:
-            if not isinstance(option,Mapping) or _uuid(option.get("id")) is None or option.get("id") in ids or option.get("option_key") in keys or option.get("order_index") in orders:
+            if (not isinstance(option,Mapping) or _uuid(option.get("id")) is None or
+                not isinstance(option.get("option_key"),str) or not option["option_key"].strip() or
+                isinstance(option.get("order_index"),bool) or not isinstance(option.get("order_index"),int) or option["order_index"] < 0 or
+                option.get("id") in ids or option.get("option_key") in keys or option.get("order_index") in orders):
                 return _insufficient(item,candidate,RoutingReason.DUPLICATE_CHOICE_OPTION)
             ids.add(option["id"]);keys.add(option.get("option_key"));orders.add(option.get("order_index"))
         accepted=set()
         for answer in answers:
             selected=answer.get("option_ids")
-            if not isinstance(selected,Sequence) or isinstance(selected,(str,bytes)) or not selected or any(x not in ids for x in selected):
+            if (not isinstance(selected,Sequence) or isinstance(selected,(str,bytes)) or not selected or
+                any(_uuid(x) is None or x not in ids for x in selected) or len(set(selected)) != len(selected) or
+                _uuid(answer.get("id")) is None):
                 return _insufficient(item,candidate,RoutingReason.UNKNOWN_CHOICE_OPTION)
             if fmt == "single_choice" and len(selected)!=1: return _insufficient(item,candidate,RoutingReason.INVALID_SINGLE_CHOICE)
             key=tuple(sorted(selected))
@@ -274,8 +348,26 @@ def _route_answered(item: Mapping[str, Any], method: Mapping[str, Any], fmt: str
         if mode not in {"all_or_nothing","per_option"} or mode=="per_option" and fmt!="multiple_choice":
             return _insufficient(item,candidate,RoutingReason.INVALID_WEIGHTED_POLICY)
         rules=policy.get("option_rules",())
-        if mode=="per_option" and (not isinstance(rules,Sequence) or any(not isinstance(r,Mapping) or r.get("option_id") not in ids for r in rules)):
+        if mode=="all_or_nothing" and rules not in (None,(),[]):
             return _insufficient(item,candidate,RoutingReason.INVALID_WEIGHTED_POLICY)
+        if mode=="per_option":
+            if not isinstance(rules,Sequence) or isinstance(rules,(str,bytes)) or len(rules)!=len(ids):
+                return _insufficient(item,candidate,RoutingReason.INVALID_WEIGHTED_POLICY)
+            rule_ids=set(); correct=Decimal(0); membership=set().union(*accepted)
+            option_keys={x["id"]:x["option_key"] for x in options}
+            for rule in rules:
+                weight=_decimal(rule.get("weight")) if isinstance(rule,Mapping) else None
+                role=rule.get("role") if isinstance(rule,Mapping) else None
+                oid=rule.get("option_id") if isinstance(rule,Mapping) else None
+                if (oid not in ids or oid in rule_ids or rule.get("option_key") != option_keys.get(oid) or
+                    role not in {"correct","distractor"} or weight is None or
+                    role=="correct" and weight<=0 or role=="distractor" and weight>=0 or
+                    (role=="correct") != (oid in membership)):
+                    return _insufficient(item,candidate,RoutingReason.INVALID_WEIGHTED_POLICY)
+                rule_ids.add(oid)
+                if role=="correct": correct+=weight
+            if correct != Decimal("1.000000"):
+                return _insufficient(item,candidate,RoutingReason.INVALID_WEIGHTED_POLICY)
     return _decision(item,candidate,RoutingDisposition.READY,_READY_REASON[candidate])
 
 

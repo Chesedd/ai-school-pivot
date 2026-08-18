@@ -228,9 +228,11 @@ or student content. Primary reason selection and diagnostic ordering are determi
 The transport-neutral async `Checker` protocol has stable `checker_type` and
 `checker_version`, accepts an immutable snapshot-item/decision request, and returns a
 typed result draft with `correct`, `partially_correct`, `incorrect`, `unclear`,
-`insufficient_rubric`, or `manual_required`. No concrete checker exists in 4.3. The
-application draft intentionally includes `unclear`; persistence compatibility must
-be verified and, if needed, migrated only in the later phase that persists outcomes.
+`insufficient_rubric`, or `manual_required`. Phase 4.4 adds the application-only
+`exact_v1` and `choice_v1` implementations and structured result schema `1.0`.
+The application draft intentionally includes `unclear`; the current PostgreSQL enum
+does not accept it. Persistence compatibility remains deferred to the later phase
+that persists outcomes, so Phase 4.4 is not persisted end-to-end checking.
 
 ## 6. Exact and choice contracts
 
@@ -259,6 +261,32 @@ policy: sum positive selected correct weights minus explicit distractor penaltie
 clamped `[0,max]`; otherwise no partial. Extra options fail an all-or-nothing set.
 Evidence stores matched/missing/extra option IDs, not labels or expected solution;
 student feedback must not disclose unselected correct options.
+
+Phase 4.4 executes these rules only from the immutable item and its Phase 4.3
+`RoutingDecision`. Exact uses Python string equality and performs no runtime trim,
+case folding, NFC, newline conversion, whitespace collapsing, fuzzy comparison, or
+other normalization. All-or-nothing choice compares sets against OR alternatives.
+For a mismatch, technical evidence references the alternative with the smallest
+symmetric difference, breaking ties by canonical accepted-answer UUID.
+
+Version-1 per-option multiple-choice scoring first gives an exact accepted-set match
+the frozen maximum. Otherwise it computes `fraction = sum(selected rule weights)`,
+then `bounded_fraction = min(1, max(0, fraction))`, and finally applies
+`ROUND_HALF_UP(bounded_fraction * frozen points, 0.01)` exactly once, with no
+intermediate rounding. The rounded score determines correct, incorrect, or partial.
+An unknown snapshotted option UUID produces `unclear` with review, never an ordinary
+incorrect verdict. Unanswered routing produces incorrect, zero, confidence `1.0000`
+without invoking any checker or provider. Insufficient/manual routing similarly
+builds a review result without checker execution.
+
+Deterministic evidence contains only bounded routing codes, canonical technical
+UUIDs, counts, policy version/mode, and plain Decimal strings. It excludes raw and
+normalized answer text, accepted text, statements, solutions, option labels/content,
+and student, participant, assignment, group, or class identity. Student feedback
+does not reveal accepted values or missing correct option IDs. Phase 4.4 performs no
+result persistence, event transition, provider call, worker orchestration, numeric,
+expression, or LLM execution; ready routes for those future checkers fail with a
+typed privacy-safe unsupported-execution error.
 
 ## 7. Numeric and structured-expression contracts
 
