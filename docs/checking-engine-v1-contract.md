@@ -187,6 +187,51 @@ match is allowed only under an authored canonicalizer contract; otherwise manual
 `long_text` never exact. Format/type matrix mismatch and incompatible checker hints
 are methodology conflict → `insufficient_rubric` and human review.
 
+### 5.1 Phase 4.3 application contract
+
+The public pure entry point is `route_snapshot(snapshot) -> tuple[RoutingDecision,
+...]`. It preserves the canonical item order, reads no repository/current version,
+does not normalize an answer, execute a checker, calculate a score, or mutate its
+input. Routing execution and persistence (`routing_decided` included) are explicitly
+deferred to 4.4+. The supported versions are `checking_input_v1`, Handoff `1`, and
+`checking_routing_contract_v1`. A well-shaped future version produces a manual
+decision; a malformed envelope raises a typed, privacy-safe routing input error.
+
+`RoutingDecision` is immutable and contains only `assessment_item_id`,
+`task_version_id`, the supported routing-contract version, effective `checker_type`,
+`candidate_checker_type`, `disposition`, primary `reason_code`, `unanswered`,
+`execution_required`, and an ordered tuple of bounded diagnostics. It never contains
+answers, statement, expected solution, rubric content, student/participant identity,
+or other PII. `ready` uses the natural checker and requires later execution;
+`unanswered` keeps that checker but requires no execution; `insufficient_rubric`
+uses effective `manual_required` while retaining the natural candidate; and
+`manual_required` denotes valid authored intent beyond the V1 safety boundary.
+
+Natural mapping is `short_text` → `exact`, `number` → `numeric`, both choice formats
+→ `multiple_choice`, `expression` → `structured_expression`, and `long_text` →
+`llm_rubric`. Unanswered means **only** both frozen raw and normalized answers are
+null. A format/type conflict remains insufficient even when unanswered. Exact typed
+methodology takes precedence over a simultaneously valid rubric; short text falls
+back to LLM only with both a valid points rubric and expected solution. Long text is
+never exact. Unknown semantic formats and policies are never inferred.
+
+The stable V1 primary reason allowlist is:
+
+| Class | Reason codes |
+|---|---|
+| ready/unanswered | `routed_exact`, `routed_numeric`, `routed_choice`, `routed_expression_identity`, `routed_open_rubric`, `unanswered` |
+| malformed/incompatible methodology | `malformed_snapshot`, `malformed_item`, `answer_format_mismatch`, `incompatible_task_answer_format`, `legacy_untyped_answer`, `missing_typed_accepted_answer`, `incompatible_accepted_answer_kind`, `missing_canonical_value`, `duplicate_canonical_alternative`, `invalid_numeric_tolerance`, `missing_choice_options`, `duplicate_choice_option`, `unknown_choice_option`, `invalid_single_choice_cardinality`, `missing_choice_scoring_policy`, `invalid_weighted_policy`, `missing_expression_identity_contract`, `missing_expected_solution`, `missing_or_empty_rubric`, `rubric_max_items_mismatch`, `contradictory_methodology` |
+| valid but outside V1 | `unknown_answer_format`, `unsupported_contract_version`, `unsupported_normalization_policy`, `unsupported_unit`, `semantic_text_judgment_required`, `expression_equivalence_required`, `unsupported_grading_mode`, `outside_v1_capability` |
+
+Every code is a trim-nonblank string of at most 64 characters and carries no authored
+or student content. Primary reason selection and diagnostic ordering are deterministic.
+The transport-neutral async `Checker` protocol has stable `checker_type` and
+`checker_version`, accepts an immutable snapshot-item/decision request, and returns a
+typed result draft with `correct`, `partially_correct`, `incorrect`, `unclear`,
+`insufficient_rubric`, or `manual_required`. No concrete checker exists in 4.3. The
+application draft intentionally includes `unclear`; persistence compatibility must
+be verified and, if needed, migrated only in the later phase that persists outcomes.
+
 ## 6. Exact and choice contracts
 
 Exact compares only stored `normalized_answer.text` to typed accepted canonical text.
