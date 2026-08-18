@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import json
+from decimal import Decimal
 from dataclasses import asdict
 from pathlib import Path
 from uuid import uuid4
@@ -9,7 +10,7 @@ import pytest
 
 from app.application.checking_routing import (
     Checker, CheckerOutcome, CheckerRequest, CheckerResultDraft, CheckerType,
-    RoutingDisposition, RoutingInputError, RoutingReason, route_snapshot,
+    ResultReason, RoutingDisposition, RoutingInputError, RoutingReason, route_snapshot,
 )
 
 FIXTURES_DIR = Path(__file__).resolve().parents[1] / "fixtures"
@@ -207,7 +208,15 @@ def test_canonical_phase_42_fixture_routes_unanswered_exact():
 def test_common_async_checker_protocol():
     class Fake:
         checker_type=CheckerType.EXACT; checker_version="fake_v1"
-        async def check(self,request): return CheckerResultDraft(CheckerOutcome.CORRECT,self.checker_type,self.checker_version)
+        async def check(self,request): return CheckerResultDraft(
+            assessment_item_id=request.decision.assessment_item_id,
+            task_version_id=request.decision.task_version_id,
+            outcome=CheckerOutcome.CORRECT,checker_type=self.checker_type,
+            checker_version=self.checker_version,reason_code=ResultReason.EXACT_MATCH,
+            score_suggested=Decimal("2.00"),max_score=Decimal("2.00"),
+            confidence=Decimal("1.0000"),summary="fake result",
+            student_feedback_draft=None,teacher_summary=None,
+            needs_human_review=False,needs_human_review_reason=None)
     fake=Fake(); assert isinstance(fake,Checker)
     value=snapshot(answered=False); decision=route_snapshot(value)[0]
     assert asyncio.run(fake.check(CheckerRequest(value["items"][0],decision))).outcome is CheckerOutcome.CORRECT
