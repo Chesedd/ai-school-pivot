@@ -119,7 +119,7 @@ async def test_archive_close_later_version_rerun_preserves_history(context):
     async with engine.begin() as c:
         await c.execute(text("UPDATE tasks SET archived_at=clock_timestamp() WHERE id IN (:task,:second_task)"),ids)
         await c.execute(text("UPDATE task_versions SET status='archived' WHERE id IN (:version,:second_version)"),ids)
-        await c.execute(text("UPDATE assignments SET status='closed',closed_at=clock_timestamp() WHERE id=:assignment"),ids)
+        await c.execute(text("UPDATE assignments SET status='closed',closed_at=clock_timestamp(),closed_by=:actor WHERE id=:assignment"),ids)
         await c.execute(text("INSERT INTO task_versions(id,task_id,version_no,statement,task_type,answer_format,difficulty,status,created_by) VALUES (:new_version,:task,2,'New truth','problem','number',50,'draft',:actor)"),ids)
     rerun=await intake.create(request(ids,"rerun",supersedes=first.id))
     async with engine.connect() as c:
