@@ -169,8 +169,9 @@ def test_result_contract_rejects_silent_score_repair():
 
 
 def test_ready_unsupported_checker_is_typed_and_private():
-    value=item("expression",{"expression":"x"}); value["raw_answer"]="SECRET"
-    value["methodology"]["accepted_answers"]=[{"id":uid(),"value_kind":"expression","canonical_text":"x",
-        "normalization_policy_code":"expression_identity_v1","normalization_policy_version":1}]
+    value=item("long_text",{"text":"SECRET"}); value["raw_answer"]="SECRET"
+    value["methodology"]["expected_solution"]={"solution_text":"PRIVATE"}
+    value["methodology"]["rubric"]={"grading_mode":"points","max_score":"2.5","items":[
+        {"id":uid(),"order_index":0,"criterion":"PRIVATE","max_points":"2.5"}]}
     with pytest.raises(DeterministicExecutionError) as error: run(value)
     assert str(error.value)=="unsupported_checker_execution" and "SECRET" not in str(error.value)

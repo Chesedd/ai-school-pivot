@@ -4,7 +4,8 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP, localcontext
-from typing import Any
+from enum import Enum
+from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
 
 from app.application.checking_routing import (
@@ -17,6 +18,7 @@ RESULT_SCHEMA_VERSION = "1.0"
 EXACT_CHECKER_VERSION = "exact_v1"
 CHOICE_CHECKER_VERSION = "choice_v1"
 NUMERIC_CHECKER_VERSION = "numeric_v1"
+EXPRESSION_CHECKER_VERSION = "expression_identity_v1"
 UNANSWERED_CHECKER_VERSION = "unanswered_v1"
 ROUTING_FALLBACK_VERSION = "routing_fallback_v1"
 
@@ -28,6 +30,27 @@ class DeterministicExecutionError(ValueError):
             code = "invalid_execution_error"
         self.code = code
         super().__init__(code)
+
+
+class ExpressionProofResult(str, Enum):
+    PROVEN_EQUIVALENT = "proven_equivalent"
+    UNPROVEN = "unproven"
+
+
+@runtime_checkable
+class ExpressionEquivalenceAdapter(Protocol):
+    async def check(self, canonical_actual: str, canonical_expected: str,
+                    policy_code: str, policy_version: int) -> ExpressionProofResult: ...
+
+
+class IdentityExpressionEquivalenceAdapter:
+    """Pure V1 proof adapter: string identity is the only supported proof."""
+    async def check(self, canonical_actual: str, canonical_expected: str,
+                    policy_code: str, policy_version: int) -> ExpressionProofResult:
+        if (policy_code, policy_version) != ("expression_identity_v1", 1):
+            return ExpressionProofResult.UNPROVEN
+        return (ExpressionProofResult.PROVEN_EQUIVALENT
+                if canonical_actual == canonical_expected else ExpressionProofResult.UNPROVEN)
 
 
 class FrozenEvidence(Mapping[str, Any]):
@@ -414,6 +437,99 @@ class NumericChecker:
         return parsed
 
 
+def _bounded_expression(value: Any) -> str | None:
+    if not isinstance(value, str) or not value or len(value) > 60000:
+        return None
+    try:
+        encoded = json.dumps({"expression": value}, ensure_ascii=False,
+                             separators=(",", ":")).encode("utf-8")
+    except (TypeError, UnicodeEncodeError):
+        return None
+    return value if len(encoded) <= 65536 else None
+
+
+class ExpressionChecker:
+    """Conservative expression checker that can prove string identity only."""
+    checker_type = CheckerType.STRUCTURED_EXPRESSION
+    checker_version = EXPRESSION_CHECKER_VERSION
+
+    def __init__(self, adapter: ExpressionEquivalenceAdapter | None = None):
+        self._adapter = adapter or IdentityExpressionEquivalenceAdapter()
+
+    async def check(self, request: CheckerRequest) -> CheckerResultDraft:
+        decision, item = request.decision, request.item
+        if (decision.disposition is not RoutingDisposition.READY or
+                decision.checker_type is not self.checker_type or
+                item.get("answer_format") != "expression"):
+            raise DeterministicExecutionError("incompatible_checker_request")
+        normalized = item.get("normalized_answer")
+        actual = (_bounded_expression(normalized.get("expression"))
+                  if isinstance(normalized, Mapping) and set(normalized) == {"expression"}
+                  else None)
+        if actual is None:
+            return _result(request, outcome=CheckerOutcome.UNCLEAR,
+                checker_type=self.checker_type, checker_version=self.checker_version,
+                reason=ResultReason.MALFORMED_NORMALIZED_ANSWER, score=None,
+                summary="The stored expression cannot be checked safely.",
+                teacher="Expression answer review is required.",
+                review_reason=ResultReason.MALFORMED_NORMALIZED_ANSWER.value)
+        parsed = self._methodology(_method(item))
+        if parsed is None:
+            return _result(request, outcome=CheckerOutcome.INSUFFICIENT_RUBRIC,
+                checker_type=self.checker_type, checker_version=self.checker_version,
+                reason=ResultReason.INVALID_EXPRESSION_METHODOLOGY, score=None,
+                summary="The snapshotted expression methodology is invalid.",
+                teacher="Expression methodology review is required.",
+                review_reason=ResultReason.INVALID_EXPRESSION_METHODOLOGY.value)
+        matches: list[str] = []
+        for identifier, expected in parsed:
+            proof = await self._adapter.check(actual, expected, "expression_identity_v1", 1)
+            if not isinstance(proof, ExpressionProofResult):
+                raise DeterministicExecutionError("invalid_expression_adapter_response")
+            if proof is ExpressionProofResult.PROVEN_EQUIVALENT:
+                matches.append(identifier)
+        evidence = {"policy_code": "expression_identity_v1", "policy_version": 1,
+                    "adapter_version": self.checker_version,
+                    "alternatives_checked": len(parsed),
+                    "proof_status": (ExpressionProofResult.PROVEN_EQUIVALENT.value
+                                     if matches else ExpressionProofResult.UNPROVEN.value)}
+        if matches:
+            evidence["matched_accepted_answer_id"] = min(matches)
+            return _result(request, outcome=CheckerOutcome.CORRECT,
+                checker_type=self.checker_type, checker_version=self.checker_version,
+                reason=ResultReason.EXPRESSION_IDENTITY_MATCH, score=_points(item),
+                summary="The expression is identical to an accepted expression.",
+                feedback="Your expression was verified by exact identity comparison.",
+                teacher="Expression identity was proven.", evidence=evidence)
+        return _result(request, outcome=CheckerOutcome.MANUAL_REQUIRED,
+            checker_type=self.checker_type, checker_version=self.checker_version,
+            reason=ResultReason.EXPRESSION_EQUIVALENCE_UNPROVEN, score=None,
+            summary="Automatic identity comparison could not establish equivalence; manual review is required.",
+            feedback="Automatic identity comparison could not establish equivalence; manual review is required.",
+            teacher="Expression equivalence remains unproven.",
+            review_reason=ResultReason.EXPRESSION_EQUIVALENCE_UNPROVEN.value,
+            evidence=evidence)
+
+    @staticmethod
+    def _methodology(method: Mapping[str, Any] | None) -> list[tuple[str, str]] | None:
+        answers = method.get("accepted_answers") if method else None
+        if not isinstance(answers, Sequence) or isinstance(answers, (str, bytes)) or not answers:
+            return None
+        parsed=[]; identifiers=set(); canonical_values=set()
+        for answer in answers:
+            if not isinstance(answer, Mapping): return None
+            identifier=_uuid(answer.get("id")); canonical=_bounded_expression(answer.get("canonical_text"))
+            if (identifier is None or identifier in identifiers or
+                    answer.get("value_kind") != "expression" or canonical is None or
+                    canonical in canonical_values or
+                    (answer.get("normalization_policy_code"),
+                     answer.get("normalization_policy_version")) != ("expression_identity_v1", 1)):
+                return None
+            identifiers.add(identifier); canonical_values.add(canonical)
+            parsed.append((identifier, canonical))
+        return parsed
+
+
 def _validate_request(request: CheckerRequest) -> None:
     if not isinstance(request.item, Mapping) or not isinstance(request.decision, RoutingDecision):
         raise DeterministicExecutionError("invalid_execution_request")
@@ -440,7 +556,8 @@ async def execute_deterministic(request: CheckerRequest, checkers: Mapping[Check
     if request.decision.disposition in {RoutingDisposition.INSUFFICIENT_RUBRIC,RoutingDisposition.MANUAL_REQUIRED}:
         return build_routing_fallback_result(request)
     registry=checkers if checkers is not None else {CheckerType.EXACT:ExactChecker(),
-        CheckerType.MULTIPLE_CHOICE:ChoiceChecker(), CheckerType.NUMERIC:NumericChecker()}
+        CheckerType.MULTIPLE_CHOICE:ChoiceChecker(), CheckerType.NUMERIC:NumericChecker(),
+        CheckerType.STRUCTURED_EXPRESSION:ExpressionChecker()}
     checker=registry.get(request.decision.checker_type)
     if checker is None: raise DeterministicExecutionError("unsupported_checker_execution")
     if checker.checker_type is not request.decision.checker_type:
