@@ -38,7 +38,6 @@ class RequestConflict(ProviderBoundaryError): pass
 
 def _bounded(value: str, maximum: int, label: str, *, identifier: bool = False) -> str:
     if type(value) is not str or not value or value != value.strip() or len(value) > maximum:
-    if not isinstance(value, str) or not value or value != value.strip() or len(value) > maximum:
         raise ProviderBoundaryError(f"invalid {label}")
     if identifier and not _ID.fullmatch(value): raise ProviderBoundaryError(f"invalid {label}")
     return value
