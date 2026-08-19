@@ -1,10 +1,14 @@
+import json
 from decimal import Decimal
-from uuid import uuid4
+from types import SimpleNamespace
+from uuid import UUID, uuid4
 
 import pytest
 
 from app.application.checking import (CreateRunCommand, InvalidPersistenceCommand,
     safe_event_details, validate_finding, validate_model_result, validate_result, validate_transition)
+from app.application.checking_provider import AttemptDisposition, PromptSpec
+from app.infrastructure.checking_repository import _attempt_state, _prompt_lock_key
 
 
 def command(**changes):
@@ -50,3 +54,27 @@ def test_event_details_are_allowlisted_and_exclude_student_data():
 def test_model_result_must_belong_to_same_run_and_item():
     run,item=uuid4(),uuid4(); validate_model_result(run,item,run,item)
     with pytest.raises(InvalidPersistenceCommand): validate_model_result(run,item,uuid4(),item)
+
+
+def test_prompt_advisory_lock_key_is_canonical_unambiguous_and_text_safe():
+    normal=PromptSpec("provider-probe","1.0.0","synthetic","probe-v1")
+    key=_prompt_lock_key(normal)
+    assert key=='["provider-probe","1.0.0"]'
+    assert "\x00" not in key and json.loads(key)==["provider-probe","1.0.0"]
+    assert _prompt_lock_key(normal)==key
+    assert _prompt_lock_key(PromptSpec("a:b","c","x","v")) != _prompt_lock_key(PromptSpec("a","b:c","x","v"))
+    controlled=_prompt_lock_key(PromptSpec("provider-probe","1\x00control","x","v"))
+    assert "\x00" not in controlled and "\\u0000" in controlled
+
+
+def test_attempt_state_canonicalizes_driver_uuid_subclass():
+    class DriverUUID(UUID): pass
+    expected=uuid4(); driver_value=DriverUUID(bytes=expected.bytes)
+    row=SimpleNamespace(id=driver_value,attempt_no=1,status="running",
+        request_fingerprint="a"*64,validated_output=None,error_code=None)
+    state=_attempt_state(row,AttemptDisposition.CLAIMED)
+    assert state.attempt_id==expected and state.attempt_id.bytes==driver_value.bytes
+    assert type(state.attempt_id) is UUID and type(state.attempt_id) is not DriverUUID
+    assert state.attempt_no==1 and state.status=="running"
+    assert state.disposition is AttemptDisposition.CLAIMED
+    assert state.request_fingerprint=="a"*64
