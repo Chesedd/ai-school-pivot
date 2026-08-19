@@ -131,10 +131,20 @@ def test_exact_methodology_failures(mutation,reason):
     value=snapshot(); mutation(value); assert route_snapshot(value)[0].reason_code is reason
 
 
-@pytest.mark.parametrize("field,value",[("absolute_tolerance",None),("absolute_tolerance","-1"),("relative_tolerance","NaN")])
-def test_invalid_numeric_tolerances(field,value):
+@pytest.mark.parametrize("field,value,reason",[("absolute_tolerance","-1",RoutingReason.INVALID_NUMERIC_TOLERANCE),
+    ("relative_tolerance","NaN",RoutingReason.INVALID_NUMERIC_TOLERANCE),
+    ("absolute_tolerance",1.0,RoutingReason.INVALID_NUMERIC_TOLERANCE),
+    ("relative_tolerance",True,RoutingReason.INVALID_NUMERIC_TOLERANCE),
+    ("canonical_decimal","1e0",RoutingReason.MISSING_CANONICAL_VALUE)])
+def test_invalid_numeric_tolerances(field,value,reason):
     item=snapshot("number"); numeric(item); item["items"][0]["methodology"]["accepted_answers"][0][field]=value
-    assert route_snapshot(item)[0].reason_code is RoutingReason.INVALID_NUMERIC_TOLERANCE
+    assert route_snapshot(item)[0].reason_code is reason
+
+
+def test_null_numeric_tolerances_mean_zero_and_route_ready():
+    item=snapshot("number"); numeric(item); answer=item["items"][0]["methodology"]["accepted_answers"][0]
+    answer["absolute_tolerance"]=answer["relative_tolerance"]=None
+    assert route_snapshot(item)[0].disposition is RoutingDisposition.READY
 
 
 def test_unsupported_unit_is_manual():

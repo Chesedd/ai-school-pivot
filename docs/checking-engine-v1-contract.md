@@ -290,10 +290,39 @@ typed privacy-safe unsupported-execution error.
 
 ## 7. Numeric and structured-expression contracts
 
+Phase 4.5 implements an application-only `NumericChecker` (`numeric_v1`) over the
+immutable snapshot and Phase 4.3 decision. It reads the student value exclusively
+from the already persisted `normalized_answer.decimal` and authored values exclusively
+from `accepted_answers[].canonical_decimal`; it never rereads a repository or reruns
+normalization. The exact formula is `delta = abs(a-e)`,
+`threshold = absolute_tolerance + relative_tolerance * abs(e)`, with a match when
+`delta <= threshold` (inclusive). A null tolerance is exactly zero. Each alternative
+has its own tolerances, and all arithmetic uses a per-comparison local Decimal context
+sized from its operands, without float conversion, intermediate rounding, silent
+clamping, or reliance on the default precision of 28.
+
+Any matching alternative produces the frozen maximum; numeric checking has no partial
+score. Multiple matches select minimum delta then canonical accepted-answer UUID.
+Mismatch evidence selects minimum positive `delta-threshold`, then delta, then UUID,
+so accepted-answer order cannot affect canonical serialization. Malformed historical
+student values produce `unclear` and review; malformed numeric methodology produces
+`insufficient_rubric` and review. Units remain `manual_required`; a defensively forced
+ready unit-bearing request fails closed. Free-form `normalization_rule` remains inert.
+
+Numeric evidence is limited to `actual_decimal`, `alternatives_checked`, the compared
+technical accepted-answer UUID, matched UUID for a match, `delta`, `threshold`, and
+the selected alternative's absolute and relative tolerances. Decimal evidence is
+plain, canonical, arbitrary-precision text. It excludes accepted decimal values, raw
+answers, statements, solutions, other alternatives, labels, legacy fields, and user,
+class, assignment, or group identity. Feedback never reveals the expected value or
+tolerance boundary. Phase 4.5 does not persist results in PostgreSQL; the persistence
+compatibility gap for `unclear` remains deferred. Expression and LLM execution, units,
+Teacher Review, and orchestration remain for later phases.
+
 Numeric uses Python/PostgreSQL-equivalent arbitrary precision `Decimal`, never binary
 float. Student source is `normalized_answer.decimal`, whose grammar/canonicalization
-is the existing Phase 3 normalizer; accepted source is the new typed decimal field
-(or strictly parsed legacy `answer_value` during transition). Non-finite/malformed
+is the existing Phase 3 normalizer; accepted source is the typed decimal field only.
+Legacy `answer_value` is not correctness truth. Non-finite/malformed
 historical normalized values are `unclear`+review; malformed accepted methodology is
 `insufficient_rubric`.
 
