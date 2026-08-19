@@ -722,3 +722,69 @@ implemented. Phase 4.7's provider boundary is also deferred, as are result
 persistence/orchestration and resolution of the existing `unclear` compatibility
 gap. Phase 4.6 produces only the existing schema `1.0` application result draft;
 it does not perform official or final grading.
+
+## Phase 4.7 — versioned LLM provider boundary
+
+Phase 4.7 introduces an application-owned, transport-neutral provider port. Frozen
+request/response DTOs contain only allowlisted technical provider data; no SDK type,
+Checking run/item identifier, submission identity, actor identity, snapshot, or arbitrary
+provider metadata crosses the port. The sole prompt in this phase is the synthetic
+provider-contract probe. Its exact UTF-8 template bytes are SHA-256 hashed and its stable
+name, semantic version, template hash, and output-schema version form immutable prompt
+identity. Retired prompts cannot start new executions but remain valid history for replay.
+
+Settings are limited to a finite plain Decimal-string temperature, bounded integer seed,
+and positive bounded output-token limit. Canonical JSON rejects floats, coercion, nested
+mutable settings, unknown keys, and unsupported objects. The lowercase SHA-256 request
+fingerprint covers provider/model IDs, 30,000 ms timeout, detached settings, all prompt and
+strict-schema identity, and exact ordered system/user message text. Attempt and database
+IDs are excluded. Its deterministic `sha256:<fingerprint>` token is advisory provider
+correlation/idempotency, not an exactly-once claim.
+
+Responses must be exactly one JSON object parsed by ordinary `json.loads`: fences, prose
+extraction, repair, coercion, partial parsing, additional fields, and wrong primitive types
+are rejected. A supplied parsed candidate must be canonically identical. Malformed JSON
+is `invalid_json`; strict Pydantic schema failure is `schema_invalid`; Phase 4.8 alone may
+define `semantic_invalid`. The persisted validated envelope contains schema version,
+validated candidate, and bounded finish metadata.
+
+Each attempt has an application-enforced 30-second timeout. Timeout, transport,
+rate-limit, and provider-5xx failures permit three total attempts; invalid JSON permits
+two; authentication, invalid request, content block, schema/semantic invalidity, and
+unknown errors permit one. Full-jitter exponential backoff is capped at 30 seconds and
+clock, jitter, and sleep are injectable. A short transaction registers/loads the prompt
+and claims a `running` attempt, then commits before the external call. A second short
+transaction CAS-finalizes it and atomically appends optional cost. Retries claim the next
+contiguous row. Provider calls are at least once while attempt rows are persisted exactly
+once: a crash before finalization can repeat an external call. A running row is reported
+for worker recovery rather than duplicated; terminal success or exhaustion replays
+without a call; a changed fingerprint conflicts. Leases, stale-attempt recovery, queues,
+workers, and polling remain deferred orchestration work.
+
+Raw output is sensitive and is stored only in `model_runs.raw_output`; it is excluded from
+events, cost telemetry, exceptions, logs, traces, and HTTP APIs. Retention duration is a
+configurable Phase 7 policy and is intentionally not invented here. Usage is validated
+locally. Versioned local pricing uses Decimal token rates and rounds only the final amount
+to `NUMERIC(18,8)` with `ROUND_HALF_UP`; provider monetary prose is ignored. Phase 4.8
+rubric schema, prompt, semantic validation, scoring, findings, and results were not
+started. Phase 4.9 and provider SDK integration also remain deferred.
+
+### Phase 4.7 corrective persistence acceptance
+
+The persistence-only `ProviderExecutionKey` carries the CheckRun and assessment-item UUIDs
+into the attempt store; it is intentionally absent from `ProviderRequest` and can never
+reach `LLMProvider.evaluate`. `SQLAlchemyProviderAttemptStore` uses an
+`async_sessionmaker` to open and close a fresh transaction for `replay_or_claim`, returns
+an explicit `claimed`, `running_existing`, or `terminal_existing` disposition, and closes
+that transaction before the service invokes the provider. Finalization uses a second fresh
+transaction for the status CAS and optional cost event. UUID attempt identity is never
+encoded with control-flow string prefixes.
+
+All schema, parsed-candidate, validated-envelope, attempt, and outcome JSON is recursively
+detached and frozen; persistence explicitly thaws it to fresh plain JSONB-compatible
+objects. Canonicalization continues to reject floats and unsupported values without
+rewriting strings. The application measures each provider call with its injected monotonic
+clock, rejects non-finite, Boolean, or backward readings, converts elapsed time to
+nonnegative integer milliseconds, and overrides adapter-reported latency before
+persistence. These corrections do not introduce rubric prompting, semantic grading,
+results, findings, workers, routes, or any Phase 4.8 behavior.
