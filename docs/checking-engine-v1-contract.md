@@ -680,3 +680,45 @@ its weights are authored Decimal values. No checker, inference from labels/keys,
 unit conversion, free-text normalization, evaluation, or CAS is introduced here.
 A canonical `unit_code` only records authored identity and can still require manual
 checking until input-unit support exists.
+
+## Phase 4.6 — structured expression identity boundary
+
+Phase 4.6 adds the application-layer `structured_expression` checker version
+`expression_identity_v1`. It consumes the frozen Phase 3 normalized mapping
+`{"expression": <string>}` exactly as stored. Phase 3 NFC, newline conversion, and
+outer trimming are the only preprocessing: the checker does not trim, rewrite,
+tokenize, parse, simplify, evaluate, case-fold, or otherwise canonicalize text.
+Python string equality is the sole V1 correctness proof. One or more typed
+expression alternatives are OR alternatives; a proven match receives the frozen
+maximum score, and canonical accepted-answer UUID ordering makes defensive match
+selection deterministic.
+
+The transport-neutral `ExpressionEquivalenceAdapter` has only two bounded proof
+outcomes: `proven_equivalent` and `unproven`. The production adapter is pure,
+identity-only, supports only policy `expression_identity_v1` version `1`, and has
+no database, provider, process, network, CAS, or LLM dependency. It cannot report
+non-equivalence. Consequently every non-identical expression is
+`manual_required`, never `incorrect` or `partially_correct`: automatic identity
+comparison could not establish equivalence and a human must review it. A malformed
+historical normalized value is `unclear`; malformed authored expression
+methodology is `insufficient_rubric`. Unsupported or future policies remain at the
+existing routing fallback and never invoke the checker. Unanswered expressions
+retain their natural checker identity but bypass checker execution.
+
+Expression strings must be non-empty, at most 60,000 Python characters, valid
+UTF-8/JSON data, and fit the existing 65,536-byte compact JSON boundary before an
+adapter is invoked. Accepted IDs and canonical strings must be unique and accepted
+IDs canonical UUIDs. Legacy `answer_value` and free-form `normalization_rule` are
+inert. Evidence is immutable and limited to policy code/version, checker/adapter
+version, alternatives checked, bounded proof status, and—only for a proven
+identity—the matched accepted-answer UUID. It excludes student and accepted
+expressions, other alternatives, statements, solutions, rubric/option content,
+student/participant/assignment/class identities, and arbitrary exceptions.
+Feedback never reveals an accepted expression.
+
+This phase adds no persistence, schema/migration, orchestration, provider or LLM
+execution. A future sandboxed CAS adapter is deferred and is not represented as
+implemented. Phase 4.7's provider boundary is also deferred, as are result
+persistence/orchestration and resolution of the existing `unclear` compatibility
+gap. Phase 4.6 produces only the existing schema `1.0` application result draft;
+it does not perform official or final grading.

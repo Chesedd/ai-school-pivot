@@ -1,6 +1,7 @@
 """Pure, deterministic routing contracts for a materialized Checking input v1."""
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -92,6 +93,9 @@ class ResultReason(str, Enum):
     NUMERIC_MATCH = "numeric_match"
     NUMERIC_MISMATCH = "numeric_mismatch"
     INVALID_NUMERIC_METHODOLOGY = "invalid_numeric_methodology"
+    EXPRESSION_IDENTITY_MATCH = "expression_identity_match"
+    EXPRESSION_EQUIVALENCE_UNPROVEN = "expression_equivalence_unproven"
+    INVALID_EXPRESSION_METHODOLOGY = "invalid_expression_methodology"
     ROUTING_INSUFFICIENT_RUBRIC = "routing_insufficient_rubric"
     ROUTING_MANUAL_REQUIRED = "routing_manual_required"
 
@@ -335,12 +339,20 @@ def _route_answered(item: Mapping[str, Any], method: Mapping[str, Any], fmt: str
     elif fmt == "expression":
         answers, reason = _typed(method, "expression")
         if reason: return _insufficient(item,candidate,reason)
-        seen=set()
+        seen=set(); answer_ids=set()
         for answer in answers:
+            identifier=_uuid(answer.get("id"))
+            if identifier is None or identifier in answer_ids:
+                return _insufficient(item,candidate,RoutingReason.MALFORMED_ITEM)
+            answer_ids.add(identifier)
             policy=(answer.get("normalization_policy_code"),answer.get("normalization_policy_version"))
             if policy != ("expression_identity_v1",1): return _manual(item,candidate,RoutingReason.EXPRESSION_EQUIVALENCE)
             value=answer.get("canonical_text")
-            if not isinstance(value,str) or not value: return _insufficient(item,candidate,RoutingReason.MISSING_EXPRESSION_IDENTITY)
+            try: encoded=json.dumps({"expression":value},ensure_ascii=False,separators=(",",":")).encode("utf-8")
+            except (TypeError, UnicodeEncodeError):
+                return _insufficient(item,candidate,RoutingReason.MISSING_EXPRESSION_IDENTITY)
+            if not isinstance(value,str) or not value or len(value)>60000 or len(encoded)>65536:
+                return _insufficient(item,candidate,RoutingReason.MISSING_EXPRESSION_IDENTITY)
             if value in seen: return _insufficient(item,candidate,RoutingReason.DUPLICATE_CANONICAL)
             seen.add(value)
     else:
