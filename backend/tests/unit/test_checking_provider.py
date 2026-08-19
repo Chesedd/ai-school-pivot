@@ -2,7 +2,7 @@ import asyncio
 from dataclasses import FrozenInstanceError
 from decimal import Decimal
 from types import MappingProxyType
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -31,6 +31,24 @@ def test_protocol_key_immutability_hash_and_fingerprint():
     key=ProviderExecutionKey(uuid4(),uuid4())
     assert not hasattr(req,"check_run_id") and str(key.check_run_id) not in repr(req)
     assert req.request_fingerprint!=request((ProviderMessage("user","SYNTHETIC_USER"),ProviderMessage("system","SYNTHETIC_SYSTEM"))).request_fingerprint
+
+
+def test_execution_key_canonicalizes_driver_uuid_subclasses_and_remains_frozen():
+    class DriverUUID(UUID): pass
+    run_id=uuid4(); item_id=uuid4(); driver_run_id=DriverUUID(bytes=run_id.bytes)
+    key=ProviderExecutionKey(driver_run_id,item_id)
+    assert type(key.check_run_id) is UUID and type(key.assessment_item_id) is UUID
+    assert key.check_run_id==run_id and key.check_run_id.bytes==driver_run_id.bytes
+    assert key.assessment_item_id==item_id and key.assessment_item_id.bytes==item_id.bytes
+    with pytest.raises(FrozenInstanceError): key.check_run_id=uuid4()
+    req=request()
+    assert not hasattr(req,"check_run_id") and str(run_id) not in repr(req)
+
+
+@pytest.mark.parametrize("invalid",[str(uuid4()),1,object(),None])
+def test_execution_key_rejects_non_uuid_values(invalid):
+    with pytest.raises(ProviderBoundaryError,match="^invalid execution key$"):
+        ProviderExecutionKey(invalid,uuid4())
 
 
 def test_recursive_json_freeze_thaw_is_detached_and_canonical():

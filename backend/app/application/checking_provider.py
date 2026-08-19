@@ -85,14 +85,20 @@ def settings_snapshot(settings: Mapping[str, Any]) -> Mapping[str, Any]:
     return freeze_json(result)
 
 
+def _canonical_uuid(value: object) -> UUID:
+    if not isinstance(value, UUID):
+        raise ProviderBoundaryError("invalid execution key")
+    return UUID(bytes=value.bytes)
+
+
 @dataclass(frozen=True)
 class ProviderExecutionKey:
     """Application persistence identity; never crosses the provider port."""
     check_run_id: UUID
     assessment_item_id: UUID
     def __post_init__(self):
-        if type(self.check_run_id) is not UUID or type(self.assessment_item_id) is not UUID:
-            raise ProviderBoundaryError("invalid execution key")
+        object.__setattr__(self, "check_run_id", _canonical_uuid(self.check_run_id))
+        object.__setattr__(self, "assessment_item_id", _canonical_uuid(self.assessment_item_id))
 
 
 @dataclass(frozen=True)
