@@ -186,7 +186,10 @@ class CheckingRepository:
 
 
 def _attempt_state(row: ModelRun, disposition: AttemptDisposition) -> AttemptState:
-    return AttemptState(row.id, row.attempt_no, row.status, disposition,
+    if not isinstance(row.id, UUID):
+        raise InvalidPersistenceCommand("invalid attempt identity")
+    attempt_id = UUID(bytes=row.id.bytes)
+    return AttemptState(attempt_id, row.attempt_no, row.status, disposition,
         row.request_fingerprint, row.validated_output, row.error_code)
 
 
