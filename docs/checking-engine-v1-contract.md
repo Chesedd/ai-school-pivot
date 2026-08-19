@@ -795,3 +795,22 @@ results, findings, workers, routes, or any Phase 4.8 behavior.
 Application validation requires every authored rubric item once and in order; checks canonical Decimal allocations, status consistency, provenance allowlists, and bounded answer-slice evidence; and sorts findings by technical identity. Typical-error and skill provenance is re-derived from the frozen snapshot. Invalid output or exhausted provider failure produces a safe `unclear` draft, while a running attempt produces a typed nonterminal signal.
 
 The application scales exactly once: `ROUND_HALF_UP(rubric_score / rubric.max_score * assessment_item.points, 0.01)`. It uses Decimal with no intermediate rounding. An unclear item suppresses the score. Confidence comes only from an immutable versioned application policy, and every evaluated LLM draft requires review with `llm_human_review_required`; it is never a final grade. Phase 4.9 remains deferred.
+
+## Граница с AI Content Authoring Phase 4A
+
+Checking Engine потребляет точную immutable methodology исторической
+`approved` Content Bank task version. Он никогда не создаёт задания, не
+додумывает отсутствующие expected answers или rubric, не исправляет неполную
+methodology при проверке ответа ученика и не изменяет Content Bank.
+
+[AI Content Authoring v1](ai-content-authoring-v1-contract.md) — отдельный,
+принадлежащий Content Bank трек Phase 4A. Authoring sessions, previews и
+provider attempts authoring не используют и не перегружают Checking-owned
+check runs, checker results, findings, events или provider attempts. Между
+Content Bank authoring и Checking application services нет семантической
+зависимости.
+
+Это дополнение не меняет реализованные поведенческие контракты Phases 4.0–4.8.
+Phase 4.9 и Phase 4.10 остаются Checking-owned. Общая Phase 4 закрывается лишь
+после двух независимых gates: Checking Engine Phase 4.10 acceptance и AI
+Content Authoring Phase 4A.6 acceptance; ни один gate не заменяет другой.
