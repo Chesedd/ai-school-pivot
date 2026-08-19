@@ -705,3 +705,18 @@ GET /api/content-bank/tasks?q=%D0%B4%D0%B2%D0%B8%D0%B6%D0%B5%D0%BD%D0%B8%D0%B5&s
 `difficulty` — обязательное строгое целое число 1–100 и свойство версии задания. API списка принимает необязательные `difficulty_min` и `difficulty_max` (1–100); минимум не может превышать максимум. Сортировка `sort_by=difficulty` числовая.
 CSV/XLSX сохраняет колонку `difficulty`, но принимает только целые 1–100; пустые, дробные, текстовые и прежние enum-значения отклоняются. Допустимые примеры: 1, 25, 50, 75, 100.
 Миграция переводит `basic`→25, `standard`→50, `advanced`→75; downgrade группирует 1–33/34–66/67–100 обратно.
+
+## Post-MVP: AI Content Authoring Phase 4A
+
+Будущий AI-assisted authoring является отдельным треком, принадлежащим Content
+Bank; его обязательные границы и roadmap заданы в
+[AI Content Authoring v1 contract](ai-content-authoring-v1-contract.md). Phase
+4A.0 добавляет только документацию: API, persistence, UI и provider workflow
+ещё не реализованы.
+
+После human confirmation будущий authoring flow должен создавать через
+обычные application boundaries карточку `task` и `task version` № 1 со
+статусом `draft`. Это не меняет исторические контракты Phase 2 и не обходит
+существующие инварианты и отдельный цикл `draft → review → approved`. Provider
+не является actor, не создаёт и не утверждает Content Bank entities напрямую;
+автоматические submit for review и approval запрещены.

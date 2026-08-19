@@ -1,13 +1,17 @@
 # Документация
 
+- [AI Content Authoring v1 — контракт Phase 4A](ai-content-authoring-v1-contract.md) —
+  Phase 4A.0, только документация и архитектура. Принадлежащие Content Bank
+  реализационные Phases 4A.1–4A.6 ещё не начаты.
 - [Проверка Checking intake Phase 4.2](checking-intake-phase42-verification.md) — детерминированный исторический snapshot, хеши, транзакция и privacy boundary.
 
 - [Проверка Checking DB Foundation](checking-engine-db-foundation-verification.md) —
   схема, PostgreSQL invariants, migration lifecycle и локальный gate Phase 4.1.
 - [Checking Engine v1: контракт и gap audit](checking-engine-v1-contract.md) —
-  решения Phase 4.0 для intake, routing/checkers, результатов, persistence,
-  provider boundary, confidence и следующих implementation prompts; production
-  Checking Engine ещё не реализован.
+  исходные решения Phase 4.0 и последующие контракты. Phases 4.0–4.8 уже
+  включают persistence foundation, immutable intake, routing/checkers,
+  provider execution и LLM rubric checker; Checking Phases 4.9 и 4.10 остаются
+  незавершёнными, поэтому production-wide готовность не заявляется.
 - [Финальная приёмка Assessment Core Phase 3](phase3-assessment-core-acceptance.md).
 
 - [Пользовательский гайд Content Bank](content-bank-user-guide.md) —

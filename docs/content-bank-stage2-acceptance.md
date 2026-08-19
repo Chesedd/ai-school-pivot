@@ -489,3 +489,15 @@ try {
 same-subject placement одного task; direct contents и recursive subtree search;
 совместимость с `difficulty_min`/`difficulty_max`; root-only import; прямые URL,
 breadcrumb и четыре empty states; task/folder audit и конкурентные конфликты.
+
+## Post-MVP roadmap note — 2026-08-19
+
+Историческая отметка `Content corpus: DEFERRED_UNTIL_AGENT` и исходный baseline
+этого acceptance passport остаются точными для момента приёмки. Отсутствовавшая
+работа по generation/content readiness теперь спланирована в принадлежащем
+Content Bank треке [AI Content Authoring Phase 4A](ai-content-authoring-v1-contract.md).
+
+Phase 4A.0 добавляет только документацию. Этот note не заявляет наличие corpus,
+generator, API, persistence, UI либо успешно пройденного real-provider quality
+gate и не меняет ретроактивно техническую MVP-приёмку Content Bank. Будущая
+реализация и отдельная приёмка предусмотрены Phases 4A.1–4A.6.
