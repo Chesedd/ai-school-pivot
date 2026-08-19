@@ -163,6 +163,7 @@ def result_to_json_safe(result: CheckerResultDraft) -> dict[str, Any]:
         "model_limitations": result.model_limitations,
         "evidence": result.evidence,
         "findings": result.findings,
+        "rubric_items": result.rubric_items,
     }
     safe = _thaw(_freeze(data))
     json.dumps(safe, sort_keys=True, separators=(",", ":"), allow_nan=False)

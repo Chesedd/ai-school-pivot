@@ -765,9 +765,7 @@ Raw output is sensitive and is stored only in `model_runs.raw_output`; it is exc
 events, cost telemetry, exceptions, logs, traces, and HTTP APIs. Retention duration is a
 configurable Phase 7 policy and is intentionally not invented here. Usage is validated
 locally. Versioned local pricing uses Decimal token rates and rounds only the final amount
-to `NUMERIC(18,8)` with `ROUND_HALF_UP`; provider monetary prose is ignored. Phase 4.8
-rubric schema, prompt, semantic validation, scoring, findings, and results were not
-started. Phase 4.9 and provider SDK integration also remain deferred.
+to `NUMERIC(18,8)` with `ROUND_HALF_UP`; provider monetary prose is ignored. Phase 4.9 and provider SDK integration also remain deferred.
 
 ### Phase 4.7 corrective persistence acceptance
 
@@ -788,3 +786,12 @@ clock, rejects non-finite, Boolean, or backward readings, converts elapsed time 
 nonnegative integer milliseconds, and overrides adapter-reported latency before
 persistence. These corrections do not introduce rubric prompting, semantic grading,
 results, findings, workers, routes, or any Phase 4.8 behavior.
+
+
+## Phase 4.8 LLM rubric application checker
+
+`llm_rubric_v1` runs only for a READY `llm_rubric` decision and calls the Phase 4.7 boundary through `ProviderExecutionService`. Its fixed `llm_rubric_output_v1` contract forbids extra properties, numeric score values, model confidence, totals, outcomes, review decisions, and grades. The canonical user message contains only the statement, frozen normalized answer text, expected solution, typed accepted alternatives, authored rubric, linked typical errors and skills, and interpretation versions. Persistence/run/item/task/person/assignment identities are excluded. All message content is explicitly untrusted JSON data.
+
+Application validation requires every authored rubric item once and in order; checks canonical Decimal allocations, status consistency, provenance allowlists, and bounded answer-slice evidence; and sorts findings by technical identity. Typical-error and skill provenance is re-derived from the frozen snapshot. Invalid output or exhausted provider failure produces a safe `unclear` draft, while a running attempt produces a typed nonterminal signal.
+
+The application scales exactly once: `ROUND_HALF_UP(rubric_score / rubric.max_score * assessment_item.points, 0.01)`. It uses Decimal with no intermediate rounding. An unclear item suppresses the score. Confidence comes only from an immutable versioned application policy, and every evaluated LLM draft requires review with `llm_human_review_required`; it is never a final grade. Phase 4.9 remains deferred.
