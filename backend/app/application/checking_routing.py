@@ -89,6 +89,9 @@ class ResultReason(str, Enum):
     MALFORMED_NORMALIZED_ANSWER = "malformed_normalized_answer"
     INVALID_EXACT_METHODOLOGY = "invalid_exact_methodology"
     INVALID_CHOICE_METHODOLOGY = "invalid_choice_methodology"
+    NUMERIC_MATCH = "numeric_match"
+    NUMERIC_MISMATCH = "numeric_mismatch"
+    INVALID_NUMERIC_METHODOLOGY = "invalid_numeric_methodology"
     ROUTING_INSUFFICIENT_RUBRIC = "routing_insufficient_rubric"
     ROUTING_MANUAL_REQUIRED = "routing_manual_required"
 
@@ -223,6 +226,16 @@ def _decimal(value: Any, *, positive: bool = False, nonnegative: bool = False) -
     return result
 
 
+def _canonical_decimal(value: Any) -> Decimal | None:
+    """Parse a finite plain Decimal only when its spelling is canonical."""
+    result = _decimal(value)
+    if result is None or not isinstance(value, str): return None
+    plain = format(result, "f")
+    if "." in plain: plain = plain.rstrip("0").rstrip(".")
+    if result.is_zero(): plain = "0"
+    return result if value == plain else None
+
+
 def _decision(item: Mapping[str, Any], candidate: CheckerType, disposition: RoutingDisposition,
               reason: RoutingReason) -> RoutingDecision:
     effective = candidate if disposition in {RoutingDisposition.READY, RoutingDisposition.UNANSWERED} else CheckerType.MANUAL_REQUIRED
@@ -296,13 +309,25 @@ def _route_answered(item: Mapping[str, Any], method: Mapping[str, Any], fmt: str
     elif fmt == "number":
         answers, reason = _typed(method, "decimal")
         if reason: return _insufficient(item,candidate,reason)
-        seen=set()
+        seen=set(); answer_ids=set()
         for answer in answers:
+            required={"id","value_kind","canonical_decimal","absolute_tolerance","relative_tolerance",
+                "unit_code","normalization_policy_code","normalization_policy_version"}
+            if not required.issubset(answer):
+                return _insufficient(item,candidate,RoutingReason.MALFORMED_ITEM)
+            identifier = _uuid(answer.get("id"))
+            if identifier is None or identifier in answer_ids:
+                return _insufficient(item,candidate,RoutingReason.MALFORMED_ITEM)
+            answer_ids.add(identifier)
             if (answer.get("normalization_policy_code"),answer.get("normalization_policy_version")) != ("decimal_v1",1):
                 return _manual(item,candidate,RoutingReason.UNSUPPORTED_NORMALIZATION)
-            value=_decimal(answer.get("canonical_decimal"))
+            value=_canonical_decimal(answer.get("canonical_decimal"))
             if value is None: return _insufficient(item,candidate,RoutingReason.MISSING_CANONICAL_VALUE)
-            if _decimal(answer.get("absolute_tolerance"),nonnegative=True) is None or _decimal(answer.get("relative_tolerance"),nonnegative=True) is None:
+            if any(t is not None and _canonical_decimal(t) is None for t in
+                   (answer.get("absolute_tolerance"), answer.get("relative_tolerance"))):
+                return _insufficient(item,candidate,RoutingReason.INVALID_NUMERIC_TOLERANCE)
+            if any(t is not None and _canonical_decimal(t) < 0 for t in
+                   (answer.get("absolute_tolerance"), answer.get("relative_tolerance"))):
                 return _insufficient(item,candidate,RoutingReason.INVALID_NUMERIC_TOLERANCE)
             if answer.get("unit_code") is not None: return _manual(item,candidate,RoutingReason.UNSUPPORTED_UNIT)
             if value in seen: return _insufficient(item,candidate,RoutingReason.DUPLICATE_CANONICAL)
