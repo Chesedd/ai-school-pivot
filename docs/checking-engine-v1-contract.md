@@ -768,3 +768,23 @@ locally. Versioned local pricing uses Decimal token rates and rounds only the fi
 to `NUMERIC(18,8)` with `ROUND_HALF_UP`; provider monetary prose is ignored. Phase 4.8
 rubric schema, prompt, semantic validation, scoring, findings, and results were not
 started. Phase 4.9 and provider SDK integration also remain deferred.
+
+### Phase 4.7 corrective persistence acceptance
+
+The persistence-only `ProviderExecutionKey` carries the CheckRun and assessment-item UUIDs
+into the attempt store; it is intentionally absent from `ProviderRequest` and can never
+reach `LLMProvider.evaluate`. `SQLAlchemyProviderAttemptStore` uses an
+`async_sessionmaker` to open and close a fresh transaction for `replay_or_claim`, returns
+an explicit `claimed`, `running_existing`, or `terminal_existing` disposition, and closes
+that transaction before the service invokes the provider. Finalization uses a second fresh
+transaction for the status CAS and optional cost event. UUID attempt identity is never
+encoded with control-flow string prefixes.
+
+All schema, parsed-candidate, validated-envelope, attempt, and outcome JSON is recursively
+detached and frozen; persistence explicitly thaws it to fresh plain JSONB-compatible
+objects. Canonicalization continues to reject floats and unsupported values without
+rewriting strings. The application measures each provider call with its injected monotonic
+clock, rejects non-finite, Boolean, or backward readings, converts elapsed time to
+nonnegative integer milliseconds, and overrides adapter-reported latency before
+persistence. These corrections do not introduce rubric prompting, semantic grading,
+results, findings, workers, routes, or any Phase 4.8 behavior.
