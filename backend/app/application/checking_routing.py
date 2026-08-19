@@ -98,6 +98,10 @@ class ResultReason(str, Enum):
     INVALID_EXPRESSION_METHODOLOGY = "invalid_expression_methodology"
     ROUTING_INSUFFICIENT_RUBRIC = "routing_insufficient_rubric"
     ROUTING_MANUAL_REQUIRED = "routing_manual_required"
+    LLM_RUBRIC_EVALUATED = "llm_rubric_evaluated"
+    LLM_PROVIDER_FAILURE = "llm_provider_failure"
+    LLM_STRUCTURED_OUTPUT_INVALID = "llm_structured_output_invalid"
+    LLM_INVALID_METHODOLOGY = "llm_invalid_methodology"
 
 
 class ResultContractError(ValueError):
@@ -147,6 +151,7 @@ class CheckerResultDraft:
     model_limitations: tuple[str, ...] = ()
     evidence: Mapping[str, Any] = _EMPTY_EVIDENCE
     findings: tuple[Mapping[str, Any], ...] = ()
+    rubric_items: tuple[Mapping[str, Any], ...] = ()
     schema_version: str = "1.0"
 
     def __post_init__(self) -> None:
@@ -174,10 +179,14 @@ class CheckerResultDraft:
             raise ResultContractError("invalid_outcome_score")
         if self.outcome in {CheckerOutcome.UNCLEAR, CheckerOutcome.INSUFFICIENT_RUBRIC, CheckerOutcome.MANUAL_REQUIRED} and self.score_suggested is not None:
             raise ResultContractError("invalid_outcome_score")
-        review_outcomes = {CheckerOutcome.UNCLEAR, CheckerOutcome.INSUFFICIENT_RUBRIC, CheckerOutcome.MANUAL_REQUIRED}
-        if self.needs_human_review != (self.outcome in review_outcomes) or self.needs_human_review != (self.needs_human_review_reason is not None):
+        review_required = (self.outcome in {CheckerOutcome.UNCLEAR, CheckerOutcome.INSUFFICIENT_RUBRIC,
+                           CheckerOutcome.MANUAL_REQUIRED} or
+                           self.checker_type is CheckerType.LLM_RUBRIC and self.reason_code is not ResultReason.UNANSWERED)
+        if self.needs_human_review != review_required or self.needs_human_review != (self.needs_human_review_reason is not None):
             raise ResultContractError("invalid_review_contract")
-        if not self.summary.strip() or not isinstance(self.model_limitations, tuple) or not isinstance(self.evidence, Mapping) or not isinstance(self.findings, tuple):
+        if (not self.summary.strip() or not isinstance(self.model_limitations, tuple) or
+                not isinstance(self.evidence, Mapping) or not isinstance(self.findings, tuple) or
+                not isinstance(self.rubric_items, tuple)):
             raise ResultContractError()
 
 
