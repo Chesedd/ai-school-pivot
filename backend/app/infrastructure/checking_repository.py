@@ -11,8 +11,12 @@ from app.application.checking import (ActiveRunConflict, ConcurrentConflict, Cre
 from app.infrastructure.assessment_models import StudentSubmission
 from app.infrastructure.checking_models import CostEvent, CheckFinding, CheckResult, CheckRun, CheckerEvent, ModelRun, PromptVersion
 from app.application.checking_provider import (MAX_ATTEMPTS, AttemptDisposition, AttemptState,
-    Pricing, PromptSpec, ProviderExecutionKey, ProviderRequest, ProviderResponse,
+    Pricing, PromptSpec, ProviderExecutionKey, ProviderRequest, ProviderResponse, canonical_json,
     RequestConflict, retry_allowed, thaw_json)
+
+
+def _prompt_lock_key(spec: PromptSpec) -> str:
+    return canonical_json([spec.stable_name, spec.semantic_version])
 
 
 class CheckingRepository:
@@ -85,7 +89,7 @@ class CheckingRepository:
         # The schema's historical identity includes the hash; serialize the narrower
         # name/version policy here so concurrent different content cannot both win.
         await self.session.execute(select(func.pg_advisory_xact_lock(
-            func.hashtextextended(spec.stable_name + "\x00" + spec.semantic_version, 0))))
+            func.hashtextextended(_prompt_lock_key(spec), 0))))
         rows = (await self.session.scalars(select(PromptVersion).where(
             PromptVersion.name == spec.stable_name,
             PromptVersion.semantic_version == spec.semantic_version).with_for_update())).all()
