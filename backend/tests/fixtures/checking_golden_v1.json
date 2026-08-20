@@ -1,0 +1,936 @@
+{
+  "version": "checking_golden_dataset_v1",
+  "description": "Synthetic technical corpus; not human-approved or real-provider quality evidence.",
+  "cases": [
+    {
+      "case_id": "case-001",
+      "category": "exact_text",
+      "expected_checker": "exact",
+      "expected_outcome": "correct",
+      "expected_reason": "exact_match",
+      "expected_score": "2.5",
+      "max_score": "2.5",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "exact_boundary",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-002",
+      "category": "exact_text",
+      "expected_checker": "exact",
+      "expected_outcome": "incorrect",
+      "expected_reason": "exact_mismatch",
+      "expected_score": "0",
+      "max_score": "1",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "unicode_exact",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-003",
+      "category": "exact_text",
+      "expected_checker": "exact",
+      "expected_outcome": "incorrect",
+      "expected_reason": "exact_mismatch",
+      "expected_score": "0",
+      "max_score": "1",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "case_sensitive",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-004",
+      "category": "exact_text",
+      "expected_checker": "exact",
+      "expected_outcome": "unclear",
+      "expected_reason": "exact_mismatch",
+      "expected_score": null,
+      "max_score": "2.5",
+      "expected_review": true,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "whitespace_exact",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-005",
+      "category": "exact_text",
+      "expected_checker": "exact",
+      "expected_outcome": "correct",
+      "expected_reason": "exact_match",
+      "expected_score": "1",
+      "max_score": "1",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "alternative_exact",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-006",
+      "category": "exact_text",
+      "expected_checker": "exact",
+      "expected_outcome": "incorrect",
+      "expected_reason": "exact_mismatch",
+      "expected_score": "0",
+      "max_score": "1",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "prompt_injection_data",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-007",
+      "category": "exact_text",
+      "expected_checker": "exact",
+      "expected_outcome": "incorrect",
+      "expected_reason": "exact_mismatch",
+      "expected_score": "0",
+      "max_score": "2.5",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "privacy_negative_marker",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-008",
+      "category": "exact_text",
+      "expected_checker": "exact",
+      "expected_outcome": "unclear",
+      "expected_reason": "exact_mismatch",
+      "expected_score": null,
+      "max_score": "1",
+      "expected_review": true,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "unanswered_exact",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-009",
+      "category": "choice",
+      "expected_checker": "multiple_choice",
+      "expected_outcome": "correct",
+      "expected_reason": "choice_match",
+      "expected_score": "2.5",
+      "max_score": "2.5",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "single",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-010",
+      "category": "choice",
+      "expected_checker": "multiple_choice",
+      "expected_outcome": "incorrect",
+      "expected_reason": "choice_mismatch",
+      "expected_score": "0",
+      "max_score": "1",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "single_mismatch",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-011",
+      "category": "choice",
+      "expected_checker": "multiple_choice",
+      "expected_outcome": "partially_correct",
+      "expected_reason": "choice_partial",
+      "expected_score": "0.5",
+      "max_score": "1",
+      "expected_review": false,
+      "expected_findings": [
+        {
+          "finding_type": "rubric_miss",
+          "rubric_item_id": "00000000-0000-4000-8000-000000000011"
+        }
+      ],
+      "metadata": {
+        "scenario": "multiple",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-012",
+      "category": "choice",
+      "expected_checker": "multiple_choice",
+      "expected_outcome": "unclear",
+      "expected_reason": "unknown_choice_option",
+      "expected_score": null,
+      "max_score": "2.5",
+      "expected_review": true,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "multiple_partial",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-013",
+      "category": "choice",
+      "expected_checker": "multiple_choice",
+      "expected_outcome": "correct",
+      "expected_reason": "choice_match",
+      "expected_score": "1",
+      "max_score": "1",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "or_alternative_a",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-014",
+      "category": "choice",
+      "expected_checker": "multiple_choice",
+      "expected_outcome": "incorrect",
+      "expected_reason": "choice_mismatch",
+      "expected_score": "0",
+      "max_score": "1",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "or_alternative_b",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-015",
+      "category": "choice",
+      "expected_checker": "multiple_choice",
+      "expected_outcome": "partially_correct",
+      "expected_reason": "choice_partial",
+      "expected_score": "0.5",
+      "max_score": "2.5",
+      "expected_review": false,
+      "expected_findings": [
+        {
+          "finding_type": "rubric_miss",
+          "rubric_item_id": "00000000-0000-4000-8000-000000000015"
+        }
+      ],
+      "metadata": {
+        "scenario": "weighted_full",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-016",
+      "category": "choice",
+      "expected_checker": "multiple_choice",
+      "expected_outcome": "unclear",
+      "expected_reason": "unknown_choice_option",
+      "expected_score": null,
+      "max_score": "1",
+      "expected_review": true,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "weighted_partial",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-017",
+      "category": "choice",
+      "expected_checker": "multiple_choice",
+      "expected_outcome": "correct",
+      "expected_reason": "choice_match",
+      "expected_score": "1",
+      "max_score": "1",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "unknown_option",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-018",
+      "category": "choice",
+      "expected_checker": "multiple_choice",
+      "expected_outcome": "incorrect",
+      "expected_reason": "choice_mismatch",
+      "expected_score": "0",
+      "max_score": "2.5",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "duplicate_defense",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-019",
+      "category": "choice",
+      "expected_checker": "multiple_choice",
+      "expected_outcome": "partially_correct",
+      "expected_reason": "choice_partial",
+      "expected_score": "0.5",
+      "max_score": "1",
+      "expected_review": false,
+      "expected_findings": [
+        {
+          "finding_type": "rubric_miss",
+          "rubric_item_id": "00000000-0000-4000-8000-000000000019"
+        }
+      ],
+      "metadata": {
+        "scenario": "unanswered_choice",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-020",
+      "category": "choice",
+      "expected_checker": "multiple_choice",
+      "expected_outcome": "unclear",
+      "expected_reason": "unknown_choice_option",
+      "expected_score": null,
+      "max_score": "1",
+      "expected_review": true,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "privacy_negative_marker",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-021",
+      "category": "numeric",
+      "expected_checker": "numeric",
+      "expected_outcome": "correct",
+      "expected_reason": "numeric_match",
+      "expected_score": "2.5",
+      "max_score": "2.5",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "exact_zero",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-022",
+      "category": "numeric",
+      "expected_checker": "numeric",
+      "expected_outcome": "incorrect",
+      "expected_reason": "numeric_mismatch",
+      "expected_score": "0",
+      "max_score": "1",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "absolute_tolerance",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-023",
+      "category": "numeric",
+      "expected_checker": "numeric",
+      "expected_outcome": "incorrect",
+      "expected_reason": "numeric_mismatch",
+      "expected_score": "0",
+      "max_score": "1",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "boundary_inside",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-024",
+      "category": "numeric",
+      "expected_checker": "numeric",
+      "expected_outcome": "unclear",
+      "expected_reason": "numeric_mismatch",
+      "expected_score": null,
+      "max_score": "2.5",
+      "expected_review": true,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "boundary_outside",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-025",
+      "category": "numeric",
+      "expected_checker": "numeric",
+      "expected_outcome": "correct",
+      "expected_reason": "numeric_match",
+      "expected_score": "1",
+      "max_score": "1",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "round_half_up_low",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-026",
+      "category": "numeric",
+      "expected_checker": "numeric",
+      "expected_outcome": "incorrect",
+      "expected_reason": "numeric_mismatch",
+      "expected_score": "0",
+      "max_score": "1",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "round_half_up_high",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-027",
+      "category": "numeric",
+      "expected_checker": "numeric",
+      "expected_outcome": "incorrect",
+      "expected_reason": "numeric_mismatch",
+      "expected_score": "0",
+      "max_score": "2.5",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "negative",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-028",
+      "category": "numeric",
+      "expected_checker": "numeric",
+      "expected_outcome": "unclear",
+      "expected_reason": "numeric_mismatch",
+      "expected_score": null,
+      "max_score": "1",
+      "expected_review": true,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "alternative",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-029",
+      "category": "numeric",
+      "expected_checker": "numeric",
+      "expected_outcome": "correct",
+      "expected_reason": "numeric_match",
+      "expected_score": "1",
+      "max_score": "1",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "invalid_evidence",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-030",
+      "category": "numeric",
+      "expected_checker": "numeric",
+      "expected_outcome": "incorrect",
+      "expected_reason": "numeric_mismatch",
+      "expected_score": "0",
+      "max_score": "2.5",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "privacy_negative_marker",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-031",
+      "category": "structured_expression",
+      "expected_checker": "structured_expression",
+      "expected_outcome": "correct",
+      "expected_reason": "expression_identity_match",
+      "expected_score": "2.5",
+      "max_score": "2.5",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "identity",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-032",
+      "category": "structured_expression",
+      "expected_checker": "structured_expression",
+      "expected_outcome": "incorrect",
+      "expected_reason": "expression_equivalence_unproven",
+      "expected_score": "0",
+      "max_score": "1",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "identity_mismatch",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-033",
+      "category": "structured_expression",
+      "expected_checker": "structured_expression",
+      "expected_outcome": "incorrect",
+      "expected_reason": "expression_equivalence_unproven",
+      "expected_score": "0",
+      "max_score": "1",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "canonical_alternative",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-034",
+      "category": "structured_expression",
+      "expected_checker": "structured_expression",
+      "expected_outcome": "unclear",
+      "expected_reason": "expression_equivalence_unproven",
+      "expected_score": null,
+      "max_score": "2.5",
+      "expected_review": true,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "equivalence_unproven",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-035",
+      "category": "structured_expression",
+      "expected_checker": "structured_expression",
+      "expected_outcome": "correct",
+      "expected_reason": "expression_identity_match",
+      "expected_score": "1",
+      "max_score": "1",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "unanswered_expression",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-036",
+      "category": "structured_expression",
+      "expected_checker": "structured_expression",
+      "expected_outcome": "incorrect",
+      "expected_reason": "expression_equivalence_unproven",
+      "expected_score": "0",
+      "max_score": "1",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "invalid_contract",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-037",
+      "category": "structured_expression",
+      "expected_checker": "structured_expression",
+      "expected_outcome": "incorrect",
+      "expected_reason": "expression_equivalence_unproven",
+      "expected_score": "0",
+      "max_score": "2.5",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "absent_evidence",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-038",
+      "category": "structured_expression",
+      "expected_checker": "structured_expression",
+      "expected_outcome": "unclear",
+      "expected_reason": "expression_equivalence_unproven",
+      "expected_score": null,
+      "max_score": "1",
+      "expected_review": true,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "typical_error_provenance",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-039",
+      "category": "structured_expression",
+      "expected_checker": "structured_expression",
+      "expected_outcome": "correct",
+      "expected_reason": "expression_identity_match",
+      "expected_score": "1",
+      "max_score": "1",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "skill_provenance",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-040",
+      "category": "structured_expression",
+      "expected_checker": "structured_expression",
+      "expected_outcome": "incorrect",
+      "expected_reason": "expression_equivalence_unproven",
+      "expected_score": "0",
+      "max_score": "2.5",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "prompt_injection_data",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-041",
+      "category": "llm_rubric",
+      "expected_checker": "llm_rubric",
+      "expected_outcome": "correct",
+      "expected_reason": "llm_rubric_evaluated",
+      "expected_score": "2.5",
+      "max_score": "2.5",
+      "expected_review": true,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "validated_full",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-042",
+      "category": "llm_rubric",
+      "expected_checker": "llm_rubric",
+      "expected_outcome": "incorrect",
+      "expected_reason": "llm_rubric_evaluated",
+      "expected_score": "0",
+      "max_score": "1",
+      "expected_review": true,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "validated_incorrect",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-043",
+      "category": "llm_rubric",
+      "expected_checker": "llm_rubric",
+      "expected_outcome": "partially_correct",
+      "expected_reason": "llm_rubric_evaluated",
+      "expected_score": "0.5",
+      "max_score": "1",
+      "expected_review": true,
+      "expected_findings": [
+        {
+          "finding_type": "rubric_miss",
+          "rubric_item_id": "00000000-0000-4000-8000-000000000043"
+        }
+      ],
+      "metadata": {
+        "scenario": "validated_partial",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-044",
+      "category": "llm_rubric",
+      "expected_checker": "llm_rubric",
+      "expected_outcome": "unclear",
+      "expected_reason": "llm_structured_output_invalid",
+      "expected_score": null,
+      "max_score": "2.5",
+      "expected_review": true,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "malformed_output",
+        "provider_candidate": "intentionally_invalid"
+      }
+    },
+    {
+      "case_id": "case-045",
+      "category": "llm_rubric",
+      "expected_checker": "llm_rubric",
+      "expected_outcome": "correct",
+      "expected_reason": "llm_rubric_evaluated",
+      "expected_score": "1",
+      "max_score": "1",
+      "expected_review": true,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "missing_coverage",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-046",
+      "category": "llm_rubric",
+      "expected_checker": "llm_rubric",
+      "expected_outcome": "incorrect",
+      "expected_reason": "llm_rubric_evaluated",
+      "expected_score": "0",
+      "max_score": "1",
+      "expected_review": true,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "duplicate_coverage",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-047",
+      "category": "llm_rubric",
+      "expected_checker": "llm_rubric",
+      "expected_outcome": "partially_correct",
+      "expected_reason": "llm_rubric_evaluated",
+      "expected_score": "0.5",
+      "max_score": "2.5",
+      "expected_review": true,
+      "expected_findings": [
+        {
+          "finding_type": "rubric_miss",
+          "rubric_item_id": "00000000-0000-4000-8000-000000000047"
+        }
+      ],
+      "metadata": {
+        "scenario": "required_miss",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-048",
+      "category": "llm_rubric",
+      "expected_checker": "llm_rubric",
+      "expected_outcome": "unclear",
+      "expected_reason": "llm_structured_output_invalid",
+      "expected_score": null,
+      "max_score": "1",
+      "expected_review": true,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "absent_evidence",
+        "provider_candidate": "intentionally_invalid"
+      }
+    },
+    {
+      "case_id": "case-049",
+      "category": "llm_rubric",
+      "expected_checker": "llm_rubric",
+      "expected_outcome": "correct",
+      "expected_reason": "llm_rubric_evaluated",
+      "expected_score": "1",
+      "max_score": "1",
+      "expected_review": true,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "invalid_evidence",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-050",
+      "category": "llm_rubric",
+      "expected_checker": "llm_rubric",
+      "expected_outcome": "incorrect",
+      "expected_reason": "llm_rubric_evaluated",
+      "expected_score": "0",
+      "max_score": "2.5",
+      "expected_review": true,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "provider_exhaustion",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-051",
+      "category": "llm_rubric",
+      "expected_checker": "llm_rubric",
+      "expected_outcome": "partially_correct",
+      "expected_reason": "llm_rubric_evaluated",
+      "expected_score": "0.5",
+      "max_score": "1",
+      "expected_review": true,
+      "expected_findings": [
+        {
+          "finding_type": "rubric_miss",
+          "rubric_item_id": "00000000-0000-4000-8000-000000000051"
+        }
+      ],
+      "metadata": {
+        "scenario": "prompt_injection_data",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-052",
+      "category": "llm_rubric",
+      "expected_checker": "llm_rubric",
+      "expected_outcome": "unclear",
+      "expected_reason": "llm_structured_output_invalid",
+      "expected_score": null,
+      "max_score": "1",
+      "expected_review": true,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "privacy_negative_marker",
+        "provider_candidate": "intentionally_invalid"
+      }
+    },
+    {
+      "case_id": "case-053",
+      "category": "boundary",
+      "expected_checker": "manual_required",
+      "expected_outcome": "incorrect",
+      "expected_reason": "unanswered",
+      "expected_score": "0",
+      "max_score": "2.5",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "unanswered",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-054",
+      "category": "boundary",
+      "expected_checker": "manual_required",
+      "expected_outcome": "unclear",
+      "expected_reason": "llm_provider_failure",
+      "expected_score": null,
+      "max_score": "1",
+      "expected_review": true,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "unclear",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-055",
+      "category": "boundary",
+      "expected_checker": "manual_required",
+      "expected_outcome": "manual_required",
+      "expected_reason": "routing_manual_required",
+      "expected_score": null,
+      "max_score": "1",
+      "expected_review": true,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "manual_required",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-056",
+      "category": "boundary",
+      "expected_checker": "manual_required",
+      "expected_outcome": "insufficient_rubric",
+      "expected_reason": "routing_insufficient_rubric",
+      "expected_score": null,
+      "max_score": "2.5",
+      "expected_review": true,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "insufficient_methodology",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-057",
+      "category": "boundary",
+      "expected_checker": "manual_required",
+      "expected_outcome": "incorrect",
+      "expected_reason": "unanswered",
+      "expected_score": "0",
+      "max_score": "1",
+      "expected_review": false,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "unanswered_second",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-058",
+      "category": "boundary",
+      "expected_checker": "manual_required",
+      "expected_outcome": "unclear",
+      "expected_reason": "llm_provider_failure",
+      "expected_score": null,
+      "max_score": "1",
+      "expected_review": true,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "provider_exhaustion",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-059",
+      "category": "boundary",
+      "expected_checker": "manual_required",
+      "expected_outcome": "manual_required",
+      "expected_reason": "routing_manual_required",
+      "expected_score": null,
+      "max_score": "2.5",
+      "expected_review": true,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "manual_outside_capability",
+        "provider_candidate": "validated"
+      }
+    },
+    {
+      "case_id": "case-060",
+      "category": "boundary",
+      "expected_checker": "manual_required",
+      "expected_outcome": "insufficient_rubric",
+      "expected_reason": "routing_insufficient_rubric",
+      "expected_score": null,
+      "max_score": "1",
+      "expected_review": true,
+      "expected_findings": [],
+      "metadata": {
+        "scenario": "privacy_negative_marker",
+        "provider_candidate": "validated"
+      }
+    }
+  ]
+}

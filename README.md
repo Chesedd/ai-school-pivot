@@ -59,3 +59,10 @@ docker compose ps
 
 Полные PowerShell-сценарии и процедуры приёмки намеренно не дублируются здесь:
 используйте пользовательский гайд и актуальный acceptance-документ.
+
+### Checking Phase 4.10 acceptance
+
+Phase 4.9 is accepted at `cd0dbbd`. Phase 4.10's deterministic 60-case technical
+contract and the separately pending, explicitly configured real-provider quality
+gate are documented in [the acceptance specification](docs/checking-engine-phase410-acceptance.md).
+No final grades, Teacher Review, or Phase 4A authoring behavior is included.
