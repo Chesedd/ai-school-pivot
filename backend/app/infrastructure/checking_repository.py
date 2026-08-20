@@ -1,4 +1,5 @@
 """SQLAlchemy persistence adapter for atomic Checking operations; never commits."""
+from collections import Counter
 from datetime import datetime
 from uuid import UUID
 
