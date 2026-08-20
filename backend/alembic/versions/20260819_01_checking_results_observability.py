@@ -28,8 +28,16 @@ def upgrade():
     op.add_column("check_results",sa.Column("reason_code",sa.String(64)))
     op.add_column("check_results",sa.Column("confidence_policy_version",sa.String(64)))
     op.add_column("check_results",sa.Column("confidence_details",postgresql.JSONB()))
+    op.execute(
+        "ALTER TABLE check_results "
+        "DISABLE TRIGGER trg_check_results_immutable"
+    )
     op.execute("""UPDATE check_results r SET reason_code='legacy_result', confidence_policy_version=x.threshold_policy_version,
       confidence_details=jsonb_build_object('schema_version','checking_confidence_gate_v1','base',to_char(r.confidence,'FM0.0000'),'effective',to_char(r.confidence,'FM0.0000'),'policy_version',x.threshold_policy_version,'reasons',jsonb_build_array('legacy_result'),'penalties','[]'::jsonb,'total_penalty','0.0000','needs_human_review',r.needs_human_review,'review_reason',r.review_reason) FROM check_runs x WHERE x.id=r.check_run_id""")
+    op.execute(
+        "ALTER TABLE check_results "
+        "ENABLE TRIGGER trg_check_results_immutable"
+    )
     for c in ("reason_code","confidence_policy_version","confidence_details"): op.alter_column("check_results",c,nullable=False)
     op.create_check_constraint("ck_check_results_reason_code","check_results","reason_code=btrim(reason_code) AND char_length(reason_code) BETWEEN 1 AND 64")
     op.create_check_constraint("ck_check_results_confidence_policy","check_results","confidence_policy_version=btrim(confidence_policy_version) AND char_length(confidence_policy_version) BETWEEN 1 AND 64")

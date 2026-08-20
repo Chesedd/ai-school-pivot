@@ -830,3 +830,12 @@ Migration `20260819_01` resolves the database/application gap by adding `unclear
 ### Phase 4.9 corrective migration `20260820_01`
 
 Revision `20260820_01` restores `trg_model_runs_guard` after the published Phase 4.9 revision recreated `checking_guard_model_run()` without recreating its table trigger. The corrective head makes the existing one-time terminal result association rule effective again and rejects model-attempt deletion, result unlinking, and result reassignment. Downgrade from `20260820_01` to `20260819_01` intentionally preserves the trigger because `20260819_01` already requires that invariant. The subsequent downgrade from `20260819_01` to `20260810_04` removes it before restoring the previous guard function, keeping the migration chain safe and consistent.
+
+### Phase 4.9 migration replay safety
+
+The Phase 4.9 migration-owned legacy result backfill temporarily disables exactly
+`trg_check_results_immutable` inside the PostgreSQL migration transaction. It
+restores that trigger immediately after the unchanged backfill, before the
+upgrade completes. It does not disable other user triggers or weaken runtime
+immutability. PostgreSQL transactional DDL also restores the original trigger
+state if the migration transaction fails.
