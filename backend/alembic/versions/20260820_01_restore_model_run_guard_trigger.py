@@ -19,4 +19,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute("DROP TRIGGER trg_model_runs_guard ON model_runs")
+    # Keep the guard installed: revision 20260819_01 already requires this
+    # invariant, and its downgrade removes it before restoring the old guard.
+    pass
