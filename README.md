@@ -13,12 +13,13 @@ Core поддерживает составление и публикацию р�
 вариант, student attempt lifecycle до отправки ответа и внутренний
 [Checking Handoff v1](docs/assessment-checking-handoff-v1.md).
 
-Checking Engine уже не является целиком не реализованным: Phases 4.0–4.8
+Checking Engine уже не является целиком не реализованным: Phases 4.0–4.9
 включают контракты, persistence foundation, immutable intake,
 детерминированные routing/checkers, provider execution и LLM rubric checker.
-Checking Phases 4.9 (findings/confidence) и 4.10 (vertical acceptance) остаются
-в плане; production-wide завершение и real-provider quality acceptance не
-заявляются.
+Phase 4.9 findings/confidence принята. Техническая приёмка Phase 4.10 включает
+детерминированный/application gate и отдельный реальный PostgreSQL gate; она не
+заявляется до успешного PostgreSQL прогона. Real-provider quality evaluation
+остаётся отдельным явно конфигурируемым gate, а fake provider её не заменяет.
 
 AI-генерация заданий пользователям пока недоступна. Она запланирована как
 отдельный, принадлежащий Content Bank трек Phase 4A. Текущая Phase 4A.0
@@ -62,7 +63,9 @@ docker compose ps
 
 ### Checking Phase 4.10 acceptance
 
-Phase 4.9 is accepted at `cd0dbbd`. Phase 4.10's deterministic 60-case technical
-contract and the separately pending, explicitly configured real-provider quality
-gate are documented in [the acceptance specification](docs/checking-engine-phase410-acceptance.md).
+Phase 4.9 is accepted at `cd0dbbd`. Phase 4.10's executable 60-case application
+gate and real PostgreSQL technical gate are documented in
+[the acceptance specification](docs/checking-engine-phase410-acceptance.md).
+Real-provider quality evaluation remains separately pending and explicitly
+configured; fake-provider success is not quality acceptance.
 No final grades, Teacher Review, or Phase 4A authoring behavior is included.
