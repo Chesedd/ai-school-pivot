@@ -134,6 +134,7 @@ def _finding(item: Mapping[str,Any], raw: Mapping[str,Any], confidence: Decimal)
     sid=_uuid(raw.get("skill_id"),"invalid_finding_provenance") if raw.get("skill_id") is not None else None
     method=item.get("methodology",{}); rubric=(method.get("rubric") or {}).get("items",()); errors=method.get("typical_errors",()); skills=method.get("skills",())
     rr=[x for x in rubric if x.get("id")==str(rid)]; ee=[x for x in errors if x.get("id")==str(tid)]; ss={x.get("id"):x for x in skills}
+    if sid is not None and str(sid) not in item.get("skill_ids",()): raise InvalidCheckingResult("invalid_finding_provenance")
     code=title=criterion=None
     if mapped=="rubric":
         if rid is None or str(rid) not in item.get("rubric_item_ids",()) or len(rr)!=1: raise InvalidCheckingResult("invalid_finding_provenance")
@@ -158,8 +159,13 @@ def prepare_result(snapshot_item: Mapping[str,Any], draft: CheckerResultDraft, p
     except Exception: raise InvalidCheckingResult("invalid_frozen_points") from None
     if type(draft.max_score) is not Decimal or draft.max_score!=points: raise InvalidCheckingResult("points_mismatch")
     _safe(draft.evidence); _safe(draft.rubric_items)
-    if policy.semantic_version != draft.evidence.get("confidence_policy_version") and draft.checker_type is CheckerType.LLM_RUBRIC and draft.reason_code is ResultReason.LLM_RUBRIC_EVALUATED:
-        raise ConfidencePolicyConflict("confidence_policy_mismatch")
+    if draft.checker_type is CheckerType.LLM_RUBRIC and draft.reason_code is ResultReason.LLM_RUBRIC_EVALUATED:
+        if policy.semantic_version != draft.evidence.get("confidence_policy_version"):
+            raise ConfidencePolicyConflict("confidence_policy_mismatch")
+        source_reasons=draft.evidence.get("confidence_reason_codes")
+        if (not isinstance(source_reasons, (tuple,list)) or not source_reasons or
+                any(type(x) is not str or not x.strip() or len(x)>64 for x in source_reasons)):
+            raise InvalidCheckingResult("invalid_confidence_evidence")
     reasons=[]; penalties=[]
     if draft.reason_code is ResultReason.UNANSWERED: base=Decimal("1.0000"); reasons.append(ConfidenceReason.UNANSWERED)
     elif draft.outcome is CheckerOutcome.MANUAL_REQUIRED: base=Decimal("0.0000"); reasons.append(ConfidenceReason.MANUAL_REQUIRED)
@@ -184,12 +190,19 @@ def prepare_result(snapshot_item: Mapping[str,Any], draft: CheckerResultDraft, p
     review=draft.needs_human_review or draft.checker_type is CheckerType.LLM_RUBRIC or draft.outcome in {CheckerOutcome.MANUAL_REQUIRED,CheckerOutcome.INSUFFICIENT_RUBRIC,CheckerOutcome.UNCLEAR} or effective<policy.review_threshold or (draft.checker_type is not CheckerType.LLM_RUBRIC and effective!=Decimal("1.0000"))
     if effective<policy.review_threshold: reasons.append(ConfidenceReason.BELOW_REVIEW_THRESHOLD)
     review_reason=(draft.needs_human_review_reason or reasons[-1].value) if review else None
+    if review_reason is not None and (type(review_reason) is not str or not review_reason.strip() or len(review_reason)>500):
+        raise InvalidCheckingResult("invalid_review_reason")
     assessment=ConfidenceAssessment(CONFIDENCE_GATE_SCHEMA_VERSION,base,effective,policy.semantic_version,tuple(reasons),tuple(penalties),total.quantize(_Q4,rounding=ROUND_HALF_UP),review,review_reason)
     findings=tuple(sorted((_finding(snapshot_item,x,effective) for x in draft.findings),key=lambda x:(x.finding_type,str(x.rubric_item_id or ""),str(x.typical_error_id or ""),str(x.skill_id or ""),x.snapshot_code or "")))
     identities=[(x.finding_type,x.rubric_item_id,x.typical_error_id,x.skill_id,x.snapshot_code) for x in findings]
     if len(identities)!=len(set(identities)): raise InvalidCheckingResult("duplicate_finding")
     confidence_json={"schema_version":assessment.schema_version,"base":format(base,".4f"),"effective":format(effective,".4f"),"policy_version":policy.semantic_version,"reasons":[x.value for x in reasons],"penalties":[{"reason":x.reason.value,"amount":format(x.amount,"f")} for x in penalties],"total_penalty":format(assessment.total_penalty,".4f"),"needs_human_review":review,"review_reason":review_reason}
-    envelope=MappingProxyType({"schema_version":RESULT_PERSISTENCE_VERSION,"source_schema_version":draft.schema_version,"checker_version":draft.checker_version,"reason_code":draft.reason_code.value,"result_status":draft.outcome.value,"score_suggested":format(draft.score_suggested,"f") if draft.score_suggested is not None else None,"max_score":format(points,"f"),"confidence":confidence_json,"rubric_items":_safe(draft.rubric_items)})
+    finding_json=[{"finding_type":x.finding_type,"severity":x.severity,"confidence":format(x.confidence,".4f"),
+        "rubric_item_id":str(x.rubric_item_id) if x.rubric_item_id else None,
+        "typical_error_id":str(x.typical_error_id) if x.typical_error_id else None,
+        "skill_id":str(x.skill_id) if x.skill_id else None,"snapshot_code":x.snapshot_code,
+        "snapshot_title":x.snapshot_title,"snapshot_criterion":x.snapshot_criterion,"evidence":dict(x.evidence)} for x in findings]
+    envelope=MappingProxyType({"schema_version":RESULT_PERSISTENCE_VERSION,"source_schema_version":draft.schema_version,"checker_version":draft.checker_version,"reason_code":draft.reason_code.value,"result_status":draft.outcome.value,"score_suggested":format(draft.score_suggested,"f") if draft.score_suggested is not None else None,"max_score":format(points,"f"),"confidence":confidence_json,"findings":finding_json,"rubric_items":_safe(draft.rubric_items)})
     return PreparedCheckingResult(aid,tid,draft.checker_type.value,draft.checker_version,draft.schema_version,draft.outcome.value,draft.reason_code.value,draft.score_suggested,points,assessment,draft.summary,draft.student_feedback_draft,draft.teacher_summary,draft.model_limitations,findings,tuple(MappingProxyType(_safe(x)) for x in draft.rubric_items),envelope)
 
 
