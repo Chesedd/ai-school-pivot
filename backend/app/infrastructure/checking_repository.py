@@ -1,4 +1,5 @@
 """SQLAlchemy persistence adapter for atomic Checking operations; never commits."""
+from collections import Counter
 from datetime import datetime
 from uuid import UUID
 
@@ -13,6 +14,8 @@ from app.infrastructure.checking_models import CostEvent, CheckFinding, CheckRes
 from app.application.checking_provider import (MAX_ATTEMPTS, AttemptDisposition, AttemptState,
     Pricing, PromptSpec, ProviderExecutionKey, ProviderRequest, ProviderResponse, canonical_json,
     RequestConflict, retry_allowed, thaw_json)
+from app.application.checking_results import (ConfidenceGatePolicy, PreparedCheckingResult,
+    ResultReplayConflict, RunObservability, prepare_result, OBSERVABILITY_SCHEMA_VERSION)
 
 
 def _prompt_lock_key(spec: PromptSpec) -> str:
@@ -251,3 +254,70 @@ class SQLAlchemyProviderAttemptStore:
                     measured_latency_ms=measured_latency_ms)
                 await session.flush()
                 return _attempt_state(row, AttemptDisposition.TERMINAL_EXISTING)
+
+
+def _confidence_details(value):
+    return {"schema_version":value.schema_version,"base":format(value.base,".4f"),
+        "effective":format(value.effective,".4f"),"policy_version":value.policy_version,
+        "reasons":[x.value for x in value.reasons],"penalties":[{"reason":x.reason.value,"amount":format(x.amount,"f")} for x in value.penalties],
+        "total_penalty":format(value.total_penalty,".4f"),"needs_human_review":value.needs_human_review,"review_reason":value.review_reason}
+
+
+class SQLAlchemyCheckingResultPersistence:
+    """Fresh-transaction, lock-serialized Phase 4.9 batch finalizer."""
+    def __init__(self, session_factory): self.session_factory=session_factory
+
+    async def finalize(self, run_id, expected_row_version, policy, drafts):
+        async with self.session_factory() as session:
+          async with session.begin():
+            run=await session.scalar(select(CheckRun).where(CheckRun.id==run_id).with_for_update())
+            if run is None: raise InvalidPersistenceCommand("run not found")
+            if run.threshold_policy_version!=policy.semantic_version: raise IdempotencyConflict("confidence policy conflict")
+            items=tuple(run.input_snapshot.get("items",()))
+            expected=[x.get("assessment_item_id") for x in items]; supplied=[x.assessment_item_id for x in drafts]
+            if len(supplied)!=len(set(supplied)) or set(supplied)!=set(expected): raise InvalidPersistenceCommand("result batch identity mismatch")
+            by_id={x.assessment_item_id:x for x in drafts}; prepared=tuple(prepare_result(x,by_id[x["assessment_item_id"]],policy) for x in items)
+            existing=tuple((await session.scalars(select(CheckResult).where(CheckResult.check_run_id==run_id).order_by(CheckResult.assessment_item_id))).all())
+            if run.status in {"completed","completed_with_review_required"}:
+                if len(existing)!=len(prepared): raise ResultReplayConflict("completed result set differs")
+                for row,value in zip(sorted(existing,key=lambda x:str(x.assessment_item_id)),sorted(prepared,key=lambda x:str(x.assessment_item_id))):
+                    if row.validated_result!=dict(value.validated_result): raise ResultReplayConflict("prepared result differs")
+                return await self._observability(session,run)
+            if run.status!="running" or run.row_version!=expected_row_version or existing: raise ConcurrentConflict("run cannot be finalized")
+            for value in prepared:
+                row=CheckResult(check_run_id=run.id,assessment_item_id=value.assessment_item_id,task_version_id=value.task_version_id,
+                    checker_type=value.checker_type,checker_version=value.checker_version,schema_version=value.schema_version,
+                    result_status=value.outcome,reason_code=value.reason_code,score_suggested=value.score_suggested,max_score=value.max_score,
+                    confidence=value.confidence.effective,confidence_policy_version=policy.semantic_version,
+                    confidence_details=_confidence_details(value.confidence),summary=value.summary,
+                    student_feedback_draft=value.student_feedback_draft,teacher_summary=value.teacher_summary,
+                    needs_human_review=value.confidence.needs_human_review,review_reason=value.confidence.review_reason,
+                    model_limitations="; ".join(value.model_limitations) or None,validated_result=dict(value.validated_result))
+                session.add(row); await session.flush()
+                for f in value.findings: session.add(CheckFinding(check_result_id=row.id,finding_type=f.finding_type,
+                    rubric_item_id=f.rubric_item_id,typical_error_id=f.typical_error_id,skill_id=f.skill_id,snapshot_code=f.snapshot_code,
+                    snapshot_title=f.snapshot_title,snapshot_criterion=f.snapshot_criterion,severity=f.severity,confidence=f.confidence,evidence=dict(f.evidence)))
+                attempts=tuple((await session.scalars(select(ModelRun).where(ModelRun.check_run_id==run.id,ModelRun.assessment_item_id==value.assessment_item_id).with_for_update())).all())
+                if any(x.status=="running" for x in attempts): raise InvalidPersistenceCommand("model attempt still running")
+                if value.checker_type=="llm_rubric":
+                    for attempt in attempts:
+                        if attempt.check_result_id not in (None,row.id): raise IdempotencyConflict("model result association conflict")
+                        attempt.check_result_id=row.id
+                elif attempts: raise InvalidPersistenceCommand("deterministic result has model attempts")
+                session.add(CheckerEvent(check_run_id=run.id,check_result_id=row.id,assessment_item_id=row.assessment_item_id,
+                    event_type="result_recorded",reason_code=value.reason_code,details={"checker_type":value.checker_type,
+                    "result_status":value.outcome,"reason_code":value.reason_code,"confidence":format(value.confidence.effective,".4f"),
+                    "needs_human_review":value.confidence.needs_human_review,"finding_count":len(value.findings)}))
+            review=sum(x.confidence.needs_human_review for x in prepared); target="completed_with_review_required" if review else "completed"
+            await session.flush(); now=await session.scalar(select(func.clock_timestamp())); run.status=target; run.finished_at=now; run.row_version+=1
+            session.add(CheckerEvent(check_run_id=run.id,event_type="run_transition",from_status="running",to_status=target,
+                details={"item_count":len(prepared),"review_required_count":review,"retry_count":run.retry_count}))
+            await session.flush(); return await self._observability(session,run)
+
+    async def _observability(self,session,run):
+        results=tuple((await session.execute(select(CheckResult.result_status,CheckResult.checker_type,CheckResult.reason_code,CheckResult.needs_human_review).where(CheckResult.check_run_id==run.id))).all())
+        finding_count=await session.scalar(select(func.count(CheckFinding.id)).join(CheckResult,CheckResult.id==CheckFinding.check_result_id).where(CheckResult.check_run_id==run.id))
+        attempts=tuple((await session.execute(select(ModelRun.status,ModelRun.attempt_no,ModelRun.latency_ms,ModelRun.input_tokens,ModelRun.output_tokens,ModelRun.cached_tokens).where(ModelRun.check_run_id==run.id))).all())
+        costs=tuple((await session.execute(select(CostEvent.currency,CostEvent.pricing_version,CostEvent.pricing_source,func.sum(CostEvent.amount)).join(ModelRun,ModelRun.id==CostEvent.model_run_id).where(ModelRun.check_run_id==run.id).group_by(CostEvent.currency,CostEvent.pricing_version,CostEvent.pricing_source).order_by(CostEvent.currency,CostEvent.pricing_version,CostEvent.pricing_source))).all())
+        count=lambda i: tuple(sorted(Counter(x[i] for x in results).items()))
+        return RunObservability(OBSERVABILITY_SCHEMA_VERSION,run.id,run.status,run.threshold_policy_version,len(run.input_snapshot.get("items",())),len(results),sum(x[3] for x in results),finding_count or 0,count(0),count(1),count(2),tuple(sorted(Counter(x[0] for x in attempts).items())),sum(max(x[1]-1,0) for x in attempts),sum(x[2] or 0 for x in attempts),sum(x[3] for x in attempts),sum(x[4] for x in attempts),sum(x[5] for x in attempts),tuple((x[0],x[1],x[2],format(x[3],"f")) for x in costs))

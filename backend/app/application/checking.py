@@ -48,12 +48,20 @@ def validate_transition(current: str, target: str) -> None:
 
 
 FORBIDDEN_EVENT_KEYS = {"raw_answer", "normalized_answer", "provider_output", "raw_output", "student_id", "participant_id", "display_name", "email"}
-ALLOWED_EVENT_KEYS = {"attempt_no", "retry_count", "checker_type", "result_status", "model_run_id", "item_count"}
+ALLOWED_EVENT_KEYS = {"attempt_no", "retry_count", "checker_type", "result_status", "reason_code",
+                      "confidence", "needs_human_review", "finding_count", "model_run_id",
+                      "item_count", "review_required_count"}
 
 
 def safe_event_details(details: dict[str, Any]) -> dict[str, Any]:
     if set(details) - ALLOWED_EVENT_KEYS or set(details) & FORBIDDEN_EVENT_KEYS:
         raise InvalidPersistenceCommand("unsafe event detail key")
+    strings={"checker_type":64,"result_status":64,"reason_code":64,"confidence":16,"model_run_id":36}
+    integers={"attempt_no","retry_count","finding_count","item_count","review_required_count"}
+    for key,value in details.items():
+        if key in strings and (type(value) is not str or not value or len(value)>strings[key]): raise InvalidPersistenceCommand("invalid event detail")
+        if key in integers and (type(value) is not int or value<0): raise InvalidPersistenceCommand("invalid event detail")
+        if key=="needs_human_review" and type(value) is not bool: raise InvalidPersistenceCommand("invalid event detail")
     return dict(details)
 
 
@@ -73,7 +81,7 @@ def validate_result(snapshot: dict[str, Any], item_id: UUID, task_version_id: UU
     if frozen != max_score: raise InvalidPersistenceCommand("max score mismatch")
     valid = ((status == "correct" and score == max_score) or (status == "incorrect" and score == 0)
              or (status == "partially_correct" and score is not None and 0 < score < max_score)
-             or (status in {"insufficient_rubric", "manual_required"} and score is None))
+             or (status in {"unclear", "insufficient_rubric", "manual_required"} and score is None))
     if not valid: raise InvalidPersistenceCommand("score/status mismatch")
 
 
