@@ -794,7 +794,7 @@ results, findings, workers, routes, or any Phase 4.8 behavior.
 
 Application validation requires every authored rubric item once and in order; checks canonical Decimal allocations, status consistency, provenance allowlists, and bounded answer-slice evidence; and sorts findings by technical identity. Typical-error and skill provenance is re-derived from the frozen snapshot. Invalid output or exhausted provider failure produces a safe `unclear` draft, while a running attempt produces a typed nonterminal signal.
 
-The application scales exactly once: `ROUND_HALF_UP(rubric_score / rubric.max_score * assessment_item.points, 0.01)`. It uses Decimal with no intermediate rounding. An unclear item suppresses the score. Confidence comes only from an immutable versioned application policy, and every evaluated LLM draft requires review with `llm_human_review_required`; it is never a final grade. Phase 4.9 remains deferred.
+The application scales exactly once: `ROUND_HALF_UP(rubric_score / rubric.max_score * assessment_item.points, 0.01)`. It uses Decimal with no intermediate rounding. An unclear item suppresses the score. Confidence comes only from an immutable versioned application policy, and every evaluated LLM draft requires review with `llm_human_review_required`; it is never a final grade. Phase 4.9 is accepted; real-provider quality evaluation remains separately pending.
 
 ## Граница с AI Content Authoring Phase 4A
 
@@ -825,7 +825,7 @@ Batch finalization locks the run, validates one draft for every frozen item in s
 
 Safe result events contain only checker type, status, bounded reason, canonical confidence, review Boolean, and finding count. Per-run observability (`checking_observability_v1`) contains run/status/policy identity, item/result/review/finding counts, deterministic counts by status/checker/reason, model-attempt status/retry/latency/token totals, and Decimal cost totals grouped by currency/pricing version/source. It excludes snapshots, answers, rubric or solution prose, finding content, evidence, summaries, feedback, raw output, provider request IDs, and person/course/assignment identities. It is technical visibility, not a public API or analytics product.
 
-Migration `20260819_01` resolves the database/application gap by adding `unclear` to `checking_result_status`, aligning its score constraint, and adding reason and versioned confidence metadata. Upgrade backfills legacy rows from each owning run. Downgrade replaces the enum safely and explicitly refuses, without rewriting or deleting history, if `unclear` rows exist. Phase 4.10 golden-dataset quality and calibration remain pending; this phase adds no final grades, Teacher Review, frontend/API, worker, remediation, provider SDK, or Phase 4A.1 behavior.
+Migration `20260819_01` resolves the database/application gap by adding `unclear` to `checking_result_status`, aligning its score constraint, and adding reason and versioned confidence metadata. Upgrade backfills legacy rows from each owning run. Downgrade replaces the enum safely and explicitly refuses, without rewriting or deleting history, if `unclear` rows exist. Phase 4.10 technical acceptance uses an executable golden corpus; real-provider quality evaluation remains pending; this phase adds no final grades, Teacher Review, frontend/API, worker, remediation, provider SDK, or Phase 4A.1 behavior.
 
 ### Phase 4.9 corrective migration `20260820_01`
 

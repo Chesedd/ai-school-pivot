@@ -1,935 +1,4317 @@
 {
   "version": "checking_golden_dataset_v1",
-  "description": "Synthetic technical corpus; not human-approved or real-provider quality evidence.",
+  "description": "60 executable synthetic production-path acceptance cases",
   "cases": [
     {
       "case_id": "case-001",
       "category": "exact_text",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000011",
+              "task_version_id": "00000000-0000-0000-0000-000000000012",
+              "position": 1,
+              "points": "2.50",
+              "answer_format": "short_text",
+              "raw_answer": "Alpha",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "short_text",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000013",
+                    "value_kind": "text",
+                    "canonical_text": "Alpha",
+                    "normalization_policy_code": "exact_text_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "exact",
       "expected_outcome": "correct",
       "expected_reason": "exact_match",
-      "expected_score": "2.5",
-      "max_score": "2.5",
+      "expected_score": "2.50",
+      "max_score": "2.50",
       "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "deterministic_proof"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "exact_boundary",
-        "provider_candidate": "validated"
+        "scenario": "exact_text_01"
       }
     },
     {
       "case_id": "case-002",
       "category": "exact_text",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000021",
+              "task_version_id": "00000000-0000-0000-0000-000000000022",
+              "position": 2,
+              "points": "2.50",
+              "answer_format": "short_text",
+              "raw_answer": "alpha",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "short_text",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000023",
+                    "value_kind": "text",
+                    "canonical_text": "Alpha",
+                    "normalization_policy_code": "exact_text_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "exact",
       "expected_outcome": "incorrect",
       "expected_reason": "exact_mismatch",
-      "expected_score": "0",
-      "max_score": "1",
+      "expected_score": "0.00",
+      "max_score": "2.50",
       "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "deterministic_proof"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "unicode_exact",
-        "provider_candidate": "validated"
+        "scenario": "exact_text_02"
       }
     },
     {
       "case_id": "case-003",
       "category": "exact_text",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000031",
+              "task_version_id": "00000000-0000-0000-0000-000000000032",
+              "position": 3,
+              "points": "2.50",
+              "answer_format": "short_text",
+              "raw_answer": "Alpha",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "short_text",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000033",
+                    "value_kind": "text",
+                    "canonical_text": "Alpha",
+                    "normalization_policy_code": "exact_text_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "exact",
-      "expected_outcome": "incorrect",
-      "expected_reason": "exact_mismatch",
-      "expected_score": "0",
-      "max_score": "1",
+      "expected_outcome": "correct",
+      "expected_reason": "exact_match",
+      "expected_score": "2.50",
+      "max_score": "2.50",
       "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "deterministic_proof"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "case_sensitive",
-        "provider_candidate": "validated"
+        "scenario": "exact_text_03"
       }
     },
     {
       "case_id": "case-004",
       "category": "exact_text",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000041",
+              "task_version_id": "00000000-0000-0000-0000-000000000042",
+              "position": 4,
+              "points": "2.50",
+              "answer_format": "short_text",
+              "raw_answer": "alpha",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "short_text",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000043",
+                    "value_kind": "text",
+                    "canonical_text": "Alpha",
+                    "normalization_policy_code": "exact_text_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "exact",
-      "expected_outcome": "unclear",
+      "expected_outcome": "incorrect",
       "expected_reason": "exact_mismatch",
-      "expected_score": null,
-      "max_score": "2.5",
-      "expected_review": true,
+      "expected_score": "0.00",
+      "max_score": "2.50",
+      "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "deterministic_proof"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "whitespace_exact",
-        "provider_candidate": "validated"
+        "scenario": "exact_text_04"
       }
     },
     {
       "case_id": "case-005",
       "category": "exact_text",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000051",
+              "task_version_id": "00000000-0000-0000-0000-000000000052",
+              "position": 5,
+              "points": "2.50",
+              "answer_format": "short_text",
+              "raw_answer": "Alpha",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "short_text",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000053",
+                    "value_kind": "text",
+                    "canonical_text": "Alpha",
+                    "normalization_policy_code": "exact_text_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "exact",
       "expected_outcome": "correct",
       "expected_reason": "exact_match",
-      "expected_score": "1",
-      "max_score": "1",
+      "expected_score": "2.50",
+      "max_score": "2.50",
       "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "deterministic_proof"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "alternative_exact",
-        "provider_candidate": "validated"
+        "scenario": "exact_text_05"
       }
     },
     {
       "case_id": "case-006",
       "category": "exact_text",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000061",
+              "task_version_id": "00000000-0000-0000-0000-000000000062",
+              "position": 6,
+              "points": "2.50",
+              "answer_format": "short_text",
+              "raw_answer": "alpha",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "short_text",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000063",
+                    "value_kind": "text",
+                    "canonical_text": "Alpha",
+                    "normalization_policy_code": "exact_text_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "exact",
       "expected_outcome": "incorrect",
       "expected_reason": "exact_mismatch",
-      "expected_score": "0",
-      "max_score": "1",
+      "expected_score": "0.00",
+      "max_score": "2.50",
       "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "deterministic_proof"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "prompt_injection_data",
-        "provider_candidate": "validated"
+        "scenario": "exact_text_06"
       }
     },
     {
       "case_id": "case-007",
       "category": "exact_text",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000071",
+              "task_version_id": "00000000-0000-0000-0000-000000000072",
+              "position": 7,
+              "points": "2.50",
+              "answer_format": "short_text",
+              "raw_answer": "Alpha",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "short_text",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000073",
+                    "value_kind": "text",
+                    "canonical_text": "Alpha",
+                    "normalization_policy_code": "exact_text_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "exact",
-      "expected_outcome": "incorrect",
-      "expected_reason": "exact_mismatch",
-      "expected_score": "0",
-      "max_score": "2.5",
+      "expected_outcome": "correct",
+      "expected_reason": "exact_match",
+      "expected_score": "2.50",
+      "max_score": "2.50",
       "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "deterministic_proof"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "privacy_negative_marker",
-        "provider_candidate": "validated"
+        "scenario": "exact_text_07"
       }
     },
     {
       "case_id": "case-008",
       "category": "exact_text",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000081",
+              "task_version_id": "00000000-0000-0000-0000-000000000082",
+              "position": 8,
+              "points": "2.50",
+              "answer_format": "short_text",
+              "raw_answer": null,
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "short_text",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000083",
+                    "value_kind": "text",
+                    "canonical_text": "Alpha",
+                    "normalization_policy_code": "exact_text_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "exact",
-      "expected_outcome": "unclear",
-      "expected_reason": "exact_mismatch",
-      "expected_score": null,
-      "max_score": "1",
-      "expected_review": true,
+      "expected_outcome": "incorrect",
+      "expected_reason": "unanswered",
+      "expected_score": "0.00",
+      "max_score": "2.50",
+      "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "unanswered"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "unanswered_exact",
-        "provider_candidate": "validated"
+        "scenario": "exact_text_08"
       }
     },
     {
       "case_id": "case-009",
       "category": "choice",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000091",
+              "task_version_id": "00000000-0000-0000-0000-000000000092",
+              "position": 9,
+              "points": "3.00",
+              "answer_format": "single_choice",
+              "raw_answer": "00000000-0000-0000-0000-000000000093",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "test",
+                "answer_format": "single_choice",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000097",
+                    "value_kind": "choice_set",
+                    "option_ids": [
+                      "00000000-0000-0000-0000-000000000093"
+                    ]
+                  }
+                ],
+                "choice_options": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000093",
+                    "option_key": "a",
+                    "order_index": 0,
+                    "label": "Option 0"
+                  },
+                  {
+                    "id": "00000000-0000-0000-0000-000000000094",
+                    "option_key": "b",
+                    "order_index": 1,
+                    "label": "Option 1"
+                  },
+                  {
+                    "id": "00000000-0000-0000-0000-000000000095",
+                    "option_key": "c",
+                    "order_index": 2,
+                    "label": "Option 2"
+                  }
+                ],
+                "choice_scoring_policy": {
+                  "mode": "all_or_nothing",
+                  "policy_version": 1,
+                  "option_rules": []
+                },
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "multiple_choice",
       "expected_outcome": "correct",
       "expected_reason": "choice_match",
-      "expected_score": "2.5",
-      "max_score": "2.5",
+      "expected_score": "3.00",
+      "max_score": "3.00",
       "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "deterministic_proof"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "single",
-        "provider_candidate": "validated"
+        "scenario": "choice_01"
       }
     },
     {
       "case_id": "case-010",
       "category": "choice",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000101",
+              "task_version_id": "00000000-0000-0000-0000-000000000102",
+              "position": 10,
+              "points": "3.00",
+              "answer_format": "single_choice",
+              "raw_answer": "00000000-0000-0000-0000-000000000104",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "test",
+                "answer_format": "single_choice",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000107",
+                    "value_kind": "choice_set",
+                    "option_ids": [
+                      "00000000-0000-0000-0000-000000000103"
+                    ]
+                  }
+                ],
+                "choice_options": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000103",
+                    "option_key": "a",
+                    "order_index": 0,
+                    "label": "Option 0"
+                  },
+                  {
+                    "id": "00000000-0000-0000-0000-000000000104",
+                    "option_key": "b",
+                    "order_index": 1,
+                    "label": "Option 1"
+                  },
+                  {
+                    "id": "00000000-0000-0000-0000-000000000105",
+                    "option_key": "c",
+                    "order_index": 2,
+                    "label": "Option 2"
+                  }
+                ],
+                "choice_scoring_policy": {
+                  "mode": "all_or_nothing",
+                  "policy_version": 1,
+                  "option_rules": []
+                },
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "multiple_choice",
       "expected_outcome": "incorrect",
       "expected_reason": "choice_mismatch",
-      "expected_score": "0",
-      "max_score": "1",
+      "expected_score": "0.00",
+      "max_score": "3.00",
       "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "deterministic_proof"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "single_mismatch",
-        "provider_candidate": "validated"
+        "scenario": "choice_02"
       }
     },
     {
       "case_id": "case-011",
       "category": "choice",
-      "expected_checker": "multiple_choice",
-      "expected_outcome": "partially_correct",
-      "expected_reason": "choice_partial",
-      "expected_score": "0.5",
-      "max_score": "1",
-      "expected_review": false,
-      "expected_findings": [
-        {
-          "finding_type": "rubric_miss",
-          "rubric_item_id": "00000000-0000-4000-8000-000000000011"
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000111",
+              "task_version_id": "00000000-0000-0000-0000-000000000112",
+              "position": 11,
+              "points": "3.00",
+              "answer_format": "single_choice",
+              "raw_answer": "00000000-0000-0000-0000-000000000119",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "test",
+                "answer_format": "single_choice",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000117",
+                    "value_kind": "choice_set",
+                    "option_ids": [
+                      "00000000-0000-0000-0000-000000000113"
+                    ]
+                  }
+                ],
+                "choice_options": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000113",
+                    "option_key": "a",
+                    "order_index": 0,
+                    "label": "Option 0"
+                  },
+                  {
+                    "id": "00000000-0000-0000-0000-000000000114",
+                    "option_key": "b",
+                    "order_index": 1,
+                    "label": "Option 1"
+                  },
+                  {
+                    "id": "00000000-0000-0000-0000-000000000115",
+                    "option_key": "c",
+                    "order_index": 2,
+                    "label": "Option 2"
+                  }
+                ],
+                "choice_scoring_policy": {
+                  "mode": "all_or_nothing",
+                  "policy_version": 1,
+                  "option_rules": []
+                },
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
         }
+      },
+      "expected_checker": "multiple_choice",
+      "expected_outcome": "unclear",
+      "expected_reason": "unknown_choice_option",
+      "expected_score": null,
+      "max_score": "3.00",
+      "expected_review": true,
+      "expected_review_reason": "unknown_choice_option",
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "0.0000",
+      "expected_confidence_reasons": [
+        "unclear",
+        "below_review_threshold"
       ],
+      "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "multiple",
-        "provider_candidate": "validated"
+        "scenario": "choice_03"
       }
     },
     {
       "case_id": "case-012",
       "category": "choice",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000121",
+              "task_version_id": "00000000-0000-0000-0000-000000000122",
+              "position": 12,
+              "points": "3.00",
+              "answer_format": "single_choice",
+              "raw_answer": "00000000-0000-0000-0000-000000000123",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "test",
+                "answer_format": "single_choice",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000127",
+                    "value_kind": "choice_set",
+                    "option_ids": [
+                      "00000000-0000-0000-0000-000000000123"
+                    ]
+                  }
+                ],
+                "choice_options": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000123",
+                    "option_key": "a",
+                    "order_index": 0,
+                    "label": "Option 0"
+                  },
+                  {
+                    "id": "00000000-0000-0000-0000-000000000124",
+                    "option_key": "b",
+                    "order_index": 1,
+                    "label": "Option 1"
+                  },
+                  {
+                    "id": "00000000-0000-0000-0000-000000000125",
+                    "option_key": "c",
+                    "order_index": 2,
+                    "label": "Option 2"
+                  }
+                ],
+                "choice_scoring_policy": {
+                  "mode": "all_or_nothing",
+                  "policy_version": 1,
+                  "option_rules": []
+                },
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "multiple_choice",
-      "expected_outcome": "unclear",
-      "expected_reason": "unknown_choice_option",
-      "expected_score": null,
-      "max_score": "2.5",
-      "expected_review": true,
+      "expected_outcome": "correct",
+      "expected_reason": "choice_match",
+      "expected_score": "3.00",
+      "max_score": "3.00",
+      "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "deterministic_proof"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "multiple_partial",
-        "provider_candidate": "validated"
+        "scenario": "choice_04"
       }
     },
     {
       "case_id": "case-013",
       "category": "choice",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000131",
+              "task_version_id": "00000000-0000-0000-0000-000000000132",
+              "position": 13,
+              "points": "3.00",
+              "answer_format": "single_choice",
+              "raw_answer": "00000000-0000-0000-0000-000000000134",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "test",
+                "answer_format": "single_choice",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000137",
+                    "value_kind": "choice_set",
+                    "option_ids": [
+                      "00000000-0000-0000-0000-000000000133"
+                    ]
+                  }
+                ],
+                "choice_options": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000133",
+                    "option_key": "a",
+                    "order_index": 0,
+                    "label": "Option 0"
+                  },
+                  {
+                    "id": "00000000-0000-0000-0000-000000000134",
+                    "option_key": "b",
+                    "order_index": 1,
+                    "label": "Option 1"
+                  },
+                  {
+                    "id": "00000000-0000-0000-0000-000000000135",
+                    "option_key": "c",
+                    "order_index": 2,
+                    "label": "Option 2"
+                  }
+                ],
+                "choice_scoring_policy": {
+                  "mode": "all_or_nothing",
+                  "policy_version": 1,
+                  "option_rules": []
+                },
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "multiple_choice",
-      "expected_outcome": "correct",
-      "expected_reason": "choice_match",
-      "expected_score": "1",
-      "max_score": "1",
+      "expected_outcome": "incorrect",
+      "expected_reason": "choice_mismatch",
+      "expected_score": "0.00",
+      "max_score": "3.00",
       "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "deterministic_proof"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "or_alternative_a",
-        "provider_candidate": "validated"
+        "scenario": "choice_05"
       }
     },
     {
       "case_id": "case-014",
       "category": "choice",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000141",
+              "task_version_id": "00000000-0000-0000-0000-000000000142",
+              "position": 14,
+              "points": "3.00",
+              "answer_format": "single_choice",
+              "raw_answer": "00000000-0000-0000-0000-000000000149",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "test",
+                "answer_format": "single_choice",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000147",
+                    "value_kind": "choice_set",
+                    "option_ids": [
+                      "00000000-0000-0000-0000-000000000143"
+                    ]
+                  }
+                ],
+                "choice_options": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000143",
+                    "option_key": "a",
+                    "order_index": 0,
+                    "label": "Option 0"
+                  },
+                  {
+                    "id": "00000000-0000-0000-0000-000000000144",
+                    "option_key": "b",
+                    "order_index": 1,
+                    "label": "Option 1"
+                  },
+                  {
+                    "id": "00000000-0000-0000-0000-000000000145",
+                    "option_key": "c",
+                    "order_index": 2,
+                    "label": "Option 2"
+                  }
+                ],
+                "choice_scoring_policy": {
+                  "mode": "all_or_nothing",
+                  "policy_version": 1,
+                  "option_rules": []
+                },
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "multiple_choice",
-      "expected_outcome": "incorrect",
-      "expected_reason": "choice_mismatch",
-      "expected_score": "0",
-      "max_score": "1",
-      "expected_review": false,
+      "expected_outcome": "unclear",
+      "expected_reason": "unknown_choice_option",
+      "expected_score": null,
+      "max_score": "3.00",
+      "expected_review": true,
+      "expected_review_reason": "unknown_choice_option",
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "0.0000",
+      "expected_confidence_reasons": [
+        "unclear",
+        "below_review_threshold"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "or_alternative_b",
-        "provider_candidate": "validated"
+        "scenario": "choice_06"
       }
     },
     {
       "case_id": "case-015",
       "category": "choice",
-      "expected_checker": "multiple_choice",
-      "expected_outcome": "partially_correct",
-      "expected_reason": "choice_partial",
-      "expected_score": "0.5",
-      "max_score": "2.5",
-      "expected_review": false,
-      "expected_findings": [
-        {
-          "finding_type": "rubric_miss",
-          "rubric_item_id": "00000000-0000-4000-8000-000000000015"
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000151",
+              "task_version_id": "00000000-0000-0000-0000-000000000152",
+              "position": 15,
+              "points": "3.00",
+              "answer_format": "single_choice",
+              "raw_answer": "00000000-0000-0000-0000-000000000153",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "test",
+                "answer_format": "single_choice",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000157",
+                    "value_kind": "choice_set",
+                    "option_ids": [
+                      "00000000-0000-0000-0000-000000000153"
+                    ]
+                  }
+                ],
+                "choice_options": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000153",
+                    "option_key": "a",
+                    "order_index": 0,
+                    "label": "Option 0"
+                  },
+                  {
+                    "id": "00000000-0000-0000-0000-000000000154",
+                    "option_key": "b",
+                    "order_index": 1,
+                    "label": "Option 1"
+                  },
+                  {
+                    "id": "00000000-0000-0000-0000-000000000155",
+                    "option_key": "c",
+                    "order_index": 2,
+                    "label": "Option 2"
+                  }
+                ],
+                "choice_scoring_policy": {
+                  "mode": "all_or_nothing",
+                  "policy_version": 1,
+                  "option_rules": []
+                },
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
         }
+      },
+      "expected_checker": "multiple_choice",
+      "expected_outcome": "correct",
+      "expected_reason": "choice_match",
+      "expected_score": "3.00",
+      "max_score": "3.00",
+      "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "deterministic_proof"
       ],
+      "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "weighted_full",
-        "provider_candidate": "validated"
+        "scenario": "choice_07"
       }
     },
     {
       "case_id": "case-016",
       "category": "choice",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000161",
+              "task_version_id": "00000000-0000-0000-0000-000000000162",
+              "position": 16,
+              "points": "3.00",
+              "answer_format": "single_choice",
+              "raw_answer": "00000000-0000-0000-0000-000000000164",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "test",
+                "answer_format": "single_choice",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000167",
+                    "value_kind": "choice_set",
+                    "option_ids": [
+                      "00000000-0000-0000-0000-000000000163"
+                    ]
+                  }
+                ],
+                "choice_options": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000163",
+                    "option_key": "a",
+                    "order_index": 0,
+                    "label": "Option 0"
+                  },
+                  {
+                    "id": "00000000-0000-0000-0000-000000000164",
+                    "option_key": "b",
+                    "order_index": 1,
+                    "label": "Option 1"
+                  },
+                  {
+                    "id": "00000000-0000-0000-0000-000000000165",
+                    "option_key": "c",
+                    "order_index": 2,
+                    "label": "Option 2"
+                  }
+                ],
+                "choice_scoring_policy": {
+                  "mode": "all_or_nothing",
+                  "policy_version": 1,
+                  "option_rules": []
+                },
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "multiple_choice",
-      "expected_outcome": "unclear",
-      "expected_reason": "unknown_choice_option",
-      "expected_score": null,
-      "max_score": "1",
-      "expected_review": true,
+      "expected_outcome": "incorrect",
+      "expected_reason": "choice_mismatch",
+      "expected_score": "0.00",
+      "max_score": "3.00",
+      "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "deterministic_proof"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "weighted_partial",
-        "provider_candidate": "validated"
+        "scenario": "choice_08"
       }
     },
     {
       "case_id": "case-017",
       "category": "choice",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000171",
+              "task_version_id": "00000000-0000-0000-0000-000000000172",
+              "position": 17,
+              "points": "3.00",
+              "answer_format": "single_choice",
+              "raw_answer": "00000000-0000-0000-0000-000000000179",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "test",
+                "answer_format": "single_choice",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000177",
+                    "value_kind": "choice_set",
+                    "option_ids": [
+                      "00000000-0000-0000-0000-000000000173"
+                    ]
+                  }
+                ],
+                "choice_options": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000173",
+                    "option_key": "a",
+                    "order_index": 0,
+                    "label": "Option 0"
+                  },
+                  {
+                    "id": "00000000-0000-0000-0000-000000000174",
+                    "option_key": "b",
+                    "order_index": 1,
+                    "label": "Option 1"
+                  },
+                  {
+                    "id": "00000000-0000-0000-0000-000000000175",
+                    "option_key": "c",
+                    "order_index": 2,
+                    "label": "Option 2"
+                  }
+                ],
+                "choice_scoring_policy": {
+                  "mode": "all_or_nothing",
+                  "policy_version": 1,
+                  "option_rules": []
+                },
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "multiple_choice",
-      "expected_outcome": "correct",
-      "expected_reason": "choice_match",
-      "expected_score": "1",
-      "max_score": "1",
-      "expected_review": false,
+      "expected_outcome": "unclear",
+      "expected_reason": "unknown_choice_option",
+      "expected_score": null,
+      "max_score": "3.00",
+      "expected_review": true,
+      "expected_review_reason": "unknown_choice_option",
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "0.0000",
+      "expected_confidence_reasons": [
+        "unclear",
+        "below_review_threshold"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "unknown_option",
-        "provider_candidate": "validated"
+        "scenario": "choice_09"
       }
     },
     {
       "case_id": "case-018",
       "category": "choice",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000181",
+              "task_version_id": "00000000-0000-0000-0000-000000000182",
+              "position": 18,
+              "points": "3.00",
+              "answer_format": "single_choice",
+              "raw_answer": "00000000-0000-0000-0000-000000000183",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "test",
+                "answer_format": "single_choice",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000187",
+                    "value_kind": "choice_set",
+                    "option_ids": [
+                      "00000000-0000-0000-0000-000000000183"
+                    ]
+                  }
+                ],
+                "choice_options": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000183",
+                    "option_key": "a",
+                    "order_index": 0,
+                    "label": "Option 0"
+                  },
+                  {
+                    "id": "00000000-0000-0000-0000-000000000184",
+                    "option_key": "b",
+                    "order_index": 1,
+                    "label": "Option 1"
+                  },
+                  {
+                    "id": "00000000-0000-0000-0000-000000000185",
+                    "option_key": "c",
+                    "order_index": 2,
+                    "label": "Option 2"
+                  }
+                ],
+                "choice_scoring_policy": {
+                  "mode": "all_or_nothing",
+                  "policy_version": 1,
+                  "option_rules": []
+                },
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "multiple_choice",
-      "expected_outcome": "incorrect",
-      "expected_reason": "choice_mismatch",
-      "expected_score": "0",
-      "max_score": "2.5",
+      "expected_outcome": "correct",
+      "expected_reason": "choice_match",
+      "expected_score": "3.00",
+      "max_score": "3.00",
       "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "deterministic_proof"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "duplicate_defense",
-        "provider_candidate": "validated"
+        "scenario": "choice_10"
       }
     },
     {
       "case_id": "case-019",
       "category": "choice",
-      "expected_checker": "multiple_choice",
-      "expected_outcome": "partially_correct",
-      "expected_reason": "choice_partial",
-      "expected_score": "0.5",
-      "max_score": "1",
-      "expected_review": false,
-      "expected_findings": [
-        {
-          "finding_type": "rubric_miss",
-          "rubric_item_id": "00000000-0000-4000-8000-000000000019"
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000191",
+              "task_version_id": "00000000-0000-0000-0000-000000000192",
+              "position": 19,
+              "points": "3.00",
+              "answer_format": "single_choice",
+              "raw_answer": "00000000-0000-0000-0000-000000000194",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "test",
+                "answer_format": "single_choice",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000197",
+                    "value_kind": "choice_set",
+                    "option_ids": [
+                      "00000000-0000-0000-0000-000000000193"
+                    ]
+                  }
+                ],
+                "choice_options": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000193",
+                    "option_key": "a",
+                    "order_index": 0,
+                    "label": "Option 0"
+                  },
+                  {
+                    "id": "00000000-0000-0000-0000-000000000194",
+                    "option_key": "b",
+                    "order_index": 1,
+                    "label": "Option 1"
+                  },
+                  {
+                    "id": "00000000-0000-0000-0000-000000000195",
+                    "option_key": "c",
+                    "order_index": 2,
+                    "label": "Option 2"
+                  }
+                ],
+                "choice_scoring_policy": {
+                  "mode": "all_or_nothing",
+                  "policy_version": 1,
+                  "option_rules": []
+                },
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
         }
+      },
+      "expected_checker": "multiple_choice",
+      "expected_outcome": "incorrect",
+      "expected_reason": "choice_mismatch",
+      "expected_score": "0.00",
+      "max_score": "3.00",
+      "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "deterministic_proof"
       ],
+      "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "unanswered_choice",
-        "provider_candidate": "validated"
+        "scenario": "choice_11"
       }
     },
     {
       "case_id": "case-020",
       "category": "choice",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000201",
+              "task_version_id": "00000000-0000-0000-0000-000000000202",
+              "position": 20,
+              "points": "3.00",
+              "answer_format": "single_choice",
+              "raw_answer": "00000000-0000-0000-0000-000000000209",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "test",
+                "answer_format": "single_choice",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000207",
+                    "value_kind": "choice_set",
+                    "option_ids": [
+                      "00000000-0000-0000-0000-000000000203"
+                    ]
+                  }
+                ],
+                "choice_options": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000203",
+                    "option_key": "a",
+                    "order_index": 0,
+                    "label": "Option 0"
+                  },
+                  {
+                    "id": "00000000-0000-0000-0000-000000000204",
+                    "option_key": "b",
+                    "order_index": 1,
+                    "label": "Option 1"
+                  },
+                  {
+                    "id": "00000000-0000-0000-0000-000000000205",
+                    "option_key": "c",
+                    "order_index": 2,
+                    "label": "Option 2"
+                  }
+                ],
+                "choice_scoring_policy": {
+                  "mode": "all_or_nothing",
+                  "policy_version": 1,
+                  "option_rules": []
+                },
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "multiple_choice",
       "expected_outcome": "unclear",
       "expected_reason": "unknown_choice_option",
       "expected_score": null,
-      "max_score": "1",
+      "max_score": "3.00",
       "expected_review": true,
+      "expected_review_reason": "unknown_choice_option",
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "0.0000",
+      "expected_confidence_reasons": [
+        "unclear",
+        "below_review_threshold"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "privacy_negative_marker",
-        "provider_candidate": "validated"
+        "scenario": "choice_12"
       }
     },
     {
       "case_id": "case-021",
       "category": "numeric",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000211",
+              "task_version_id": "00000000-0000-0000-0000-000000000212",
+              "position": 21,
+              "points": "3.00",
+              "answer_format": "number",
+              "raw_answer": "1",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "number",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000213",
+                    "value_kind": "decimal",
+                    "canonical_decimal": "1",
+                    "absolute_tolerance": "0.1",
+                    "relative_tolerance": "0",
+                    "unit_code": null,
+                    "normalization_policy_code": "decimal_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "numeric",
       "expected_outcome": "correct",
       "expected_reason": "numeric_match",
-      "expected_score": "2.5",
-      "max_score": "2.5",
+      "expected_score": "3.00",
+      "max_score": "3.00",
       "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "deterministic_proof"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "exact_zero",
-        "provider_candidate": "validated"
+        "scenario": "numeric_01"
       }
     },
     {
       "case_id": "case-022",
       "category": "numeric",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000221",
+              "task_version_id": "00000000-0000-0000-0000-000000000222",
+              "position": 22,
+              "points": "3.00",
+              "answer_format": "number",
+              "raw_answer": "1.1",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "number",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000223",
+                    "value_kind": "decimal",
+                    "canonical_decimal": "1",
+                    "absolute_tolerance": "0.1",
+                    "relative_tolerance": "0",
+                    "unit_code": null,
+                    "normalization_policy_code": "decimal_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "numeric",
-      "expected_outcome": "incorrect",
-      "expected_reason": "numeric_mismatch",
-      "expected_score": "0",
-      "max_score": "1",
+      "expected_outcome": "correct",
+      "expected_reason": "numeric_match",
+      "expected_score": "3.00",
+      "max_score": "3.00",
       "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "deterministic_proof"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "absolute_tolerance",
-        "provider_candidate": "validated"
+        "scenario": "numeric_02"
       }
     },
     {
       "case_id": "case-023",
       "category": "numeric",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000231",
+              "task_version_id": "00000000-0000-0000-0000-000000000232",
+              "position": 23,
+              "points": "3.00",
+              "answer_format": "number",
+              "raw_answer": "0.9",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "number",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000233",
+                    "value_kind": "decimal",
+                    "canonical_decimal": "1",
+                    "absolute_tolerance": "0.1",
+                    "relative_tolerance": "0",
+                    "unit_code": null,
+                    "normalization_policy_code": "decimal_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "numeric",
-      "expected_outcome": "incorrect",
-      "expected_reason": "numeric_mismatch",
-      "expected_score": "0",
-      "max_score": "1",
+      "expected_outcome": "correct",
+      "expected_reason": "numeric_match",
+      "expected_score": "3.00",
+      "max_score": "3.00",
       "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "deterministic_proof"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "boundary_inside",
-        "provider_candidate": "validated"
+        "scenario": "numeric_03"
       }
     },
     {
       "case_id": "case-024",
       "category": "numeric",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000241",
+              "task_version_id": "00000000-0000-0000-0000-000000000242",
+              "position": 24,
+              "points": "3.00",
+              "answer_format": "number",
+              "raw_answer": "1.1001",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "number",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000243",
+                    "value_kind": "decimal",
+                    "canonical_decimal": "1",
+                    "absolute_tolerance": "0.1",
+                    "relative_tolerance": "0",
+                    "unit_code": null,
+                    "normalization_policy_code": "decimal_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "numeric",
-      "expected_outcome": "unclear",
+      "expected_outcome": "incorrect",
       "expected_reason": "numeric_mismatch",
-      "expected_score": null,
-      "max_score": "2.5",
-      "expected_review": true,
+      "expected_score": "0.00",
+      "max_score": "3.00",
+      "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "deterministic_proof"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "boundary_outside",
-        "provider_candidate": "validated"
+        "scenario": "numeric_04"
       }
     },
     {
       "case_id": "case-025",
       "category": "numeric",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000251",
+              "task_version_id": "00000000-0000-0000-0000-000000000252",
+              "position": 25,
+              "points": "3.00",
+              "answer_format": "number",
+              "raw_answer": "0.8999",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "number",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000253",
+                    "value_kind": "decimal",
+                    "canonical_decimal": "1",
+                    "absolute_tolerance": "0.1",
+                    "relative_tolerance": "0",
+                    "unit_code": null,
+                    "normalization_policy_code": "decimal_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "numeric",
-      "expected_outcome": "correct",
-      "expected_reason": "numeric_match",
-      "expected_score": "1",
-      "max_score": "1",
+      "expected_outcome": "incorrect",
+      "expected_reason": "numeric_mismatch",
+      "expected_score": "0.00",
+      "max_score": "3.00",
       "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "deterministic_proof"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "round_half_up_low",
-        "provider_candidate": "validated"
+        "scenario": "numeric_05"
       }
     },
     {
       "case_id": "case-026",
       "category": "numeric",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000261",
+              "task_version_id": "00000000-0000-0000-0000-000000000262",
+              "position": 26,
+              "points": "3.00",
+              "answer_format": "number",
+              "raw_answer": "1",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "number",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000263",
+                    "value_kind": "decimal",
+                    "canonical_decimal": "1",
+                    "absolute_tolerance": "0.1",
+                    "relative_tolerance": "0",
+                    "unit_code": null,
+                    "normalization_policy_code": "decimal_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "numeric",
-      "expected_outcome": "incorrect",
-      "expected_reason": "numeric_mismatch",
-      "expected_score": "0",
-      "max_score": "1",
+      "expected_outcome": "correct",
+      "expected_reason": "numeric_match",
+      "expected_score": "3.00",
+      "max_score": "3.00",
       "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "deterministic_proof"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "round_half_up_high",
-        "provider_candidate": "validated"
+        "scenario": "numeric_06"
       }
     },
     {
       "case_id": "case-027",
       "category": "numeric",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000271",
+              "task_version_id": "00000000-0000-0000-0000-000000000272",
+              "position": 27,
+              "points": "3.00",
+              "answer_format": "number",
+              "raw_answer": "1.1",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "number",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000273",
+                    "value_kind": "decimal",
+                    "canonical_decimal": "1",
+                    "absolute_tolerance": "0.1",
+                    "relative_tolerance": "0",
+                    "unit_code": null,
+                    "normalization_policy_code": "decimal_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "numeric",
-      "expected_outcome": "incorrect",
-      "expected_reason": "numeric_mismatch",
-      "expected_score": "0",
-      "max_score": "2.5",
+      "expected_outcome": "correct",
+      "expected_reason": "numeric_match",
+      "expected_score": "3.00",
+      "max_score": "3.00",
       "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "deterministic_proof"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "negative",
-        "provider_candidate": "validated"
+        "scenario": "numeric_07"
       }
     },
     {
       "case_id": "case-028",
       "category": "numeric",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000281",
+              "task_version_id": "00000000-0000-0000-0000-000000000282",
+              "position": 28,
+              "points": "3.00",
+              "answer_format": "number",
+              "raw_answer": "0.9",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "number",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000283",
+                    "value_kind": "decimal",
+                    "canonical_decimal": "1",
+                    "absolute_tolerance": "0.1",
+                    "relative_tolerance": "0",
+                    "unit_code": null,
+                    "normalization_policy_code": "decimal_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "numeric",
-      "expected_outcome": "unclear",
-      "expected_reason": "numeric_mismatch",
-      "expected_score": null,
-      "max_score": "1",
-      "expected_review": true,
+      "expected_outcome": "correct",
+      "expected_reason": "numeric_match",
+      "expected_score": "3.00",
+      "max_score": "3.00",
+      "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "deterministic_proof"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "alternative",
-        "provider_candidate": "validated"
+        "scenario": "numeric_08"
       }
     },
     {
       "case_id": "case-029",
       "category": "numeric",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000291",
+              "task_version_id": "00000000-0000-0000-0000-000000000292",
+              "position": 29,
+              "points": "3.00",
+              "answer_format": "number",
+              "raw_answer": "1.1001",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "number",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000293",
+                    "value_kind": "decimal",
+                    "canonical_decimal": "1",
+                    "absolute_tolerance": "0.1",
+                    "relative_tolerance": "0",
+                    "unit_code": null,
+                    "normalization_policy_code": "decimal_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "numeric",
-      "expected_outcome": "correct",
-      "expected_reason": "numeric_match",
-      "expected_score": "1",
-      "max_score": "1",
+      "expected_outcome": "incorrect",
+      "expected_reason": "numeric_mismatch",
+      "expected_score": "0.00",
+      "max_score": "3.00",
       "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "deterministic_proof"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "invalid_evidence",
-        "provider_candidate": "validated"
+        "scenario": "numeric_09"
       }
     },
     {
       "case_id": "case-030",
       "category": "numeric",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000301",
+              "task_version_id": "00000000-0000-0000-0000-000000000302",
+              "position": 30,
+              "points": "3.00",
+              "answer_format": "number",
+              "raw_answer": "0.8999",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "number",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000303",
+                    "value_kind": "decimal",
+                    "canonical_decimal": "1",
+                    "absolute_tolerance": "0.1",
+                    "relative_tolerance": "0",
+                    "unit_code": null,
+                    "normalization_policy_code": "decimal_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "numeric",
       "expected_outcome": "incorrect",
       "expected_reason": "numeric_mismatch",
-      "expected_score": "0",
-      "max_score": "2.5",
+      "expected_score": "0.00",
+      "max_score": "3.00",
       "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "deterministic_proof"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "privacy_negative_marker",
-        "provider_candidate": "validated"
+        "scenario": "numeric_10"
       }
     },
     {
       "case_id": "case-031",
       "category": "structured_expression",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000311",
+              "task_version_id": "00000000-0000-0000-0000-000000000312",
+              "position": 31,
+              "points": "4.00",
+              "answer_format": "expression",
+              "raw_answer": "x+1",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "expression",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000313",
+                    "value_kind": "expression",
+                    "canonical_text": "x+1",
+                    "normalization_policy_code": "expression_identity_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "structured_expression",
       "expected_outcome": "correct",
       "expected_reason": "expression_identity_match",
-      "expected_score": "2.5",
-      "max_score": "2.5",
+      "expected_score": "4.00",
+      "max_score": "4.00",
       "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "deterministic_proof"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "identity",
-        "provider_candidate": "validated"
+        "scenario": "structured_expression_01"
       }
     },
     {
       "case_id": "case-032",
       "category": "structured_expression",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000321",
+              "task_version_id": "00000000-0000-0000-0000-000000000322",
+              "position": 32,
+              "points": "4.00",
+              "answer_format": "expression",
+              "raw_answer": "x + 1",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "expression",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000323",
+                    "value_kind": "expression",
+                    "canonical_text": "x+1",
+                    "normalization_policy_code": "expression_identity_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "structured_expression",
-      "expected_outcome": "incorrect",
+      "expected_outcome": "manual_required",
       "expected_reason": "expression_equivalence_unproven",
-      "expected_score": "0",
-      "max_score": "1",
-      "expected_review": false,
+      "expected_score": null,
+      "max_score": "4.00",
+      "expected_review": true,
+      "expected_review_reason": "expression_equivalence_unproven",
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "0.0000",
+      "expected_confidence_reasons": [
+        "manual_required",
+        "below_review_threshold"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "identity_mismatch",
-        "provider_candidate": "validated"
+        "scenario": "structured_expression_02"
       }
     },
     {
       "case_id": "case-033",
       "category": "structured_expression",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000331",
+              "task_version_id": "00000000-0000-0000-0000-000000000332",
+              "position": 33,
+              "points": "4.00",
+              "answer_format": "expression",
+              "raw_answer": "1+x",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "expression",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000333",
+                    "value_kind": "expression",
+                    "canonical_text": "x+1",
+                    "normalization_policy_code": "expression_identity_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "structured_expression",
-      "expected_outcome": "incorrect",
+      "expected_outcome": "manual_required",
       "expected_reason": "expression_equivalence_unproven",
-      "expected_score": "0",
-      "max_score": "1",
-      "expected_review": false,
+      "expected_score": null,
+      "max_score": "4.00",
+      "expected_review": true,
+      "expected_review_reason": "expression_equivalence_unproven",
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "0.0000",
+      "expected_confidence_reasons": [
+        "manual_required",
+        "below_review_threshold"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "canonical_alternative",
-        "provider_candidate": "validated"
+        "scenario": "structured_expression_03"
       }
     },
     {
       "case_id": "case-034",
       "category": "structured_expression",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000341",
+              "task_version_id": "00000000-0000-0000-0000-000000000342",
+              "position": 34,
+              "points": "4.00",
+              "answer_format": "expression",
+              "raw_answer": null,
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "expression",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000343",
+                    "value_kind": "expression",
+                    "canonical_text": "x+1",
+                    "normalization_policy_code": "expression_identity_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "structured_expression",
-      "expected_outcome": "unclear",
-      "expected_reason": "expression_equivalence_unproven",
-      "expected_score": null,
-      "max_score": "2.5",
-      "expected_review": true,
+      "expected_outcome": "incorrect",
+      "expected_reason": "unanswered",
+      "expected_score": "0.00",
+      "max_score": "4.00",
+      "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "unanswered"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "equivalence_unproven",
-        "provider_candidate": "validated"
+        "scenario": "structured_expression_04"
       }
     },
     {
       "case_id": "case-035",
       "category": "structured_expression",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000351",
+              "task_version_id": "00000000-0000-0000-0000-000000000352",
+              "position": 35,
+              "points": "4.00",
+              "answer_format": "expression",
+              "raw_answer": "x+1",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "expression",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000353",
+                    "value_kind": "expression",
+                    "canonical_text": "x+1",
+                    "normalization_policy_code": "expression_identity_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "structured_expression",
       "expected_outcome": "correct",
       "expected_reason": "expression_identity_match",
-      "expected_score": "1",
-      "max_score": "1",
+      "expected_score": "4.00",
+      "max_score": "4.00",
       "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "deterministic_proof"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "unanswered_expression",
-        "provider_candidate": "validated"
+        "scenario": "structured_expression_05"
       }
     },
     {
       "case_id": "case-036",
       "category": "structured_expression",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000361",
+              "task_version_id": "00000000-0000-0000-0000-000000000362",
+              "position": 36,
+              "points": "4.00",
+              "answer_format": "expression",
+              "raw_answer": "x + 1",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "expression",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000363",
+                    "value_kind": "expression",
+                    "canonical_text": "x+1",
+                    "normalization_policy_code": "expression_identity_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "structured_expression",
-      "expected_outcome": "incorrect",
+      "expected_outcome": "manual_required",
       "expected_reason": "expression_equivalence_unproven",
-      "expected_score": "0",
-      "max_score": "1",
-      "expected_review": false,
+      "expected_score": null,
+      "max_score": "4.00",
+      "expected_review": true,
+      "expected_review_reason": "expression_equivalence_unproven",
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "0.0000",
+      "expected_confidence_reasons": [
+        "manual_required",
+        "below_review_threshold"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "invalid_contract",
-        "provider_candidate": "validated"
+        "scenario": "structured_expression_06"
       }
     },
     {
       "case_id": "case-037",
       "category": "structured_expression",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000371",
+              "task_version_id": "00000000-0000-0000-0000-000000000372",
+              "position": 37,
+              "points": "4.00",
+              "answer_format": "expression",
+              "raw_answer": "1+x",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "expression",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000373",
+                    "value_kind": "expression",
+                    "canonical_text": "x+1",
+                    "normalization_policy_code": "expression_identity_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "structured_expression",
-      "expected_outcome": "incorrect",
+      "expected_outcome": "manual_required",
       "expected_reason": "expression_equivalence_unproven",
-      "expected_score": "0",
-      "max_score": "2.5",
-      "expected_review": false,
+      "expected_score": null,
+      "max_score": "4.00",
+      "expected_review": true,
+      "expected_review_reason": "expression_equivalence_unproven",
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "0.0000",
+      "expected_confidence_reasons": [
+        "manual_required",
+        "below_review_threshold"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "absent_evidence",
-        "provider_candidate": "validated"
+        "scenario": "structured_expression_07"
       }
     },
     {
       "case_id": "case-038",
       "category": "structured_expression",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000381",
+              "task_version_id": "00000000-0000-0000-0000-000000000382",
+              "position": 38,
+              "points": "4.00",
+              "answer_format": "expression",
+              "raw_answer": null,
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "expression",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000383",
+                    "value_kind": "expression",
+                    "canonical_text": "x+1",
+                    "normalization_policy_code": "expression_identity_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "structured_expression",
-      "expected_outcome": "unclear",
-      "expected_reason": "expression_equivalence_unproven",
-      "expected_score": null,
-      "max_score": "1",
-      "expected_review": true,
+      "expected_outcome": "incorrect",
+      "expected_reason": "unanswered",
+      "expected_score": "0.00",
+      "max_score": "4.00",
+      "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "unanswered"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "typical_error_provenance",
-        "provider_candidate": "validated"
+        "scenario": "structured_expression_08"
       }
     },
     {
       "case_id": "case-039",
       "category": "structured_expression",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000391",
+              "task_version_id": "00000000-0000-0000-0000-000000000392",
+              "position": 39,
+              "points": "4.00",
+              "answer_format": "expression",
+              "raw_answer": "x+1",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "expression",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000393",
+                    "value_kind": "expression",
+                    "canonical_text": "x+1",
+                    "normalization_policy_code": "expression_identity_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "structured_expression",
       "expected_outcome": "correct",
       "expected_reason": "expression_identity_match",
-      "expected_score": "1",
-      "max_score": "1",
+      "expected_score": "4.00",
+      "max_score": "4.00",
       "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "deterministic_proof"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "skill_provenance",
-        "provider_candidate": "validated"
+        "scenario": "structured_expression_09"
       }
     },
     {
       "case_id": "case-040",
       "category": "structured_expression",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000401",
+              "task_version_id": "00000000-0000-0000-0000-000000000402",
+              "position": 40,
+              "points": "4.00",
+              "answer_format": "expression",
+              "raw_answer": "x + 1",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "expression",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000403",
+                    "value_kind": "expression",
+                    "canonical_text": "x+1",
+                    "normalization_policy_code": "expression_identity_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "structured_expression",
-      "expected_outcome": "incorrect",
+      "expected_outcome": "manual_required",
       "expected_reason": "expression_equivalence_unproven",
-      "expected_score": "0",
-      "max_score": "2.5",
-      "expected_review": false,
+      "expected_score": null,
+      "max_score": "4.00",
+      "expected_review": true,
+      "expected_review_reason": "expression_equivalence_unproven",
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "0.0000",
+      "expected_confidence_reasons": [
+        "manual_required",
+        "below_review_threshold"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "prompt_injection_data",
-        "provider_candidate": "validated"
+        "scenario": "structured_expression_10"
       }
     },
     {
       "case_id": "case-041",
       "category": "llm_rubric",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000411",
+              "task_version_id": "00000000-0000-0000-0000-000000000412",
+              "position": 41,
+              "points": "5.00",
+              "answer_format": "long_text",
+              "raw_answer": "work",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "essay",
+                "answer_format": "long_text",
+                "accepted_answers": [],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": {
+                  "solution_text": "Reference",
+                  "final_answer": "42",
+                  "solution_steps": [
+                    "step"
+                  ]
+                },
+                "rubric": {
+                  "id": "00000000-0000-0000-0000-000000000415",
+                  "grading_mode": "points",
+                  "max_score": "2",
+                  "items": [
+                    {
+                      "id": "00000000-0000-0000-0000-000000000414",
+                      "order_index": 0,
+                      "criterion": "Reasoning",
+                      "max_points": "2",
+                      "required": true,
+                      "common_failure": "guess"
+                    }
+                  ]
+                },
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        },
+        "provider": {
+          "mode": "success",
+          "candidate": {
+            "schema_version": "llm_rubric_output_v1",
+            "rubric_items": [
+              {
+                "rubric_item_id": "00000000-0000-0000-0000-000000000414",
+                "status": "met",
+                "suggested_points": "2",
+                "evidence": [
+                  {
+                    "source": "student_answer",
+                    "kind": "quote",
+                    "quote": "work",
+                    "start": 0,
+                    "end": 4
+                  }
+                ],
+                "limitations": []
+              }
+            ],
+            "findings": [],
+            "teacher_summary": "Review allocation.",
+            "student_feedback_draft": "Explain reasoning.",
+            "model_limitations": []
+          }
+        }
+      },
       "expected_checker": "llm_rubric",
       "expected_outcome": "correct",
       "expected_reason": "llm_rubric_evaluated",
-      "expected_score": "2.5",
-      "max_score": "2.5",
+      "expected_score": "5.00",
+      "max_score": "5.00",
       "expected_review": true,
+      "expected_review_reason": "llm_human_review_required",
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "0.7500",
+      "expected_confidence_reasons": [
+        "llm_calibrated_base"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "validated_full",
-        "provider_candidate": "validated"
+        "scenario": "llm_rubric_01"
       }
     },
     {
       "case_id": "case-042",
       "category": "llm_rubric",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000421",
+              "task_version_id": "00000000-0000-0000-0000-000000000422",
+              "position": 42,
+              "points": "5.00",
+              "answer_format": "long_text",
+              "raw_answer": "work",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "essay",
+                "answer_format": "long_text",
+                "accepted_answers": [],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": {
+                  "solution_text": "Reference",
+                  "final_answer": "42",
+                  "solution_steps": [
+                    "step"
+                  ]
+                },
+                "rubric": {
+                  "id": "00000000-0000-0000-0000-000000000425",
+                  "grading_mode": "points",
+                  "max_score": "2",
+                  "items": [
+                    {
+                      "id": "00000000-0000-0000-0000-000000000424",
+                      "order_index": 0,
+                      "criterion": "Reasoning",
+                      "max_points": "2",
+                      "required": true,
+                      "common_failure": "guess"
+                    }
+                  ]
+                },
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        },
+        "provider": {
+          "mode": "success",
+          "candidate": {
+            "schema_version": "llm_rubric_output_v1",
+            "rubric_items": [
+              {
+                "rubric_item_id": "00000000-0000-0000-0000-000000000424",
+                "status": "met",
+                "suggested_points": "2",
+                "evidence": [
+                  {
+                    "source": "student_answer",
+                    "kind": "quote",
+                    "quote": "work",
+                    "start": 0,
+                    "end": 4
+                  }
+                ],
+                "limitations": []
+              }
+            ],
+            "findings": [],
+            "teacher_summary": "Review allocation.",
+            "student_feedback_draft": "Explain reasoning.",
+            "model_limitations": []
+          }
+        }
+      },
       "expected_checker": "llm_rubric",
-      "expected_outcome": "incorrect",
+      "expected_outcome": "correct",
       "expected_reason": "llm_rubric_evaluated",
-      "expected_score": "0",
-      "max_score": "1",
+      "expected_score": "5.00",
+      "max_score": "5.00",
       "expected_review": true,
+      "expected_review_reason": "llm_human_review_required",
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "0.7500",
+      "expected_confidence_reasons": [
+        "llm_calibrated_base"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "validated_incorrect",
-        "provider_candidate": "validated"
+        "scenario": "llm_rubric_02"
       }
     },
     {
       "case_id": "case-043",
       "category": "llm_rubric",
-      "expected_checker": "llm_rubric",
-      "expected_outcome": "partially_correct",
-      "expected_reason": "llm_rubric_evaluated",
-      "expected_score": "0.5",
-      "max_score": "1",
-      "expected_review": true,
-      "expected_findings": [
-        {
-          "finding_type": "rubric_miss",
-          "rubric_item_id": "00000000-0000-4000-8000-000000000043"
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000431",
+              "task_version_id": "00000000-0000-0000-0000-000000000432",
+              "position": 43,
+              "points": "5.00",
+              "answer_format": "long_text",
+              "raw_answer": "work",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "essay",
+                "answer_format": "long_text",
+                "accepted_answers": [],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": {
+                  "solution_text": "Reference",
+                  "final_answer": "42",
+                  "solution_steps": [
+                    "step"
+                  ]
+                },
+                "rubric": {
+                  "id": "00000000-0000-0000-0000-000000000435",
+                  "grading_mode": "points",
+                  "max_score": "2",
+                  "items": [
+                    {
+                      "id": "00000000-0000-0000-0000-000000000434",
+                      "order_index": 0,
+                      "criterion": "Reasoning",
+                      "max_points": "2",
+                      "required": true,
+                      "common_failure": "guess"
+                    }
+                  ]
+                },
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        },
+        "provider": {
+          "mode": "success",
+          "candidate": {
+            "schema_version": "llm_rubric_output_v1",
+            "rubric_items": [
+              {
+                "rubric_item_id": "00000000-0000-0000-0000-000000000434",
+                "status": "met",
+                "suggested_points": "2",
+                "evidence": [
+                  {
+                    "source": "student_answer",
+                    "kind": "quote",
+                    "quote": "work",
+                    "start": 0,
+                    "end": 4
+                  }
+                ],
+                "limitations": []
+              }
+            ],
+            "findings": [],
+            "teacher_summary": "Review allocation.",
+            "student_feedback_draft": "Explain reasoning.",
+            "model_limitations": []
+          }
         }
+      },
+      "expected_checker": "llm_rubric",
+      "expected_outcome": "correct",
+      "expected_reason": "llm_rubric_evaluated",
+      "expected_score": "5.00",
+      "max_score": "5.00",
+      "expected_review": true,
+      "expected_review_reason": "llm_human_review_required",
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "0.7500",
+      "expected_confidence_reasons": [
+        "llm_calibrated_base"
       ],
+      "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "validated_partial",
-        "provider_candidate": "validated"
+        "scenario": "llm_rubric_03"
       }
     },
     {
       "case_id": "case-044",
       "category": "llm_rubric",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000441",
+              "task_version_id": "00000000-0000-0000-0000-000000000442",
+              "position": 44,
+              "points": "5.00",
+              "answer_format": "long_text",
+              "raw_answer": "work",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "essay",
+                "answer_format": "long_text",
+                "accepted_answers": [],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": {
+                  "solution_text": "Reference",
+                  "final_answer": "42",
+                  "solution_steps": [
+                    "step"
+                  ]
+                },
+                "rubric": {
+                  "id": "00000000-0000-0000-0000-000000000445",
+                  "grading_mode": "points",
+                  "max_score": "2",
+                  "items": [
+                    {
+                      "id": "00000000-0000-0000-0000-000000000444",
+                      "order_index": 0,
+                      "criterion": "Reasoning",
+                      "max_points": "2",
+                      "required": true,
+                      "common_failure": "guess"
+                    }
+                  ]
+                },
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        },
+        "provider": {
+          "mode": "success",
+          "candidate": {
+            "schema_version": "llm_rubric_output_v1",
+            "rubric_items": [
+              {
+                "rubric_item_id": "00000000-0000-0000-0000-000000000444",
+                "status": "met",
+                "suggested_points": "2",
+                "evidence": [
+                  {
+                    "source": "student_answer",
+                    "kind": "quote",
+                    "quote": "work",
+                    "start": 0,
+                    "end": 4
+                  }
+                ],
+                "limitations": []
+              }
+            ],
+            "findings": [],
+            "teacher_summary": "Review allocation.",
+            "student_feedback_draft": "Explain reasoning.",
+            "model_limitations": []
+          }
+        }
+      },
       "expected_checker": "llm_rubric",
-      "expected_outcome": "unclear",
-      "expected_reason": "llm_structured_output_invalid",
-      "expected_score": null,
-      "max_score": "2.5",
+      "expected_outcome": "correct",
+      "expected_reason": "llm_rubric_evaluated",
+      "expected_score": "5.00",
+      "max_score": "5.00",
       "expected_review": true,
+      "expected_review_reason": "llm_human_review_required",
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "0.7500",
+      "expected_confidence_reasons": [
+        "llm_calibrated_base"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "malformed_output",
-        "provider_candidate": "intentionally_invalid"
+        "scenario": "llm_rubric_04"
       }
     },
     {
       "case_id": "case-045",
       "category": "llm_rubric",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000451",
+              "task_version_id": "00000000-0000-0000-0000-000000000452",
+              "position": 45,
+              "points": "5.00",
+              "answer_format": "long_text",
+              "raw_answer": "work",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "essay",
+                "answer_format": "long_text",
+                "accepted_answers": [],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": {
+                  "solution_text": "Reference",
+                  "final_answer": "42",
+                  "solution_steps": [
+                    "step"
+                  ]
+                },
+                "rubric": {
+                  "id": "00000000-0000-0000-0000-000000000455",
+                  "grading_mode": "points",
+                  "max_score": "2",
+                  "items": [
+                    {
+                      "id": "00000000-0000-0000-0000-000000000454",
+                      "order_index": 0,
+                      "criterion": "Reasoning",
+                      "max_points": "2",
+                      "required": true,
+                      "common_failure": "guess"
+                    }
+                  ]
+                },
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        },
+        "provider": {
+          "mode": "success",
+          "candidate": {
+            "schema_version": "llm_rubric_output_v1",
+            "rubric_items": [
+              {
+                "rubric_item_id": "00000000-0000-0000-0000-000000000454",
+                "status": "met",
+                "suggested_points": "2",
+                "evidence": [
+                  {
+                    "source": "student_answer",
+                    "kind": "quote",
+                    "quote": "work",
+                    "start": 0,
+                    "end": 4
+                  }
+                ],
+                "limitations": []
+              }
+            ],
+            "findings": [],
+            "teacher_summary": "Review allocation.",
+            "student_feedback_draft": "Explain reasoning.",
+            "model_limitations": []
+          }
+        }
+      },
       "expected_checker": "llm_rubric",
       "expected_outcome": "correct",
       "expected_reason": "llm_rubric_evaluated",
-      "expected_score": "1",
-      "max_score": "1",
+      "expected_score": "5.00",
+      "max_score": "5.00",
       "expected_review": true,
+      "expected_review_reason": "llm_human_review_required",
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "0.7500",
+      "expected_confidence_reasons": [
+        "llm_calibrated_base"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "missing_coverage",
-        "provider_candidate": "validated"
+        "scenario": "llm_rubric_05"
       }
     },
     {
       "case_id": "case-046",
       "category": "llm_rubric",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000461",
+              "task_version_id": "00000000-0000-0000-0000-000000000462",
+              "position": 46,
+              "points": "5.00",
+              "answer_format": "long_text",
+              "raw_answer": "work",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "essay",
+                "answer_format": "long_text",
+                "accepted_answers": [],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": {
+                  "solution_text": "Reference",
+                  "final_answer": "42",
+                  "solution_steps": [
+                    "step"
+                  ]
+                },
+                "rubric": {
+                  "id": "00000000-0000-0000-0000-000000000465",
+                  "grading_mode": "points",
+                  "max_score": "2",
+                  "items": [
+                    {
+                      "id": "00000000-0000-0000-0000-000000000464",
+                      "order_index": 0,
+                      "criterion": "Reasoning",
+                      "max_points": "2",
+                      "required": true,
+                      "common_failure": "guess"
+                    }
+                  ]
+                },
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        },
+        "provider": {
+          "mode": "success",
+          "candidate": {
+            "schema_version": "llm_rubric_output_v1",
+            "rubric_items": [
+              {
+                "rubric_item_id": "00000000-0000-0000-0000-000000000464",
+                "status": "met",
+                "suggested_points": "2",
+                "evidence": [
+                  {
+                    "source": "student_answer",
+                    "kind": "quote",
+                    "quote": "work",
+                    "start": 0,
+                    "end": 4
+                  }
+                ],
+                "limitations": []
+              }
+            ],
+            "findings": [],
+            "teacher_summary": "Review allocation.",
+            "student_feedback_draft": "Explain reasoning.",
+            "model_limitations": []
+          }
+        }
+      },
       "expected_checker": "llm_rubric",
-      "expected_outcome": "incorrect",
+      "expected_outcome": "correct",
       "expected_reason": "llm_rubric_evaluated",
-      "expected_score": "0",
-      "max_score": "1",
+      "expected_score": "5.00",
+      "max_score": "5.00",
       "expected_review": true,
+      "expected_review_reason": "llm_human_review_required",
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "0.7500",
+      "expected_confidence_reasons": [
+        "llm_calibrated_base"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "duplicate_coverage",
-        "provider_candidate": "validated"
+        "scenario": "llm_rubric_06"
       }
     },
     {
       "case_id": "case-047",
       "category": "llm_rubric",
-      "expected_checker": "llm_rubric",
-      "expected_outcome": "partially_correct",
-      "expected_reason": "llm_rubric_evaluated",
-      "expected_score": "0.5",
-      "max_score": "2.5",
-      "expected_review": true,
-      "expected_findings": [
-        {
-          "finding_type": "rubric_miss",
-          "rubric_item_id": "00000000-0000-4000-8000-000000000047"
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000471",
+              "task_version_id": "00000000-0000-0000-0000-000000000472",
+              "position": 47,
+              "points": "5.00",
+              "answer_format": "long_text",
+              "raw_answer": "work",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "essay",
+                "answer_format": "long_text",
+                "accepted_answers": [],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": {
+                  "solution_text": "Reference",
+                  "final_answer": "42",
+                  "solution_steps": [
+                    "step"
+                  ]
+                },
+                "rubric": {
+                  "id": "00000000-0000-0000-0000-000000000475",
+                  "grading_mode": "points",
+                  "max_score": "2",
+                  "items": [
+                    {
+                      "id": "00000000-0000-0000-0000-000000000474",
+                      "order_index": 0,
+                      "criterion": "Reasoning",
+                      "max_points": "2",
+                      "required": true,
+                      "common_failure": "guess"
+                    }
+                  ]
+                },
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        },
+        "provider": {
+          "mode": "success",
+          "candidate": {
+            "schema_version": "llm_rubric_output_v1",
+            "rubric_items": [
+              {
+                "rubric_item_id": "00000000-0000-0000-0000-000000000474",
+                "status": "met",
+                "suggested_points": "2",
+                "evidence": [
+                  {
+                    "source": "student_answer",
+                    "kind": "quote",
+                    "quote": "work",
+                    "start": 0,
+                    "end": 4
+                  }
+                ],
+                "limitations": []
+              }
+            ],
+            "findings": [],
+            "teacher_summary": "Review allocation.",
+            "student_feedback_draft": "Explain reasoning.",
+            "model_limitations": []
+          }
         }
+      },
+      "expected_checker": "llm_rubric",
+      "expected_outcome": "correct",
+      "expected_reason": "llm_rubric_evaluated",
+      "expected_score": "5.00",
+      "max_score": "5.00",
+      "expected_review": true,
+      "expected_review_reason": "llm_human_review_required",
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "0.7500",
+      "expected_confidence_reasons": [
+        "llm_calibrated_base"
       ],
+      "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "required_miss",
-        "provider_candidate": "validated"
+        "scenario": "llm_rubric_07"
       }
     },
     {
       "case_id": "case-048",
       "category": "llm_rubric",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000481",
+              "task_version_id": "00000000-0000-0000-0000-000000000482",
+              "position": 48,
+              "points": "5.00",
+              "answer_format": "long_text",
+              "raw_answer": "work",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "essay",
+                "answer_format": "long_text",
+                "accepted_answers": [],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": {
+                  "solution_text": "Reference",
+                  "final_answer": "42",
+                  "solution_steps": [
+                    "step"
+                  ]
+                },
+                "rubric": {
+                  "id": "00000000-0000-0000-0000-000000000485",
+                  "grading_mode": "points",
+                  "max_score": "2",
+                  "items": [
+                    {
+                      "id": "00000000-0000-0000-0000-000000000484",
+                      "order_index": 0,
+                      "criterion": "Reasoning",
+                      "max_points": "2",
+                      "required": true,
+                      "common_failure": "guess"
+                    }
+                  ]
+                },
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        },
+        "provider": {
+          "mode": "success",
+          "candidate": {
+            "schema_version": "llm_rubric_output_v1",
+            "rubric_items": [
+              {
+                "rubric_item_id": "00000000-0000-0000-0000-000000000484",
+                "status": "met",
+                "suggested_points": "2",
+                "evidence": [
+                  {
+                    "source": "student_answer",
+                    "kind": "quote",
+                    "quote": "work",
+                    "start": 0,
+                    "end": 4
+                  }
+                ],
+                "limitations": []
+              }
+            ],
+            "findings": [],
+            "teacher_summary": "Review allocation.",
+            "student_feedback_draft": "Explain reasoning.",
+            "model_limitations": []
+          }
+        }
+      },
       "expected_checker": "llm_rubric",
-      "expected_outcome": "unclear",
-      "expected_reason": "llm_structured_output_invalid",
-      "expected_score": null,
-      "max_score": "1",
+      "expected_outcome": "correct",
+      "expected_reason": "llm_rubric_evaluated",
+      "expected_score": "5.00",
+      "max_score": "5.00",
       "expected_review": true,
+      "expected_review_reason": "llm_human_review_required",
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "0.7500",
+      "expected_confidence_reasons": [
+        "llm_calibrated_base"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "absent_evidence",
-        "provider_candidate": "intentionally_invalid"
+        "scenario": "llm_rubric_08"
       }
     },
     {
       "case_id": "case-049",
       "category": "llm_rubric",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000491",
+              "task_version_id": "00000000-0000-0000-0000-000000000492",
+              "position": 49,
+              "points": "5.00",
+              "answer_format": "long_text",
+              "raw_answer": "work",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "essay",
+                "answer_format": "long_text",
+                "accepted_answers": [],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": {
+                  "solution_text": "Reference",
+                  "final_answer": "42",
+                  "solution_steps": [
+                    "step"
+                  ]
+                },
+                "rubric": {
+                  "id": "00000000-0000-0000-0000-000000000495",
+                  "grading_mode": "points",
+                  "max_score": "2",
+                  "items": [
+                    {
+                      "id": "00000000-0000-0000-0000-000000000494",
+                      "order_index": 0,
+                      "criterion": "Reasoning",
+                      "max_points": "2",
+                      "required": true,
+                      "common_failure": "guess"
+                    }
+                  ]
+                },
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        },
+        "provider": {
+          "mode": "failure",
+          "candidate": {
+            "schema_version": "llm_rubric_output_v1",
+            "rubric_items": [
+              {
+                "rubric_item_id": "00000000-0000-0000-0000-000000000494",
+                "status": "met",
+                "suggested_points": "2",
+                "evidence": [
+                  {
+                    "source": "student_answer",
+                    "kind": "quote",
+                    "quote": "work",
+                    "start": 0,
+                    "end": 4
+                  }
+                ],
+                "limitations": []
+              }
+            ],
+            "findings": [],
+            "teacher_summary": "Review allocation.",
+            "student_feedback_draft": "Explain reasoning.",
+            "model_limitations": []
+          }
+        }
+      },
       "expected_checker": "llm_rubric",
-      "expected_outcome": "correct",
-      "expected_reason": "llm_rubric_evaluated",
-      "expected_score": "1",
-      "max_score": "1",
+      "expected_outcome": "unclear",
+      "expected_reason": "llm_provider_failure",
+      "expected_score": null,
+      "max_score": "5.00",
       "expected_review": true,
+      "expected_review_reason": "llm_human_review_required",
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "0.0000",
+      "expected_confidence_reasons": [
+        "unclear",
+        "provider_failure",
+        "below_review_threshold"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": true,
       "metadata": {
-        "scenario": "invalid_evidence",
-        "provider_candidate": "validated"
+        "scenario": "llm_rubric_09"
       }
     },
     {
       "case_id": "case-050",
       "category": "llm_rubric",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000501",
+              "task_version_id": "00000000-0000-0000-0000-000000000502",
+              "position": 50,
+              "points": "5.00",
+              "answer_format": "long_text",
+              "raw_answer": "work",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "essay",
+                "answer_format": "long_text",
+                "accepted_answers": [],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": {
+                  "solution_text": "Reference",
+                  "final_answer": "42",
+                  "solution_steps": [
+                    "step"
+                  ]
+                },
+                "rubric": {
+                  "id": "00000000-0000-0000-0000-000000000505",
+                  "grading_mode": "points",
+                  "max_score": "2",
+                  "items": [
+                    {
+                      "id": "00000000-0000-0000-0000-000000000504",
+                      "order_index": 0,
+                      "criterion": "Reasoning",
+                      "max_points": "2",
+                      "required": true,
+                      "common_failure": "guess"
+                    }
+                  ]
+                },
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        },
+        "provider": {
+          "mode": "failure",
+          "candidate": {
+            "schema_version": "llm_rubric_output_v1",
+            "rubric_items": [
+              {
+                "rubric_item_id": "00000000-0000-0000-0000-000000000504",
+                "status": "met",
+                "suggested_points": "2",
+                "evidence": [
+                  {
+                    "source": "student_answer",
+                    "kind": "quote",
+                    "quote": "work",
+                    "start": 0,
+                    "end": 4
+                  }
+                ],
+                "limitations": []
+              }
+            ],
+            "findings": [],
+            "teacher_summary": "Review allocation.",
+            "student_feedback_draft": "Explain reasoning.",
+            "model_limitations": []
+          }
+        }
+      },
       "expected_checker": "llm_rubric",
-      "expected_outcome": "incorrect",
-      "expected_reason": "llm_rubric_evaluated",
-      "expected_score": "0",
-      "max_score": "2.5",
+      "expected_outcome": "unclear",
+      "expected_reason": "llm_provider_failure",
+      "expected_score": null,
+      "max_score": "5.00",
       "expected_review": true,
+      "expected_review_reason": "llm_human_review_required",
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "0.0000",
+      "expected_confidence_reasons": [
+        "unclear",
+        "provider_failure",
+        "below_review_threshold"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": true,
       "metadata": {
-        "scenario": "provider_exhaustion",
-        "provider_candidate": "validated"
+        "scenario": "llm_rubric_10"
       }
     },
     {
       "case_id": "case-051",
       "category": "llm_rubric",
-      "expected_checker": "llm_rubric",
-      "expected_outcome": "partially_correct",
-      "expected_reason": "llm_rubric_evaluated",
-      "expected_score": "0.5",
-      "max_score": "1",
-      "expected_review": true,
-      "expected_findings": [
-        {
-          "finding_type": "rubric_miss",
-          "rubric_item_id": "00000000-0000-4000-8000-000000000051"
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000511",
+              "task_version_id": "00000000-0000-0000-0000-000000000512",
+              "position": 51,
+              "points": "5.00",
+              "answer_format": "long_text",
+              "raw_answer": "work",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "essay",
+                "answer_format": "long_text",
+                "accepted_answers": [],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": {
+                  "solution_text": "Reference",
+                  "final_answer": "42",
+                  "solution_steps": [
+                    "step"
+                  ]
+                },
+                "rubric": {
+                  "id": "00000000-0000-0000-0000-000000000515",
+                  "grading_mode": "points",
+                  "max_score": "2",
+                  "items": [
+                    {
+                      "id": "00000000-0000-0000-0000-000000000514",
+                      "order_index": 0,
+                      "criterion": "Reasoning",
+                      "max_points": "2",
+                      "required": true,
+                      "common_failure": "guess"
+                    }
+                  ]
+                },
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        },
+        "provider": {
+          "mode": "malformed",
+          "candidate": {
+            "schema_version": "llm_rubric_output_v1",
+            "rubric_items": [
+              {
+                "rubric_item_id": "00000000-0000-0000-0000-000000000514",
+                "status": "met",
+                "suggested_points": "2",
+                "evidence": [
+                  {
+                    "source": "student_answer",
+                    "kind": "quote",
+                    "quote": "work",
+                    "start": 0,
+                    "end": 4
+                  }
+                ],
+                "limitations": []
+              }
+            ],
+            "findings": [],
+            "teacher_summary": "Review allocation.",
+            "student_feedback_draft": "Explain reasoning.",
+            "model_limitations": []
+          }
         }
+      },
+      "expected_checker": "llm_rubric",
+      "expected_outcome": "unclear",
+      "expected_reason": "llm_structured_output_invalid",
+      "expected_score": null,
+      "max_score": "5.00",
+      "expected_review": true,
+      "expected_review_reason": "llm_human_review_required",
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "0.0000",
+      "expected_confidence_reasons": [
+        "unclear",
+        "structured_output_invalid",
+        "below_review_threshold"
       ],
+      "expected_findings": [],
+      "expected_structured_output_valid": false,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "prompt_injection_data",
-        "provider_candidate": "validated"
+        "scenario": "llm_rubric_11"
       }
     },
     {
       "case_id": "case-052",
       "category": "llm_rubric",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000521",
+              "task_version_id": "00000000-0000-0000-0000-000000000522",
+              "position": 52,
+              "points": "5.00",
+              "answer_format": "long_text",
+              "raw_answer": "work",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "essay",
+                "answer_format": "long_text",
+                "accepted_answers": [],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": {
+                  "solution_text": "Reference",
+                  "final_answer": "42",
+                  "solution_steps": [
+                    "step"
+                  ]
+                },
+                "rubric": {
+                  "id": "00000000-0000-0000-0000-000000000525",
+                  "grading_mode": "points",
+                  "max_score": "2",
+                  "items": [
+                    {
+                      "id": "00000000-0000-0000-0000-000000000524",
+                      "order_index": 0,
+                      "criterion": "Reasoning",
+                      "max_points": "2",
+                      "required": true,
+                      "common_failure": "guess"
+                    }
+                  ]
+                },
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        },
+        "provider": {
+          "mode": "malformed",
+          "candidate": {
+            "schema_version": "llm_rubric_output_v1",
+            "rubric_items": [
+              {
+                "rubric_item_id": "00000000-0000-0000-0000-000000000524",
+                "status": "met",
+                "suggested_points": "2",
+                "evidence": [
+                  {
+                    "source": "student_answer",
+                    "kind": "quote",
+                    "quote": "work",
+                    "start": 0,
+                    "end": 4
+                  }
+                ],
+                "limitations": []
+              }
+            ],
+            "findings": [],
+            "teacher_summary": "Review allocation.",
+            "student_feedback_draft": "Explain reasoning.",
+            "model_limitations": []
+          }
+        }
+      },
       "expected_checker": "llm_rubric",
       "expected_outcome": "unclear",
       "expected_reason": "llm_structured_output_invalid",
       "expected_score": null,
-      "max_score": "1",
+      "max_score": "5.00",
       "expected_review": true,
+      "expected_review_reason": "llm_human_review_required",
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "0.0000",
+      "expected_confidence_reasons": [
+        "unclear",
+        "structured_output_invalid",
+        "below_review_threshold"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": false,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "privacy_negative_marker",
-        "provider_candidate": "intentionally_invalid"
+        "scenario": "llm_rubric_12"
       }
     },
     {
       "case_id": "case-053",
       "category": "boundary",
-      "expected_checker": "manual_required",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000531",
+              "task_version_id": "00000000-0000-0000-0000-000000000532",
+              "position": 53,
+              "points": "3.00",
+              "answer_format": "short_text",
+              "raw_answer": null,
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "short_text",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000533",
+                    "value_kind": "text",
+                    "canonical_text": "A",
+                    "normalization_policy_code": "exact_text_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
+      "expected_checker": "exact",
       "expected_outcome": "incorrect",
       "expected_reason": "unanswered",
-      "expected_score": "0",
-      "max_score": "2.5",
+      "expected_score": "0.00",
+      "max_score": "3.00",
       "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "unanswered"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "unanswered",
-        "provider_candidate": "validated"
+        "scenario": "boundary_01"
       }
     },
     {
       "case_id": "case-054",
       "category": "boundary",
-      "expected_checker": "manual_required",
-      "expected_outcome": "unclear",
-      "expected_reason": "llm_provider_failure",
-      "expected_score": null,
-      "max_score": "1",
-      "expected_review": true,
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000541",
+              "task_version_id": "00000000-0000-0000-0000-000000000542",
+              "position": 54,
+              "points": "3.00",
+              "answer_format": "short_text",
+              "raw_answer": null,
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "short_text",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000543",
+                    "value_kind": "text",
+                    "canonical_text": "A",
+                    "normalization_policy_code": "exact_text_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
+      "expected_checker": "exact",
+      "expected_outcome": "incorrect",
+      "expected_reason": "unanswered",
+      "expected_score": "0.00",
+      "max_score": "3.00",
+      "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "unanswered"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "unclear",
-        "provider_candidate": "validated"
+        "scenario": "boundary_02"
       }
     },
     {
       "case_id": "case-055",
       "category": "boundary",
-      "expected_checker": "manual_required",
-      "expected_outcome": "manual_required",
-      "expected_reason": "routing_manual_required",
-      "expected_score": null,
-      "max_score": "1",
-      "expected_review": true,
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000551",
+              "task_version_id": "00000000-0000-0000-0000-000000000552",
+              "position": 55,
+              "points": "3.00",
+              "answer_format": "short_text",
+              "raw_answer": null,
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "short_text",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000553",
+                    "value_kind": "text",
+                    "canonical_text": "A",
+                    "normalization_policy_code": "exact_text_v1",
+                    "normalization_policy_version": 1
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
+      "expected_checker": "exact",
+      "expected_outcome": "incorrect",
+      "expected_reason": "unanswered",
+      "expected_score": "0.00",
+      "max_score": "3.00",
+      "expected_review": false,
+      "expected_review_reason": null,
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "1.0000",
+      "expected_confidence_reasons": [
+        "unanswered"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "manual_required",
-        "provider_candidate": "validated"
+        "scenario": "boundary_03"
       }
     },
     {
       "case_id": "case-056",
       "category": "boundary",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000561",
+              "task_version_id": "00000000-0000-0000-0000-000000000562",
+              "position": 56,
+              "points": "3.00",
+              "answer_format": "long_text",
+              "raw_answer": "work",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "essay",
+                "answer_format": "long_text",
+                "accepted_answers": [],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "manual_required",
       "expected_outcome": "insufficient_rubric",
       "expected_reason": "routing_insufficient_rubric",
       "expected_score": null,
-      "max_score": "2.5",
+      "max_score": "3.00",
       "expected_review": true,
+      "expected_review_reason": "missing_expected_solution",
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "0.0000",
+      "expected_confidence_reasons": [
+        "insufficient_rubric",
+        "below_review_threshold"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "insufficient_methodology",
-        "provider_candidate": "validated"
+        "scenario": "boundary_04"
       }
     },
     {
       "case_id": "case-057",
       "category": "boundary",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000571",
+              "task_version_id": "00000000-0000-0000-0000-000000000572",
+              "position": 57,
+              "points": "3.00",
+              "answer_format": "long_text",
+              "raw_answer": "work",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "essay",
+                "answer_format": "long_text",
+                "accepted_answers": [],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "manual_required",
-      "expected_outcome": "incorrect",
-      "expected_reason": "unanswered",
-      "expected_score": "0",
-      "max_score": "1",
-      "expected_review": false,
+      "expected_outcome": "insufficient_rubric",
+      "expected_reason": "routing_insufficient_rubric",
+      "expected_score": null,
+      "max_score": "3.00",
+      "expected_review": true,
+      "expected_review_reason": "missing_expected_solution",
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "0.0000",
+      "expected_confidence_reasons": [
+        "insufficient_rubric",
+        "below_review_threshold"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "unanswered_second",
-        "provider_candidate": "validated"
+        "scenario": "boundary_05"
       }
     },
     {
       "case_id": "case-058",
       "category": "boundary",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000581",
+              "task_version_id": "00000000-0000-0000-0000-000000000582",
+              "position": 58,
+              "points": "3.00",
+              "answer_format": "long_text",
+              "raw_answer": "work",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "essay",
+                "answer_format": "long_text",
+                "accepted_answers": [],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "manual_required",
-      "expected_outcome": "unclear",
-      "expected_reason": "llm_provider_failure",
+      "expected_outcome": "insufficient_rubric",
+      "expected_reason": "routing_insufficient_rubric",
       "expected_score": null,
-      "max_score": "1",
+      "max_score": "3.00",
       "expected_review": true,
+      "expected_review_reason": "missing_expected_solution",
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "0.0000",
+      "expected_confidence_reasons": [
+        "insufficient_rubric",
+        "below_review_threshold"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "provider_exhaustion",
-        "provider_candidate": "validated"
+        "scenario": "boundary_06"
       }
     },
     {
       "case_id": "case-059",
       "category": "boundary",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000591",
+              "task_version_id": "00000000-0000-0000-0000-000000000592",
+              "position": 59,
+              "points": "3.00",
+              "answer_format": "expression",
+              "raw_answer": "x",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "expression",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000593",
+                    "value_kind": "expression",
+                    "canonical_text": "x",
+                    "normalization_policy_code": "expression_identity_v1",
+                    "normalization_policy_version": 2
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "manual_required",
       "expected_outcome": "manual_required",
       "expected_reason": "routing_manual_required",
       "expected_score": null,
-      "max_score": "2.5",
+      "max_score": "3.00",
       "expected_review": true,
+      "expected_review_reason": "expression_equivalence_required",
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "0.0000",
+      "expected_confidence_reasons": [
+        "manual_required",
+        "below_review_threshold"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "manual_outside_capability",
-        "provider_candidate": "validated"
+        "scenario": "boundary_07"
       }
     },
     {
       "case_id": "case-060",
       "category": "boundary",
+      "input": {
+        "snapshot": {
+          "snapshot_schema_version": "checking_input_v1",
+          "handoff_version": 1,
+          "routing_contract_version": "checking_routing_contract_v1",
+          "items": [
+            {
+              "assessment_item_id": "00000000-0000-0000-0000-000000000601",
+              "task_version_id": "00000000-0000-0000-0000-000000000602",
+              "position": 60,
+              "points": "3.00",
+              "answer_format": "expression",
+              "raw_answer": "x",
+              "methodology": {
+                "statement": "Synthetic prompt",
+                "task_type": "calculation",
+                "answer_format": "expression",
+                "accepted_answers": [
+                  {
+                    "id": "00000000-0000-0000-0000-000000000603",
+                    "value_kind": "expression",
+                    "canonical_text": "x",
+                    "normalization_policy_code": "expression_identity_v1",
+                    "normalization_policy_version": 2
+                  }
+                ],
+                "choice_options": [],
+                "choice_scoring_policy": null,
+                "expected_solution": null,
+                "rubric": null,
+                "typical_errors": [],
+                "skills": []
+              }
+            }
+          ]
+        }
+      },
       "expected_checker": "manual_required",
-      "expected_outcome": "insufficient_rubric",
-      "expected_reason": "routing_insufficient_rubric",
+      "expected_outcome": "manual_required",
+      "expected_reason": "routing_manual_required",
       "expected_score": null,
-      "max_score": "1",
+      "max_score": "3.00",
       "expected_review": true,
+      "expected_review_reason": "expression_equivalence_required",
+      "expected_confidence_policy": "confidence_v1",
+      "expected_confidence": "0.0000",
+      "expected_confidence_reasons": [
+        "manual_required",
+        "below_review_threshold"
+      ],
       "expected_findings": [],
+      "expected_structured_output_valid": true,
+      "expected_provider_failed": false,
       "metadata": {
-        "scenario": "privacy_negative_marker",
-        "provider_candidate": "validated"
+        "scenario": "boundary_08"
       }
     }
   ]

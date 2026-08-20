@@ -1,7 +1,7 @@
 # Checking Engine Phase 4.10 — vertical acceptance
 
 Phase 4.9 is accepted at merge `cd0dbbd`. Phase 4.10 adds a transport-neutral,
-provider-neutral technical acceptance boundary; it does not change the database
+executable technical acceptance boundary; it does not change the database
 schema or any Phase 4.9 migration.
 
 ## Versioned boundary and corpus
@@ -12,7 +12,7 @@ The stable synthetic corpus contains exactly 60 independently identified cases:
 8 exact-text, 12 choice (single, multiple, OR and weighted), 10 numeric,
 10 structured-expression, 12 LLM-rubric candidate-output, and 8 boundary cases.
 Its SHA-256 contract fingerprint is
-`47782edb9be6bd6bebb31bd553014c74b1d6c146a1bce129ba986618d3561003`.
+`41a3aadd87c40b5e41e85ea878f1ca573d8925efe1ac69614995ca3145687a8b`.
 It is technical synthetic test data—not teacher-approved, human-approved,
 production-quality, or evidence of real-provider model quality.
 
@@ -25,10 +25,7 @@ bounded case IDs and technical aggregates/fingerprints.
 
 ## Boundaries and status
 
-External systems may explicitly opt in, execute any provider outside this
-boundary, strictly validate results as `ObservedCheckingResultV1`, and evaluate
-those observations. No provider, URL, credential, or concrete model is selected
-automatically. Fake-provider tests prove composition and safety only.
+Every frozen case executes normalization, routing, its production checker, Phase 4.9 result preparation and the confidence gate. LLM cases use the real `LLMRubricChecker` and `ProviderExecutionService`, with a fake injected only at the provider port. Fake-provider success proves composition and safety only; it is not real-provider quality acceptance.
 
 The PostgreSQL vertical boundary uses production repositories/persistence at
 Alembic `20260820_01`; it is behavioral acceptance only when a disposable
@@ -37,6 +34,4 @@ prose, provider output and person/assignment identities are excluded from report
 and privacy-safe errors.
 
 There are no final grades, Teacher Review, frontend/public API, workers/queues, or
-AI Content Authoring Phase 4A behavior. Overall Checking Phase 4.10 remains
-**pending** until the configured real-provider quality gate is genuinely executed;
-a missing provider configuration is not a deterministic implementation failure.
+AI Content Authoring Phase 4A behavior. Phase 4.10 deterministic/application/PostgreSQL technical acceptance may be claimed only when the real PostgreSQL vertical passes. Real-provider quality evaluation remains a separate pending, explicitly configured gate.
