@@ -839,3 +839,11 @@ restores that trigger immediately after the unchanged backfill, before the
 upgrade completes. It does not disable other user triggers or weaken runtime
 immutability. PostgreSQL transactional DDL also restores the original trigger
 state if the migration transaction fails.
+
+## Phase 4.10 acceptance addendum
+
+Phase 4.9 is accepted at `cd0dbbd`. The versioned synthetic technical acceptance
+contract, its privacy boundary, PostgreSQL qualification, and pending
+real-provider quality gate are specified in
+[`checking-engine-phase410-acceptance.md`](checking-engine-phase410-acceptance.md).
+It adds no final grades, Teacher Review, or Phase 4A authoring behavior.

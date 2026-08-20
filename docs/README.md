@@ -30,3 +30,5 @@
 * [Проверка backend иерархии папок](content-bank-folder-hierarchy-backend-verification.md)
 
 - [Проверка пользовательского frontend управляемых тегов](content-bank-managed-tags-user-frontend-verification.md)
+
+- [Checking Engine Phase 4.10 vertical acceptance](checking-engine-phase410-acceptance.md) — versioned 60-case synthetic technical contract and provider-quality status.
