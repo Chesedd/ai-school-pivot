@@ -1,9 +1,10 @@
 import asyncio, json
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from decimal import Decimal
 from pathlib import Path
 import pytest
 from app.application.checking_acceptance import AcceptanceContractError,AcceptanceThresholdPolicy,GoldenDatasetV2,evaluate_golden_dataset
+from app.application.checking_results import ConfidenceReason
 from tests.support.checking_acceptance_executor import execute_golden_case
 FIXTURE=Path(__file__).parents[1]/"fixtures"/"checking_golden_v2.json"
 def dataset(): return GoldenDatasetV2.from_dict(json.loads(FIXTURE.read_text()))
@@ -46,6 +47,31 @@ def test_review_and_confidence_contract_is_exact_and_canonical():
  assert all(x.confidence_reasons==c.expected_confidence_reasons for x,c in zip(obs,d.cases))
  assert all(len(x.confidence_reasons)<=16 and len(set(x.confidence_reasons))==len(x.confidence_reasons) for x in obs)
  assert all(type(c.expected_structured_output_valid) is bool and type(c.expected_provider_failed) is bool for c in d.cases)
+
+@pytest.mark.parametrize("kind", ["golden", "observed"])
+def test_review_reason_is_present_if_and_only_if_review_is_required(kind):
+ d=dataset(); values=d.cases if kind=="golden" else observations(d)
+ review_field="expected_review" if kind=="golden" else "review_required"
+ reason_field="expected_review_reason" if kind=="golden" else "review_reason"
+ without_reason=next(x for x in values if not getattr(x,review_field))
+ with_reason=next(x for x in values if getattr(x,review_field))
+ with pytest.raises(AcceptanceContractError,match="invalid_review_reason"):
+  replace(without_reason,**{review_field:True})
+ with pytest.raises(AcceptanceContractError,match="invalid_review_reason"):
+  replace(with_reason,**{review_field:False})
+
+@pytest.mark.parametrize("kind", ["golden", "observed"])
+@pytest.mark.parametrize("reasons", [
+ ("deterministic_proof","deterministic_proof"),
+ ("below_review_threshold","manual_required"),
+ ("unknown_reason",),
+ tuple(reason.value for reason in ConfidenceReason)[:9],
+])
+def test_confidence_reasons_reject_duplicates_order_unknown_and_overlong(kind,reasons):
+ d=dataset(); value=d.cases[0] if kind=="golden" else observations(d)[0]
+ field="expected_confidence_reasons" if kind=="golden" else "confidence_reasons"
+ with pytest.raises(AcceptanceContractError,match="invalid_confidence_reasons"):
+  replace(value,**{field:reasons})
 
 @pytest.mark.parametrize('field,value',[('review_required',True),('review_reason','changed'),('confidence_policy','changed'),('confidence',Decimal('0.0000')),('confidence_reasons',('changed',)),('structured_output_valid',False),('provider_failed',True)])
 def test_per_case_output_gates_are_fatal(field,value):

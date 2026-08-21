@@ -27,11 +27,20 @@ bounded case IDs and technical aggregates/fingerprints.
 
 Every frozen case executes normalization, routing, its production checker, Phase 4.9 result preparation and the confidence gate. LLM cases use the real `LLMRubricChecker` and `ProviderExecutionService`, with a fake injected only at the provider port. Fake-provider success proves composition and safety only; it is not real-provider quality acceptance.
 
-The PostgreSQL vertical boundary uses production repositories/persistence at
-Alembic `20260820_01`; it is behavioral acceptance only when a disposable
-`TEST_DATABASE_URL` ending in `_test` is supplied. Raw answers, solutions, rubric
-prose, provider output and person/assignment identities are excluded from reports
-and privacy-safe errors.
+The single PostgreSQL vertical boundary uses production intake, frozen-snapshot
+persistence, normalization, routing, deterministic and LLM rubric checkers,
+the production provider-attempt store, Phase 4.9 preparation, and atomic result
+finalization at Alembic `20260820_01`. Its synthetic provider is injected only
+through the LLM provider port; a successful PostgreSQL run proves production
+composition and persistence behavior, not real-provider quality. It is accepted
+only when a disposable `TEST_DATABASE_URL` ending in `_test` is supplied and the
+combined local continuation gate passes without failures or skips. Raw answers,
+solutions, rubric prose, provider output and person/assignment identities are
+excluded from technical result evidence, findings, events and observability.
 
 There are no final grades, Teacher Review, frontend/public API, workers/queues, or
-AI Content Authoring Phase 4A behavior. Phase 4.10 application/deterministic technical acceptance is implemented. PostgreSQL technical acceptance remains pending until the real local 40-test continuation gate passes with no failures or skips. Real-provider quality evaluation remains a separate pending, explicitly configured gate.
+AI Content Authoring Phase 4A behavior. Phase 4.10 database-free executable
+acceptance is implemented. PostgreSQL technical acceptance remains pending until
+the real local 40-test continuation gate passes with no failures or skips.
+Real-provider quality evaluation remains a separate pending, explicitly
+configured gate; fake-provider execution is never reported as quality evidence.
