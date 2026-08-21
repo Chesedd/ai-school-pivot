@@ -53,8 +53,12 @@ def test_review_reason_is_present_if_and_only_if_review_is_required(kind):
  d=dataset(); values=d.cases if kind=="golden" else observations(d)
  review_field="expected_review" if kind=="golden" else "review_required"
  reason_field="expected_review_reason" if kind=="golden" else "review_reason"
- without_reason=next(x for x in values if not getattr(x,review_field))
- with_reason=next(x for x in values if getattr(x,review_field))
+ outcome_field="expected_outcome" if kind=="golden" else "outcome"
+ scored_outcomes={"correct","incorrect","partially_correct"}
+ without_reason=next(x for x in values if getattr(x,outcome_field) in scored_outcomes and not getattr(x,review_field))
+ with_reason=next(x for x in values if getattr(x,outcome_field) in scored_outcomes and getattr(x,review_field))
+ assert getattr(without_reason,reason_field) is None
+ assert getattr(with_reason,reason_field) is not None
  with pytest.raises(AcceptanceContractError,match="invalid_review_reason"):
   replace(without_reason,**{review_field:True})
  with pytest.raises(AcceptanceContractError,match="invalid_review_reason"):
