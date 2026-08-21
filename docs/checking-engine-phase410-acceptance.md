@@ -9,10 +9,10 @@ schema or any Phase 4.9 migration.
 The exact versions are `checking_golden_dataset_v2`,
 `checking_acceptance_report_v2`, and `checking_acceptance_thresholds_v1`.
 The stable synthetic corpus contains exactly 60 independently identified cases:
-8 exact-text, 12 choice (single, multiple, OR and weighted), 10 numeric,
-10 structured-expression, 12 LLM-rubric candidate-output, and 8 boundary cases.
+8 exact-text, 12 choice (real single/multiple formats, two accepted OR alternatives, and complete per-option weighted policies), 10 numeric (including actual negative, zero, high-precision, tolerance-boundary, and invalid-methodology inputs),
+10 structurally distinct structured-expression inputs, 12 LLM-rubric candidate-output behaviors, and 8 boundary cases with their natural checker formats.
 Its SHA-256 contract fingerprint is
-`c8222d2bc0152e6d44edf37fd1db5a0ac2f7bcc317c211ca4a468f70c2aeae1c`.
+`35a13a0e35d665676cf9bffcbc13d54922f3dfc9f429f911e64507f2aab2527f`.
 It is technical synthetic test data—not teacher-approved, human-approved,
 production-quality, or evidence of real-provider model quality.
 
