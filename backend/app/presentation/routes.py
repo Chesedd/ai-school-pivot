@@ -7,12 +7,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from app.application.folders import CreateFolderCommand, RenameFolderCommand, MoveFolderCommand, DeleteFolderCommand, MoveTaskCommand, FolderService, GetFolderTreeService
-from app.application.content_bank import AcceptedAnswerInput, ChoiceOptionInput, ChoiceOptionRuleInput, ChoiceScoringPolicyInput, ActorContext, ApplicationError, ArchiveTaskService, CreateTaskCommand, CreateTaskService, CreateVersionCommand, CreateVersionService, DuplicateCheckService, DuplicateQuery, ExpectedSolutionInput, GetAuditService, GetTaskCardService, HintInput, ListTasksService, RubricInput, RubricItemInput, SaveMethodologyCommand, SaveMethodologyService, SkillLinkInput, StatusCycleService, TaskListQuery, TypicalErrorInput, ValidationDetail, VersionContentInput
+from app.application.content_bank import AcceptedAnswerInput, ChoiceOptionInput, ChoiceOptionRuleInput, ChoiceScoringPolicyInput, ActorContext, ApplicationError, ArchiveTaskService, CreateTaskCommand, CreateTaskService, DuplicateCheckService, DuplicateQuery, ExpectedSolutionInput, GetAuditService, GetTaskCardService, HintInput, ListTasksService, RubricInput, RubricItemInput, SaveMethodologyCommand, SaveMethodologyService, SkillLinkInput, StatusCycleService, TaskListQuery, TypicalErrorInput, ValidationDetail, VersionContentInput
 from app.config import Settings, get_settings
 from app.db.session import async_session_factory
 from app.infrastructure.repository import SQLAlchemyContentBankRepository, SQLAlchemyUnitOfWork
 from app.presentation.schemas import FolderCreateRequest, FolderRenameRequest, FolderMoveRequest, TaskLocationRequest, FolderSummaryResponse, FolderTreeResponse, TaskLocationResponse
-from app.presentation.schemas import AuditPageResponse, ArchiveRequest, ArchiveResponse, CatalogResponse, CreatedVersionResponse, CreateVersionRequest, DuplicateCheckRequest, DuplicateCheckResponse, EmptyRequest, MethodologyPutRequest, MethodologyResponse, ReturnToDraftRequest, StatusCommandResponse, TaskCardResponse, TaskCreateRequest, TaskListPageResponse, TaskResponse
+from app.presentation.schemas import AuditPageResponse, ArchiveRequest, ArchiveResponse, CatalogResponse, DuplicateCheckRequest, DuplicateCheckResponse, EmptyRequest, MethodologyPutRequest, MethodologyResponse, ReturnToDraftRequest, StatusCommandResponse, TaskCardResponse, TaskCreateRequest, TaskListPageResponse, TaskResponse
 from app.presentation.schemas import TagCreateRequest, TagPatchRequest, TagDeprecateRequest, TagResponse, VersionTagsPutRequest, VersionTagsResponse
 from app.application.managed_tags import ManagedTagService
 
@@ -149,13 +149,6 @@ async def return_to_draft(task_id: UUID, version_no: int, payload: ReturnToDraft
 @router.post("/tasks/{task_id}/versions/{version_no}/approve", response_model=StatusCommandResponse)
 async def approve(task_id: UUID, version_no: int, payload: EmptyRequest, settings: Settings = Depends(get_settings)) -> object:
     return await StatusCycleService(SQLAlchemyUnitOfWork(async_session_factory)).approve(task_id, version_no, ActorContext(settings.content_bank_dev_actor_id))
-
-
-@router.post("/tasks/{task_id}/versions", response_model=CreatedVersionResponse, status_code=201)
-async def create_version(task_id: UUID, payload: CreateVersionRequest, response: Response, settings: Settings = Depends(get_settings)) -> object:
-    result = await CreateVersionService(SQLAlchemyUnitOfWork(async_session_factory)).create(CreateVersionCommand(task_id, payload.source_version_no), ActorContext(settings.content_bank_dev_actor_id))
-    response.headers["Location"] = f"/api/content-bank/tasks/{task_id}"
-    return result
 
 
 @router.post("/tasks/{task_id}/archive", response_model=ArchiveResponse)

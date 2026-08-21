@@ -18,7 +18,7 @@ from app.presentation.attachment_routes import router as attachment_router
 
 app = FastAPI()
 settings = get_settings()
-app.add_middleware(CORSMiddleware, allow_origins=[x.strip() for x in settings.cors_origins.split(",") if x.strip()], allow_credentials=False, allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"], allow_headers=["Content-Type", "Authorization", "Idempotency-Key"])
+app.add_middleware(CORSMiddleware, allow_origins=[x.strip() for x in settings.cors_origins.split(",") if x.strip()], allow_credentials=False, allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"], allow_headers=["Content-Type", "Authorization", "Idempotency-Key", "X-Filename"])
 app.include_router(router)
 app.include_router(assessment_router)
 app.include_router(student_assessment_router)

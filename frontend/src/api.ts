@@ -32,7 +32,6 @@ export const uploadTaskAttachment=(versionId:string,role:string,file:File):Promi
 export const submitReview=(taskId:string,versionNo:number)=>request(`/api/content-bank/tasks/${taskId}/versions/${versionNo}/submit-review`,json({}));
 export const returnToDraft=(taskId:string,versionNo:number,reason:string)=>request(`/api/content-bank/tasks/${taskId}/versions/${versionNo}/return-to-draft`,json({reason}));
 export const approveVersion=(taskId:string,versionNo:number)=>request(`/api/content-bank/tasks/${taskId}/versions/${versionNo}/approve`,json({}));
-export async function createTaskVersion(taskId:string,sourceVersionNo:number){const response=await fetch(`${apiBase}/api/content-bank/tasks/${taskId}/versions`,json({source_version_no:sourceVersionNo}));let data:any={};try{data=await response.json()}catch{}if(!response.ok)throw new ApiError(response.status,data.error?.code??"unexpected_error",data.error?.message??"Ошибка API",data.error?.details??[]);return {data,location:response.headers.get("Location")}}
 export const archiveTask=(taskId:string,reason?:string)=>request(`/api/content-bank/tasks/${taskId}/archive`,reason?json({reason}):{method:"POST"});
 
 export type DuplicateReason="exact_statement"|"high_statement_similarity"|"same_primary_skill"|"same_final_answer";
