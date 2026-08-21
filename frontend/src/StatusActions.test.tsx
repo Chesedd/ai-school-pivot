@@ -4,11 +4,11 @@ import userEvent from "@testing-library/user-event";
 import {ReasonDialog,StatusActionBar,ValidationIssueList} from "./StatusActions";
 
 afterEach(()=>cleanup());
-const bar=(status:string,extra={})=>render(<StatusActionBar status={status} versionNo={2} archived={status==="archived"} dirty={false} busy={null} methodologySaving={false} onAction={()=>{}} {...extra}/>);
+const bar=(status:string,extra={})=>render(<StatusActionBar status={status} archived={status==="archived"} dirty={false} busy={null} methodologySaving={false} onAction={()=>{}} {...extra}/>);
 describe("status action bar",()=>{
  it("shows only draft actions",()=>{bar("draft");expect(screen.getByRole("button",{name:"Отправить на проверку"})).toBeTruthy();expect(screen.getByRole("button",{name:"Архивировать задание"})).toBeTruthy();expect(screen.queryByRole("button",{name:"Утвердить"})).toBeNull()});
  it("shows only review actions",()=>{bar("review");expect(screen.getByRole("button",{name:"Вернуть в черновик"})).toBeTruthy();expect(screen.getByRole("button",{name:"Утвердить"})).toBeTruthy();expect(screen.queryByRole("button",{name:"Создать новую версию"})).toBeNull()});
- it("shows only approved actions",()=>{bar("approved");expect(screen.getByRole("button",{name:"Создать новую версию"})).toBeTruthy();expect(screen.queryByRole("button",{name:"Отправить на проверку"})).toBeNull()});
+ it("keeps approved tasks read-only",()=>{bar("approved");expect(screen.queryByRole("button",{name:"Создать новую версию"})).toBeNull();expect(screen.queryByRole("button",{name:"Отправить на проверку"})).toBeNull()});
  it("has no archived actions",()=>{bar("archived");expect(screen.queryAllByRole("button")).toHaveLength(0);expect(screen.getByText(/только для чтения/)).toBeTruthy()});
  it("blocks every action while dirty",()=>{bar("review",{dirty:true});screen.getAllByRole("button").forEach(x=>expect((x as HTMLButtonElement).disabled).toBe(true));expect(screen.getByText("Сначала сохраните или отмените изменения методической структуры")).toBeTruthy()});
  it("prevents double action while busy",()=>{bar("draft",{busy:"submit"});expect((screen.getByRole("button",{name:"Отправка на проверку…"}) as HTMLButtonElement).disabled).toBe(true);expect((screen.getByRole("button",{name:"Архивировать задание"}) as HTMLButtonElement).disabled).toBe(true)});

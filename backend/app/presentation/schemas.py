@@ -425,10 +425,6 @@ class ReturnToDraftRequest(StrictRequest):
     reason: str = Field(min_length=1, max_length=1000)
 
 
-class CreateVersionRequest(StrictRequest):
-    source_version_no: int = Field(gt=0)
-
-
 class ArchiveRequest(StrictRequest):
     reason: str | None = Field(default=None, max_length=1000)
 
@@ -455,17 +451,6 @@ class StatusCommandResponse(BaseModel):
     approved_at: datetime | None
     approved_by: UUID | None
     validation: ValidationReportResponse | None = None
-
-
-class CreatedVersionResponse(BaseModel):
-    task_id: UUID
-    task_version_id: UUID
-    version_no: int
-    status: str
-    created_at: datetime
-    created_by: UUID
-    approved_at: datetime | None
-    approved_by: UUID | None
 
 
 class ArchiveResponse(BaseModel):

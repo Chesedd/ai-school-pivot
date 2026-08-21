@@ -81,14 +81,12 @@ Content Bank хранит и предоставляет учебные зада�
 | Изменить draft | `task_id`, `version_no`, изменяемые поля версии | обновлённая версия | версия — draft, задача не архивна | `not_found`, `conflict` |
 | Список заданий | filters, sort, offset, limit | страница кратких карточек | корректные параметры | `validation_error` |
 | Полная карточка | `task_id` | task, выбранные версии и методика | task существует | `not_found` |
-| Создать новую версию | `task_id`, `source_version_no` | новая draft с следующим номером | задача не архивна, нет другой draft/review | `conflict`, `not_found` |
 | Отправить на review | task/version | версия review | draft проходит мягкую проверку | `invalid_status_transition`, `validation_error` |
 | Вернуть в draft | task/version, reason | draft-версия | статус review | `invalid_status_transition` |
 | Утвердить | task/version | approved-версия | status review, строгая проверка | `approval_requirements_not_met`, `invalid_status_transition` |
 | Архивировать | `task_id`, reason | архивная карточка | task существует | `not_found`, `conflict` |
 | Методические блоки | task/version, блок или набор блоков | сохранённые version-scoped блоки | только draft | `validation_error`, `conflict` |
 | Справочники | тип справочника, optional filters | subjects/grades/topics/subtopics/skills | — | `validation_error` |
-| Import commit | `import_token`, выбранные строки | summary созданных задач | preview действителен и не устарел | `import_validation_error`, `conflict` |
 | Найти дубликаты | текст условия, классификация, optional task_id | candidates с причиной и score | непустое условие | `validation_error` |
 
 Методические операции покрывают эталон (`expected_solution`), рубрику с
@@ -168,7 +166,6 @@ offset-пагинацию: `offset` (>=0, default 0), `limit` (1..100, default 2
 | GET `/tasks` | `subject_id`, `grade_id`, `topic_id`, `skill_id`, `status`, `archived` (default false), `q`, offset/limit, `sort` | 200 TaskPage | 422 |
 | GET `/tasks/{task_id}` | Полная карточка | 200 TaskCard | 404 |
 | PATCH `/tasks/{task_id}/versions/{version_no}` | Partial draft content и/или skills | 200 TaskVersion | 404, 409, 422 |
-| POST `/tasks/{task_id}/versions` | `{ "source_version_no": 1 }` | 201 TaskVersion | 404, 409 |
 | POST `/tasks/{task_id}/versions/{version_no}/submit-review` | `{}` | 200 TaskVersion | 404, 409, 422 |
 | POST `/tasks/{task_id}/versions/{version_no}/return-to-draft` | `{ "reason": "..." }` | 200 TaskVersion | 404, 409 |
 | POST `/tasks/{task_id}/versions/{version_no}/approve` | `{}` | 200 TaskVersion | 404, 409, 422 |
@@ -489,7 +486,7 @@ not_found`; не latest/draft — `409 conflict`; несовпадающее г�
 определение `(skill_id, code)` — `409 typical_error_definition_conflict`;
 невалидный UUID, JSON или доменные данные — `422 validation_error`.
 
-## 16. Фаза 2.7A — статусные команды и создание версии
+## 16. Фаза 2.7A — статусные команды
 
 Структурная проверка перед review блокирует команду (`422 validation_error`) и возвращает все нарушения в `error.details.issues`: непустой `statement`, наличие skill link, ровно один primary skill, отсутствие повторов, числовые веса в `(0, 1]` с суммой `1.0000`, совместимость `task_type`/`answer_format` и согласованность классификации. Методическая неполнота не блокирует review: `missing_expected_solution`, `missing_rubric`, `missing_rubric_items` (и `missing_accepted_answer`, если требование будет введено для формата ответа) возвращаются в `validation.issues`. `valid_for_approval` равен `false`, если есть предупреждения.
 
@@ -498,7 +495,6 @@ not_found`; не latest/draft — `409 conflict`; несовпадающее г�
 * `POST /api/content-bank/tasks/{task_id}/versions/{version_no}/submit-review`, request `{}`;
 * `POST /api/content-bank/tasks/{task_id}/versions/{version_no}/return-to-draft`, request `{ "reason": "Требуется дополнить критерии оценивания." }`; reason после trim обязателен, максимум 1000 символов. До фазы 2.9 он передаётся application-команде, но постоянно не хранится; хранение начинается вместе с Audit Log;
 * `POST /api/content-bank/tasks/{task_id}/versions/{version_no}/approve`, request `{}`;
-* `POST /api/content-bank/tasks/{task_id}/versions`, request `{ "source_version_no": 1 }`;
 * `POST /api/content-bank/tasks/{task_id}/archive`, optional request `{ "reason": "..." }` или без body.
 
 Status response (`submit-review`, `return-to-draft`, `approve`) имеет форму:

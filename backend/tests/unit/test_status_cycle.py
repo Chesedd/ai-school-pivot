@@ -90,7 +90,7 @@ async def test_successful_approve_uses_server_actor():
     assert args[0:2] == (version.task_version_id, "approved") and args[3] == ACTOR.actor_id
 
 
-async def test_create_version_requires_latest_approved_and_commits_clone():
+async def test_internal_revision_clone_requires_latest_approved_and_commits_clone():
     version = state("approved", complete_methodology()); cloned = VersionState(**{**version.__dict__, "task_version_id": uuid4(), "version_no": 2, "status": "draft", "approved_at": None, "approved_by": None})
     uow = Uow(version); uow.repository.clone_version.return_value = cloned
     result = await CreateVersionService(uow).create(CreateVersionCommand(version.task_id, 1), ACTOR)
@@ -98,7 +98,7 @@ async def test_create_version_requires_latest_approved_and_commits_clone():
     uow.repository.clone_version.assert_awaited_once_with(version.task_id, 1, ACTOR)
 
 
-async def test_create_version_rejects_non_latest_source():
+async def test_internal_revision_clone_rejects_non_latest_source():
     version = state("approved", latest=False); uow = Uow(version)
     with pytest.raises(ConflictError) as caught:
         await CreateVersionService(uow).create(CreateVersionCommand(version.task_id, 1), ACTOR)
