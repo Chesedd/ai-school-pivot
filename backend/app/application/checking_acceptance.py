@@ -8,7 +8,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import itertools
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -17,16 +16,8 @@ from types import MappingProxyType
 from typing import Any
 from uuid import UUID
 
-from app.application.checking_deterministic import execute_deterministic
-from app.application.checking_llm_rubric import ConfidencePolicy, LLMRubricChecker, OUTPUT_SCHEMA_VERSION, SYSTEM_MESSAGE
-from app.application.checking_provider import (AttemptDisposition, AttemptState, PromptSpec, ProviderExecutionKey,
-    ProviderExecutionService, ProviderFailure, ProviderResponse)
-from app.application.checking_results import ConfidenceGatePolicy, prepare_result
-from app.application.checking_routing import CheckerRequest, CheckerType, route_snapshot
-from app.application.student_assessments import normalize_answer
-
-GOLDEN_DATASET_VERSION = "checking_golden_dataset_v1"
-ACCEPTANCE_REPORT_VERSION = "checking_acceptance_report_v1"
+GOLDEN_DATASET_VERSION = "checking_golden_dataset_v2"
+ACCEPTANCE_REPORT_VERSION = "checking_acceptance_report_v2"
 ACCEPTANCE_THRESHOLDS_VERSION = "checking_acceptance_thresholds_v1"
 
 _CHECKERS = {"exact", "multiple_choice", "numeric", "structured_expression", "llm_rubric", "manual_required"}
@@ -77,8 +68,14 @@ def _decimal(value: Any, code: str = "invalid_decimal") -> Decimal:
         plain = plain.rstrip("0").rstrip(".")
     if result.is_zero():
         plain = "0"
-    if not result.is_finite() or "e" in value.lower() or value.startswith("+"):
+    if not result.is_finite() or value != plain:
         raise AcceptanceContractError(code)
+    return result
+
+def _confidence(value: Any) -> Decimal:
+    if type(value) is not str or not re.fullmatch(r"(?:0|1)\.\d{4}", value): raise AcceptanceContractError("invalid_confidence")
+    result=Decimal(value)
+    if not Decimal("0") <= result <= Decimal("1"): raise AcceptanceContractError("invalid_confidence")
     return result
 
 
@@ -140,12 +137,12 @@ def _validate_result(checker: str, outcome: str, reason: str, score: Decimal | N
 
 
 @dataclass(frozen=True)
-class GoldenCaseV1:
+class GoldenCaseV2:
     case_id: str; category: str; expected_checker: str; expected_outcome: str; expected_reason: str
     expected_score: Decimal | None; max_score: Decimal; expected_review: bool
     expected_findings: tuple[Mapping[str, Any], ...] = (); input: Mapping[str, Any] = MappingProxyType({})
     expected_review_reason: str|None=None; expected_confidence_policy: str="confidence_v1"
-    expected_confidence: Decimal=Decimal("1"); expected_confidence_reasons: tuple[str,...]=()
+    expected_confidence: Decimal=Decimal("1.0000"); expected_confidence_reasons: tuple[str,...]=()
     expected_structured_output_valid: bool=True; expected_provider_failed: bool=False
     metadata: Mapping[str, Any] = MappingProxyType({})
     def __post_init__(self):
@@ -154,21 +151,30 @@ class GoldenCaseV1:
         findings = tuple(_finding(x) for x in self.expected_findings)
         metadata = _freeze(self.metadata); input_value=_freeze_input(self.input)
         object.__setattr__(self, "expected_findings", findings); object.__setattr__(self, "metadata", metadata); object.__setattr__(self,"input",input_value)
+        if self.expected_review_reason is not None and (type(self.expected_review_reason) is not str or not _ID.fullmatch(self.expected_review_reason)):
+            raise AcceptanceContractError("invalid_review_reason")
+        if type(self.expected_confidence_policy) is not str or not _ID.fullmatch(self.expected_confidence_policy): raise AcceptanceContractError("invalid_confidence_policy")
+        if type(self.expected_confidence) is not Decimal or not self.expected_confidence.is_finite() or not 0 <= self.expected_confidence <= 1 or self.expected_confidence.as_tuple().exponent != -4:
+            raise AcceptanceContractError("invalid_confidence")
+        if (type(self.expected_confidence_reasons) is not tuple or any(type(x) is not str or not _ID.fullmatch(x) for x in self.expected_confidence_reasons)
+                or len(self.expected_confidence_reasons)>16 or len(set(self.expected_confidence_reasons)) != len(self.expected_confidence_reasons)):
+            raise AcceptanceContractError("invalid_confidence_reasons")
+        if type(self.expected_structured_output_valid) is not bool or type(self.expected_provider_failed) is not bool: raise AcceptanceContractError("invalid_provider_flags")
         _validate_result(self.expected_checker, self.expected_outcome, self.expected_reason, self.expected_score,
                          self.max_score, self.expected_review, findings)
     @classmethod
-    def from_dict(cls, value: Mapping[str, Any]) -> "GoldenCaseV1":
+    def from_dict(cls, value: Mapping[str, Any]) -> "GoldenCaseV2":
         required={"case_id","category","input","expected_checker","expected_outcome","expected_reason","expected_score","max_score","expected_review","expected_findings","expected_review_reason","expected_confidence_policy","expected_confidence","expected_confidence_reasons","expected_structured_output_valid","expected_provider_failed"}
         if not isinstance(value, Mapping) or set(value) - required - {"metadata"} or not required <= set(value): raise AcceptanceContractError("invalid_case_schema")
         return cls(value["case_id"],value["category"],value["expected_checker"],value["expected_outcome"],value["expected_reason"],
                    None if value["expected_score"] is None else _decimal(value["expected_score"]),_decimal(value["max_score"],"invalid_max_score"),
                    value["expected_review"],tuple(value["expected_findings"]),value["input"],value["expected_review_reason"],value["expected_confidence_policy"],
-                   _decimal(value["expected_confidence"]),tuple(value["expected_confidence_reasons"]),value["expected_structured_output_valid"],value["expected_provider_failed"],value.get("metadata",{}))
+                   _confidence(value["expected_confidence"]),tuple(value["expected_confidence_reasons"]),value["expected_structured_output_valid"],value["expected_provider_failed"],value.get("metadata",{}))
 
 
 @dataclass(frozen=True)
-class GoldenDatasetV1:
-    cases: tuple[GoldenCaseV1, ...]; version: str = GOLDEN_DATASET_VERSION; description: str = "synthetic technical acceptance corpus"
+class GoldenDatasetV2:
+    cases: tuple[GoldenCaseV2, ...]; version: str = GOLDEN_DATASET_VERSION; description: str = "synthetic technical acceptance corpus"
     def __post_init__(self):
         if self.version != GOLDEN_DATASET_VERSION: raise AcceptanceContractError("unsupported_dataset_version")
         if type(self.description) is not str or len(self.description)>200: raise AcceptanceContractError("invalid_dataset_schema")
@@ -176,17 +182,18 @@ class GoldenDatasetV1:
         if ids != sorted(ids) or len(ids)!=len(set(ids)): raise AcceptanceContractError("invalid_case_order")
         object.__setattr__(self,"cases",cases)
     @classmethod
-    def from_dict(cls,value:Mapping[str,Any])->"GoldenDatasetV1":
+    def from_dict(cls,value:Mapping[str,Any])->"GoldenDatasetV2":
         if not isinstance(value,Mapping) or set(value)!={"version","description","cases"} or not isinstance(value["cases"],list): raise AcceptanceContractError("invalid_dataset_schema")
-        return cls(tuple(GoldenCaseV1.from_dict(x) for x in value["cases"]),value["version"],value["description"])
+        if value["version"] != GOLDEN_DATASET_VERSION: raise AcceptanceContractError("unsupported_dataset_version")
+        return cls(tuple(GoldenCaseV2.from_dict(x) for x in value["cases"]),value["version"],value["description"])
 
 
 @dataclass(frozen=True)
-class ObservedCheckingResultV1:
+class ObservedCheckingResultV2:
     case_id:str; checker:str; outcome:str; reason:str; score:Decimal|None; max_score:Decimal; review_required:bool
     findings:tuple[Mapping[str,Any],...]=(); privacy_violation:bool=False; structured_output_valid:bool=True
     provider_failed:bool=False; latency_ms:int=0; input_tokens:int=0; output_tokens:int=0; cost:Decimal=Decimal(0)
-    review_reason:str|None=None; confidence_policy:str="confidence_v1"; confidence:Decimal=Decimal("1")
+    review_reason:str|None=None; confidence_policy:str="confidence_v1"; confidence:Decimal=Decimal("1.0000")
     confidence_reasons:tuple[str,...]=()
     def __post_init__(self):
         _identity(self.case_id); findings=tuple(_finding(x) for x in self.findings); object.__setattr__(self,"findings",findings)
@@ -195,11 +202,16 @@ class ObservedCheckingResultV1:
         if any(type(x) is not int or x<0 for x in (self.latency_ms,self.input_tokens,self.output_tokens)): raise AcceptanceContractError("invalid_observation")
         if type(self.cost) is not Decimal or not self.cost.is_finite() or self.cost<0: raise AcceptanceContractError("invalid_observation")
         if type(self.confidence) is not Decimal or not self.confidence.is_finite() or not 0<=self.confidence<=1: raise AcceptanceContractError("invalid_observation")
+        if self.review_reason is not None and (type(self.review_reason) is not str or not _ID.fullmatch(self.review_reason)): raise AcceptanceContractError("invalid_review_reason")
+        if type(self.confidence_policy) is not str or not _ID.fullmatch(self.confidence_policy): raise AcceptanceContractError("invalid_confidence_policy")
+        if self.confidence.as_tuple().exponent != -4: raise AcceptanceContractError("invalid_confidence")
+        if (type(self.confidence_reasons) is not tuple or any(type(x) is not str or not _ID.fullmatch(x) for x in self.confidence_reasons)
+                or len(self.confidence_reasons)>16 or len(set(self.confidence_reasons)) != len(self.confidence_reasons)): raise AcceptanceContractError("invalid_confidence_reasons")
     @classmethod
-    def from_dict(cls,v:Mapping[str,Any])->"ObservedCheckingResultV1":
+    def from_dict(cls,v:Mapping[str,Any])->"ObservedCheckingResultV2":
         required={"case_id","checker","outcome","reason","score","max_score","review_required","findings"}; optional={"privacy_violation","structured_output_valid","provider_failed","latency_ms","input_tokens","output_tokens","cost","review_reason","confidence_policy","confidence","confidence_reasons"}
         if not isinstance(v,Mapping) or set(v)-required-optional or not required<=set(v): raise AcceptanceContractError("invalid_observation_schema")
-        return cls(v["case_id"],v["checker"],v["outcome"],v["reason"],None if v["score"] is None else _decimal(v["score"]),_decimal(v["max_score"]),v["review_required"],tuple(v["findings"]),v.get("privacy_violation",False),v.get("structured_output_valid",True),v.get("provider_failed",False),v.get("latency_ms",0),v.get("input_tokens",0),v.get("output_tokens",0),_decimal(v.get("cost","0")),v.get("review_reason"),v.get("confidence_policy","confidence_v1"),_decimal(v.get("confidence","1")),tuple(v.get("confidence_reasons",())))
+        return cls(v["case_id"],v["checker"],v["outcome"],v["reason"],None if v["score"] is None else _decimal(v["score"]),_decimal(v["max_score"]),v["review_required"],tuple(v["findings"]),v.get("privacy_violation",False),v.get("structured_output_valid",True),v.get("provider_failed",False),v.get("latency_ms",0),v.get("input_tokens",0),v.get("output_tokens",0),_decimal(v.get("cost","0")),v.get("review_reason"),v.get("confidence_policy","confidence_v1"),_confidence(v.get("confidence","1.0000")),tuple(v.get("confidence_reasons",())))
 
 
 @dataclass(frozen=True)
@@ -256,51 +268,10 @@ def _jsonable(value:Any)->Any:
 def _fingerprint(value:Any)->str: return hashlib.sha256(json.dumps(_jsonable(value),sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()).hexdigest()
 def _rate(n:int,d:int)->Decimal: return (Decimal(n)/Decimal(d)).quantize(Decimal(".0001")) if d else Decimal(0)
 
-class _AcceptanceAttemptStore:
-    async def replay_or_claim(self,key,request,prompt,maximum_attempts):
-        return AttemptState(UUID("00000000-0000-0000-0000-000000000099"),1,"running",AttemptDisposition.CLAIMED,request.request_fingerprint)
-    async def finalize(self,key,attempt,**values):
-        return AttemptState(attempt.attempt_id,1,values["status"],AttemptDisposition.TERMINAL_EXISTING,
-            attempt.request_fingerprint,values.get("validated_output"),values.get("error_code"))
-
-async def execute_golden_case(case_input: Mapping[str,Any], case_id: str) -> ObservedCheckingResultV1:
-    """Execute input-only production composition; expected fields are structurally inaccessible."""
-    raw=json.loads(json.dumps(_jsonable(case_input))); snapshot=raw["snapshot"]; item=snapshot["items"][0]
-    if "normalized_answer" not in item:
-        item["normalized_answer"]=None if item.get("raw_answer") is None else normalize_answer(item["answer_format"],item["raw_answer"])
-    decision=route_snapshot(snapshot)[0]; checkers=None; provider_failed=False; structured=True
-    if decision.checker_type is CheckerType.LLM_RUBRIC and decision.execution_required:
-        provider_spec=raw.get("provider",{}); mode=provider_spec.get("mode","success")
-        class Provider:
-            async def evaluate(self,request):
-                if mode=="failure": raise ProviderFailure("authentication")
-                candidate=provider_spec.get("candidate",{})
-                if mode=="malformed":
-                    candidate=dict(candidate); candidate["rubric_items"]=[dict(candidate["rubric_items"][0],suggested_points="2.0")]
-                output=json.dumps(candidate,separators=(",",":"))
-                return ProviderResponse("synthetic",output)
-        clock=itertools.count(100,1)
-        service=ProviderExecutionService(_AcceptanceAttemptStore(),Provider(),monotonic=lambda:next(clock))
-        prompt=PromptSpec("checking.llm-rubric","1.0.0",SYSTEM_MESSAGE,OUTPUT_SCHEMA_VERSION)
-        checker=LLMRubricChecker(service,ProviderExecutionKey(UUID("00000000-0000-0000-0000-000000000098"),UUID(item["assessment_item_id"])),
-            provider_id="fake",model_id="fake-v1",prompt=prompt,settings={"temperature":"0"},
-            confidence_policy=ConfidencePolicy("confidence_v1",Decimal("0.7500"),("rubric_evidence",)))
-        checkers={CheckerType.LLM_RUBRIC:checker}; provider_failed=mode=="failure"; structured=mode!="malformed"
-    draft=await execute_deterministic(CheckerRequest(item,decision),checkers)
-    policy=ConfidenceGatePolicy("confidence_v1",Decimal("0.5000"),Decimal("0.1000"),Decimal("0.1000"),Decimal("0.1000"),Decimal("0.1000"))
-    prepared=prepare_result(item,draft,policy)
-    findings=tuple(MappingProxyType({"finding_type":x.finding_type,"rubric_item_id":str(x.rubric_item_id) if x.rubric_item_id else None,
-        "typical_error_id":str(x.typical_error_id) if x.typical_error_id else None,"skill_id":str(x.skill_id) if x.skill_id else None,"code":x.snapshot_code}) for x in prepared.findings)
-    return ObservedCheckingResultV1(case_id,prepared.checker_type,prepared.outcome,prepared.reason_code,prepared.score_suggested,
-        prepared.max_score,prepared.confidence.needs_human_review,findings,False,structured,provider_failed,
-        review_reason=prepared.confidence.review_reason,confidence_policy=prepared.confidence.policy_version,
-        confidence=prepared.confidence.effective,confidence_reasons=tuple(x.value for x in prepared.confidence.reasons))
-
-
-def evaluate_golden_dataset(dataset:GoldenDatasetV1, observed_results:Sequence[ObservedCheckingResultV1], thresholds:AcceptanceThresholdPolicy)->AcceptanceReport:
-    if type(dataset) is not GoldenDatasetV1 or type(thresholds) is not AcceptanceThresholdPolicy: raise AcceptanceContractError("invalid_evaluation_input")
+def evaluate_golden_dataset(dataset:GoldenDatasetV2, observed_results:Sequence[ObservedCheckingResultV2], thresholds:AcceptanceThresholdPolicy)->AcceptanceReport:
+    if type(dataset) is not GoldenDatasetV2 or type(thresholds) is not AcceptanceThresholdPolicy: raise AcceptanceContractError("invalid_evaluation_input")
     observed=tuple(observed_results)
-    if any(type(x) is not ObservedCheckingResultV1 for x in observed): raise AcceptanceContractError("invalid_evaluation_input")
+    if any(type(x) is not ObservedCheckingResultV2 for x in observed): raise AcceptanceContractError("invalid_evaluation_input")
     ids=[x.case_id for x in observed]
     if len(ids)!=len(set(ids)): raise AcceptanceContractError("duplicate_observed_result")
     observed=tuple(sorted(observed,key=lambda x:x.case_id)); om={x.case_id:x for x in observed}; expected={x.case_id:x for x in dataset.cases}

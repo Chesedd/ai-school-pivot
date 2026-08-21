@@ -1,5 +1,5 @@
 {
-  "version": "checking_golden_dataset_v1",
+  "version": "checking_golden_dataset_v2",
   "description": "60 executable synthetic production-path acceptance cases",
   "cases": [
     {
@@ -45,8 +45,8 @@
       "expected_checker": "exact",
       "expected_outcome": "correct",
       "expected_reason": "exact_match",
-      "expected_score": "2.50",
-      "max_score": "2.50",
+      "expected_score": "2.5",
+      "max_score": "2.5",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -104,8 +104,8 @@
       "expected_checker": "exact",
       "expected_outcome": "incorrect",
       "expected_reason": "exact_mismatch",
-      "expected_score": "0.00",
-      "max_score": "2.50",
+      "expected_score": "0",
+      "max_score": "2.5",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -163,8 +163,8 @@
       "expected_checker": "exact",
       "expected_outcome": "correct",
       "expected_reason": "exact_match",
-      "expected_score": "2.50",
-      "max_score": "2.50",
+      "expected_score": "2.5",
+      "max_score": "2.5",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -222,8 +222,8 @@
       "expected_checker": "exact",
       "expected_outcome": "incorrect",
       "expected_reason": "exact_mismatch",
-      "expected_score": "0.00",
-      "max_score": "2.50",
+      "expected_score": "0",
+      "max_score": "2.5",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -281,8 +281,8 @@
       "expected_checker": "exact",
       "expected_outcome": "correct",
       "expected_reason": "exact_match",
-      "expected_score": "2.50",
-      "max_score": "2.50",
+      "expected_score": "2.5",
+      "max_score": "2.5",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -340,8 +340,8 @@
       "expected_checker": "exact",
       "expected_outcome": "incorrect",
       "expected_reason": "exact_mismatch",
-      "expected_score": "0.00",
-      "max_score": "2.50",
+      "expected_score": "0",
+      "max_score": "2.5",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -399,8 +399,8 @@
       "expected_checker": "exact",
       "expected_outcome": "correct",
       "expected_reason": "exact_match",
-      "expected_score": "2.50",
-      "max_score": "2.50",
+      "expected_score": "2.5",
+      "max_score": "2.5",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -458,8 +458,8 @@
       "expected_checker": "exact",
       "expected_outcome": "incorrect",
       "expected_reason": "unanswered",
-      "expected_score": "0.00",
-      "max_score": "2.50",
+      "expected_score": "0",
+      "max_score": "2.5",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -540,8 +540,8 @@
       "expected_checker": "multiple_choice",
       "expected_outcome": "correct",
       "expected_reason": "choice_match",
-      "expected_score": "3.00",
-      "max_score": "3.00",
+      "expected_score": "3",
+      "max_score": "3",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -553,7 +553,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "choice_01"
+        "scenario": "single_correct"
       }
     },
     {
@@ -622,8 +622,8 @@
       "expected_checker": "multiple_choice",
       "expected_outcome": "incorrect",
       "expected_reason": "choice_mismatch",
-      "expected_score": "0.00",
-      "max_score": "3.00",
+      "expected_score": "0",
+      "max_score": "3",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -635,7 +635,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "choice_02"
+        "scenario": "single_mismatch"
       }
     },
     {
@@ -705,7 +705,7 @@
       "expected_outcome": "unclear",
       "expected_reason": "unknown_choice_option",
       "expected_score": null,
-      "max_score": "3.00",
+      "max_score": "3",
       "expected_review": true,
       "expected_review_reason": "unknown_choice_option",
       "expected_confidence_policy": "confidence_v1",
@@ -718,7 +718,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "choice_03"
+        "scenario": "single_unknown"
       }
     },
     {
@@ -787,8 +787,8 @@
       "expected_checker": "multiple_choice",
       "expected_outcome": "correct",
       "expected_reason": "choice_match",
-      "expected_score": "3.00",
-      "max_score": "3.00",
+      "expected_score": "3",
+      "max_score": "3",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -800,7 +800,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "choice_04"
+        "scenario": "multiple_exact_set"
       }
     },
     {
@@ -869,8 +869,8 @@
       "expected_checker": "multiple_choice",
       "expected_outcome": "incorrect",
       "expected_reason": "choice_mismatch",
-      "expected_score": "0.00",
-      "max_score": "3.00",
+      "expected_score": "0",
+      "max_score": "3",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -882,7 +882,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "choice_05"
+        "scenario": "multiple_mismatched_set"
       }
     },
     {
@@ -952,7 +952,7 @@
       "expected_outcome": "unclear",
       "expected_reason": "unknown_choice_option",
       "expected_score": null,
-      "max_score": "3.00",
+      "max_score": "3",
       "expected_review": true,
       "expected_review_reason": "unknown_choice_option",
       "expected_confidence_policy": "confidence_v1",
@@ -965,7 +965,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "choice_06"
+        "scenario": "multiple_order_independent"
       }
     },
     {
@@ -1034,8 +1034,8 @@
       "expected_checker": "multiple_choice",
       "expected_outcome": "correct",
       "expected_reason": "choice_match",
-      "expected_score": "3.00",
-      "max_score": "3.00",
+      "expected_score": "3",
+      "max_score": "3",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -1047,7 +1047,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "choice_07"
+        "scenario": "accepted_or_first"
       }
     },
     {
@@ -1116,8 +1116,8 @@
       "expected_checker": "multiple_choice",
       "expected_outcome": "incorrect",
       "expected_reason": "choice_mismatch",
-      "expected_score": "0.00",
-      "max_score": "3.00",
+      "expected_score": "0",
+      "max_score": "3",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -1129,7 +1129,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "choice_08"
+        "scenario": "accepted_or_second"
       }
     },
     {
@@ -1199,7 +1199,7 @@
       "expected_outcome": "unclear",
       "expected_reason": "unknown_choice_option",
       "expected_score": null,
-      "max_score": "3.00",
+      "max_score": "3",
       "expected_review": true,
       "expected_review_reason": "unknown_choice_option",
       "expected_confidence_policy": "confidence_v1",
@@ -1212,7 +1212,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "choice_09"
+        "scenario": "all_or_nothing"
       }
     },
     {
@@ -1281,8 +1281,8 @@
       "expected_checker": "multiple_choice",
       "expected_outcome": "correct",
       "expected_reason": "choice_match",
-      "expected_score": "3.00",
-      "max_score": "3.00",
+      "expected_score": "3",
+      "max_score": "3",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -1294,7 +1294,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "choice_10"
+        "scenario": "weighted_correct"
       }
     },
     {
@@ -1363,8 +1363,8 @@
       "expected_checker": "multiple_choice",
       "expected_outcome": "incorrect",
       "expected_reason": "choice_mismatch",
-      "expected_score": "0.00",
-      "max_score": "3.00",
+      "expected_score": "0",
+      "max_score": "3",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -1376,7 +1376,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "choice_11"
+        "scenario": "weighted_partial"
       }
     },
     {
@@ -1446,7 +1446,7 @@
       "expected_outcome": "unclear",
       "expected_reason": "unknown_choice_option",
       "expected_score": null,
-      "max_score": "3.00",
+      "max_score": "3",
       "expected_review": true,
       "expected_review_reason": "unknown_choice_option",
       "expected_confidence_policy": "confidence_v1",
@@ -1459,7 +1459,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "choice_12"
+        "scenario": "invalid_selection"
       }
     },
     {
@@ -1508,8 +1508,8 @@
       "expected_checker": "numeric",
       "expected_outcome": "correct",
       "expected_reason": "numeric_match",
-      "expected_score": "3.00",
-      "max_score": "3.00",
+      "expected_score": "3",
+      "max_score": "3",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -1521,7 +1521,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "numeric_01"
+        "scenario": "exact"
       }
     },
     {
@@ -1570,8 +1570,8 @@
       "expected_checker": "numeric",
       "expected_outcome": "correct",
       "expected_reason": "numeric_match",
-      "expected_score": "3.00",
-      "max_score": "3.00",
+      "expected_score": "3",
+      "max_score": "3",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -1583,7 +1583,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "numeric_02"
+        "scenario": "tolerance_boundary"
       }
     },
     {
@@ -1632,8 +1632,8 @@
       "expected_checker": "numeric",
       "expected_outcome": "correct",
       "expected_reason": "numeric_match",
-      "expected_score": "3.00",
-      "max_score": "3.00",
+      "expected_score": "3",
+      "max_score": "3",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -1645,7 +1645,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "numeric_03"
+        "scenario": "tolerance_inside"
       }
     },
     {
@@ -1694,8 +1694,8 @@
       "expected_checker": "numeric",
       "expected_outcome": "incorrect",
       "expected_reason": "numeric_mismatch",
-      "expected_score": "0.00",
-      "max_score": "3.00",
+      "expected_score": "0",
+      "max_score": "3",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -1707,7 +1707,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "numeric_04"
+        "scenario": "tolerance_outside"
       }
     },
     {
@@ -1756,8 +1756,8 @@
       "expected_checker": "numeric",
       "expected_outcome": "incorrect",
       "expected_reason": "numeric_mismatch",
-      "expected_score": "0.00",
-      "max_score": "3.00",
+      "expected_score": "0",
+      "max_score": "3",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -1769,7 +1769,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "numeric_05"
+        "scenario": "negative"
       }
     },
     {
@@ -1818,8 +1818,8 @@
       "expected_checker": "numeric",
       "expected_outcome": "correct",
       "expected_reason": "numeric_match",
-      "expected_score": "3.00",
-      "max_score": "3.00",
+      "expected_score": "3",
+      "max_score": "3",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -1831,7 +1831,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "numeric_06"
+        "scenario": "zero"
       }
     },
     {
@@ -1880,8 +1880,8 @@
       "expected_checker": "numeric",
       "expected_outcome": "correct",
       "expected_reason": "numeric_match",
-      "expected_score": "3.00",
-      "max_score": "3.00",
+      "expected_score": "3",
+      "max_score": "3",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -1893,7 +1893,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "numeric_07"
+        "scenario": "decimal_precision"
       }
     },
     {
@@ -1942,8 +1942,8 @@
       "expected_checker": "numeric",
       "expected_outcome": "correct",
       "expected_reason": "numeric_match",
-      "expected_score": "3.00",
-      "max_score": "3.00",
+      "expected_score": "3",
+      "max_score": "3",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -1955,7 +1955,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "numeric_08"
+        "scenario": "invalid_methodology"
       }
     },
     {
@@ -2004,8 +2004,8 @@
       "expected_checker": "numeric",
       "expected_outcome": "incorrect",
       "expected_reason": "numeric_mismatch",
-      "expected_score": "0.00",
-      "max_score": "3.00",
+      "expected_score": "0",
+      "max_score": "3",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -2017,7 +2017,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "numeric_09"
+        "scenario": "lower_boundary"
       }
     },
     {
@@ -2066,8 +2066,8 @@
       "expected_checker": "numeric",
       "expected_outcome": "incorrect",
       "expected_reason": "numeric_mismatch",
-      "expected_score": "0.00",
-      "max_score": "3.00",
+      "expected_score": "0",
+      "max_score": "3",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -2079,7 +2079,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "numeric_10"
+        "scenario": "upper_outside"
       }
     },
     {
@@ -2125,8 +2125,8 @@
       "expected_checker": "structured_expression",
       "expected_outcome": "correct",
       "expected_reason": "expression_identity_match",
-      "expected_score": "4.00",
-      "max_score": "4.00",
+      "expected_score": "4",
+      "max_score": "4",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -2138,7 +2138,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "structured_expression_01"
+        "scenario": "identity"
       }
     },
     {
@@ -2185,7 +2185,7 @@
       "expected_outcome": "manual_required",
       "expected_reason": "expression_equivalence_unproven",
       "expected_score": null,
-      "max_score": "4.00",
+      "max_score": "4",
       "expected_review": true,
       "expected_review_reason": "expression_equivalence_unproven",
       "expected_confidence_policy": "confidence_v1",
@@ -2198,7 +2198,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "structured_expression_02"
+        "scenario": "whitespace_sensitive"
       }
     },
     {
@@ -2245,7 +2245,7 @@
       "expected_outcome": "manual_required",
       "expected_reason": "expression_equivalence_unproven",
       "expected_score": null,
-      "max_score": "4.00",
+      "max_score": "4",
       "expected_review": true,
       "expected_review_reason": "expression_equivalence_unproven",
       "expected_confidence_policy": "confidence_v1",
@@ -2258,7 +2258,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "structured_expression_03"
+        "scenario": "reordered"
       }
     },
     {
@@ -2304,8 +2304,8 @@
       "expected_checker": "structured_expression",
       "expected_outcome": "incorrect",
       "expected_reason": "unanswered",
-      "expected_score": "0.00",
-      "max_score": "4.00",
+      "expected_score": "0",
+      "max_score": "4",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -2317,7 +2317,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "structured_expression_04"
+        "scenario": "unanswered"
       }
     },
     {
@@ -2363,8 +2363,8 @@
       "expected_checker": "structured_expression",
       "expected_outcome": "correct",
       "expected_reason": "expression_identity_match",
-      "expected_score": "4.00",
-      "max_score": "4.00",
+      "expected_score": "4",
+      "max_score": "4",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -2376,7 +2376,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "structured_expression_05"
+        "scenario": "parenthesized_identity"
       }
     },
     {
@@ -2423,7 +2423,7 @@
       "expected_outcome": "manual_required",
       "expected_reason": "expression_equivalence_unproven",
       "expected_score": null,
-      "max_score": "4.00",
+      "max_score": "4",
       "expected_review": true,
       "expected_review_reason": "expression_equivalence_unproven",
       "expected_confidence_policy": "confidence_v1",
@@ -2436,7 +2436,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "structured_expression_06"
+        "scenario": "equivalence_unproven"
       }
     },
     {
@@ -2483,7 +2483,7 @@
       "expected_outcome": "manual_required",
       "expected_reason": "expression_equivalence_unproven",
       "expected_score": null,
-      "max_score": "4.00",
+      "max_score": "4",
       "expected_review": true,
       "expected_review_reason": "expression_equivalence_unproven",
       "expected_confidence_policy": "confidence_v1",
@@ -2496,7 +2496,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "structured_expression_07"
+        "scenario": "commuted_unproven"
       }
     },
     {
@@ -2542,8 +2542,8 @@
       "expected_checker": "structured_expression",
       "expected_outcome": "incorrect",
       "expected_reason": "unanswered",
-      "expected_score": "0.00",
-      "max_score": "4.00",
+      "expected_score": "0",
+      "max_score": "4",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -2555,7 +2555,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "structured_expression_08"
+        "scenario": "malformed_answer"
       }
     },
     {
@@ -2601,8 +2601,8 @@
       "expected_checker": "structured_expression",
       "expected_outcome": "correct",
       "expected_reason": "expression_identity_match",
-      "expected_score": "4.00",
-      "max_score": "4.00",
+      "expected_score": "4",
+      "max_score": "4",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -2614,7 +2614,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "structured_expression_09"
+        "scenario": "literal_identity"
       }
     },
     {
@@ -2661,7 +2661,7 @@
       "expected_outcome": "manual_required",
       "expected_reason": "expression_equivalence_unproven",
       "expected_score": null,
-      "max_score": "4.00",
+      "max_score": "4",
       "expected_review": true,
       "expected_review_reason": "expression_equivalence_unproven",
       "expected_confidence_policy": "confidence_v1",
@@ -2674,7 +2674,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "structured_expression_10"
+        "scenario": "malformed_methodology"
       }
     },
     {
@@ -2759,8 +2759,8 @@
       "expected_checker": "llm_rubric",
       "expected_outcome": "correct",
       "expected_reason": "llm_rubric_evaluated",
-      "expected_score": "5.00",
-      "max_score": "5.00",
+      "expected_score": "5",
+      "max_score": "5",
       "expected_review": true,
       "expected_review_reason": "llm_human_review_required",
       "expected_confidence_policy": "confidence_v1",
@@ -2772,7 +2772,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "llm_rubric_01"
+        "scenario": "correct"
       }
     },
     {
@@ -2857,8 +2857,8 @@
       "expected_checker": "llm_rubric",
       "expected_outcome": "correct",
       "expected_reason": "llm_rubric_evaluated",
-      "expected_score": "5.00",
-      "max_score": "5.00",
+      "expected_score": "5",
+      "max_score": "5",
       "expected_review": true,
       "expected_review_reason": "llm_human_review_required",
       "expected_confidence_policy": "confidence_v1",
@@ -2870,7 +2870,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "llm_rubric_02"
+        "scenario": "partially_correct"
       }
     },
     {
@@ -2955,8 +2955,8 @@
       "expected_checker": "llm_rubric",
       "expected_outcome": "correct",
       "expected_reason": "llm_rubric_evaluated",
-      "expected_score": "5.00",
-      "max_score": "5.00",
+      "expected_score": "5",
+      "max_score": "5",
       "expected_review": true,
       "expected_review_reason": "llm_human_review_required",
       "expected_confidence_policy": "confidence_v1",
@@ -2968,7 +2968,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "llm_rubric_03"
+        "scenario": "incorrect"
       }
     },
     {
@@ -3053,8 +3053,8 @@
       "expected_checker": "llm_rubric",
       "expected_outcome": "correct",
       "expected_reason": "llm_rubric_evaluated",
-      "expected_score": "5.00",
-      "max_score": "5.00",
+      "expected_score": "5",
+      "max_score": "5",
       "expected_review": true,
       "expected_review_reason": "llm_human_review_required",
       "expected_confidence_policy": "confidence_v1",
@@ -3066,7 +3066,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "llm_rubric_04"
+        "scenario": "required_criterion_missed"
       }
     },
     {
@@ -3151,8 +3151,8 @@
       "expected_checker": "llm_rubric",
       "expected_outcome": "correct",
       "expected_reason": "llm_rubric_evaluated",
-      "expected_score": "5.00",
-      "max_score": "5.00",
+      "expected_score": "5",
+      "max_score": "5",
       "expected_review": true,
       "expected_review_reason": "llm_human_review_required",
       "expected_confidence_policy": "confidence_v1",
@@ -3164,7 +3164,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "llm_rubric_05"
+        "scenario": "typical_error_provenance"
       }
     },
     {
@@ -3249,8 +3249,8 @@
       "expected_checker": "llm_rubric",
       "expected_outcome": "correct",
       "expected_reason": "llm_rubric_evaluated",
-      "expected_score": "5.00",
-      "max_score": "5.00",
+      "expected_score": "5",
+      "max_score": "5",
       "expected_review": true,
       "expected_review_reason": "llm_human_review_required",
       "expected_confidence_policy": "confidence_v1",
@@ -3262,7 +3262,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "llm_rubric_06"
+        "scenario": "skill_rubric_provenance"
       }
     },
     {
@@ -3347,8 +3347,8 @@
       "expected_checker": "llm_rubric",
       "expected_outcome": "correct",
       "expected_reason": "llm_rubric_evaluated",
-      "expected_score": "5.00",
-      "max_score": "5.00",
+      "expected_score": "5",
+      "max_score": "5",
       "expected_review": true,
       "expected_review_reason": "llm_human_review_required",
       "expected_confidence_policy": "confidence_v1",
@@ -3360,7 +3360,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "llm_rubric_07"
+        "scenario": "missing_coverage"
       }
     },
     {
@@ -3445,8 +3445,8 @@
       "expected_checker": "llm_rubric",
       "expected_outcome": "correct",
       "expected_reason": "llm_rubric_evaluated",
-      "expected_score": "5.00",
-      "max_score": "5.00",
+      "expected_score": "5",
+      "max_score": "5",
       "expected_review": true,
       "expected_review_reason": "llm_human_review_required",
       "expected_confidence_policy": "confidence_v1",
@@ -3458,7 +3458,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "llm_rubric_08"
+        "scenario": "duplicate_coverage"
       }
     },
     {
@@ -3544,7 +3544,7 @@
       "expected_outcome": "unclear",
       "expected_reason": "llm_provider_failure",
       "expected_score": null,
-      "max_score": "5.00",
+      "max_score": "5",
       "expected_review": true,
       "expected_review_reason": "llm_human_review_required",
       "expected_confidence_policy": "confidence_v1",
@@ -3558,7 +3558,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": true,
       "metadata": {
-        "scenario": "llm_rubric_09"
+        "scenario": "invalid_coverage_order_or_evidence"
       }
     },
     {
@@ -3644,7 +3644,7 @@
       "expected_outcome": "unclear",
       "expected_reason": "llm_provider_failure",
       "expected_score": null,
-      "max_score": "5.00",
+      "max_score": "5",
       "expected_review": true,
       "expected_review_reason": "llm_human_review_required",
       "expected_confidence_policy": "confidence_v1",
@@ -3658,7 +3658,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": true,
       "metadata": {
-        "scenario": "llm_rubric_10"
+        "scenario": "provider_failure"
       }
     },
     {
@@ -3744,7 +3744,7 @@
       "expected_outcome": "unclear",
       "expected_reason": "llm_structured_output_invalid",
       "expected_score": null,
-      "max_score": "5.00",
+      "max_score": "5",
       "expected_review": true,
       "expected_review_reason": "llm_human_review_required",
       "expected_confidence_policy": "confidence_v1",
@@ -3758,7 +3758,7 @@
       "expected_structured_output_valid": false,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "llm_rubric_11"
+        "scenario": "malformed_structured_or_solution_leak"
       }
     },
     {
@@ -3844,7 +3844,7 @@
       "expected_outcome": "unclear",
       "expected_reason": "llm_structured_output_invalid",
       "expected_score": null,
-      "max_score": "5.00",
+      "max_score": "5",
       "expected_review": true,
       "expected_review_reason": "llm_human_review_required",
       "expected_confidence_policy": "confidence_v1",
@@ -3858,7 +3858,7 @@
       "expected_structured_output_valid": false,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "llm_rubric_12"
+        "scenario": "prompt_injection_as_data"
       }
     },
     {
@@ -3904,8 +3904,8 @@
       "expected_checker": "exact",
       "expected_outcome": "incorrect",
       "expected_reason": "unanswered",
-      "expected_score": "0.00",
-      "max_score": "3.00",
+      "expected_score": "0",
+      "max_score": "3",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -3917,7 +3917,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "boundary_01"
+        "scenario": "unanswered_exact"
       }
     },
     {
@@ -3963,8 +3963,8 @@
       "expected_checker": "exact",
       "expected_outcome": "incorrect",
       "expected_reason": "unanswered",
-      "expected_score": "0.00",
-      "max_score": "3.00",
+      "expected_score": "0",
+      "max_score": "3",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -3976,7 +3976,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "boundary_02"
+        "scenario": "unanswered_choice"
       }
     },
     {
@@ -4022,8 +4022,8 @@
       "expected_checker": "exact",
       "expected_outcome": "incorrect",
       "expected_reason": "unanswered",
-      "expected_score": "0.00",
-      "max_score": "3.00",
+      "expected_score": "0",
+      "max_score": "3",
       "expected_review": false,
       "expected_review_reason": null,
       "expected_confidence_policy": "confidence_v1",
@@ -4035,7 +4035,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "boundary_03"
+        "scenario": "unanswered_numeric"
       }
     },
     {
@@ -4074,7 +4074,7 @@
       "expected_outcome": "insufficient_rubric",
       "expected_reason": "routing_insufficient_rubric",
       "expected_score": null,
-      "max_score": "3.00",
+      "max_score": "3",
       "expected_review": true,
       "expected_review_reason": "missing_expected_solution",
       "expected_confidence_policy": "confidence_v1",
@@ -4087,7 +4087,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "boundary_04"
+        "scenario": "insufficient_missing_rubric"
       }
     },
     {
@@ -4126,7 +4126,7 @@
       "expected_outcome": "insufficient_rubric",
       "expected_reason": "routing_insufficient_rubric",
       "expected_score": null,
-      "max_score": "3.00",
+      "max_score": "3",
       "expected_review": true,
       "expected_review_reason": "missing_expected_solution",
       "expected_confidence_policy": "confidence_v1",
@@ -4139,7 +4139,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "boundary_05"
+        "scenario": "insufficient_empty_rubric"
       }
     },
     {
@@ -4178,7 +4178,7 @@
       "expected_outcome": "insufficient_rubric",
       "expected_reason": "routing_insufficient_rubric",
       "expected_score": null,
-      "max_score": "3.00",
+      "max_score": "3",
       "expected_review": true,
       "expected_review_reason": "missing_expected_solution",
       "expected_confidence_policy": "confidence_v1",
@@ -4191,7 +4191,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "boundary_06"
+        "scenario": "insufficient_coverage"
       }
     },
     {
@@ -4238,7 +4238,7 @@
       "expected_outcome": "manual_required",
       "expected_reason": "routing_manual_required",
       "expected_score": null,
-      "max_score": "3.00",
+      "max_score": "3",
       "expected_review": true,
       "expected_review_reason": "expression_equivalence_required",
       "expected_confidence_policy": "confidence_v1",
@@ -4251,7 +4251,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "boundary_07"
+        "scenario": "manual_capability"
       }
     },
     {
@@ -4298,7 +4298,7 @@
       "expected_outcome": "manual_required",
       "expected_reason": "routing_manual_required",
       "expected_score": null,
-      "max_score": "3.00",
+      "max_score": "3",
       "expected_review": true,
       "expected_review_reason": "expression_equivalence_required",
       "expected_confidence_policy": "confidence_v1",
@@ -4311,7 +4311,7 @@
       "expected_structured_output_valid": true,
       "expected_provider_failed": false,
       "metadata": {
-        "scenario": "boundary_08"
+        "scenario": "manual_expression_capability"
       }
     }
   ]
