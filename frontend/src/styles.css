@@ -31,3 +31,9 @@ a{color:#2458bd;font-weight:650}.back{display:inline-block;margin-bottom:22px}.c
 /* Pilot student assessment */
 .student-assignment-list{display:grid;gap:1rem;margin-top:1.25rem}.student-assignment-list dl{margin-bottom:0}.student-attempt{max-width:60rem;margin:auto}.student-attempt .page-heading{margin-bottom:1rem}.item-numbers{display:flex;gap:.5rem;flex-wrap:wrap;margin:1rem 0}.item-numbers button{min-width:2.75rem}.item-numbers .active{box-shadow:inset 0 0 0 2px var(--primary)}.student-item{padding:1.25rem;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-subtle)}.student-item label,.student-item fieldset label{display:grid;gap:.35rem}.student-item textarea{min-height:8rem}.student-item fieldset{display:grid;gap:.75rem;border:0;padding:0}.choice-row{display:grid;grid-template-columns:1fr auto;gap:.5rem;align-items:end}.item-navigation,.submit-bar{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-top:1rem}.submit-bar{padding-top:1rem;border-top:1px solid var(--border)}.submit-bar span{color:#8a3b12}.statement{white-space:pre-wrap}
 @media(max-width:520px){.choice-row{grid-template-columns:1fr}.item-navigation,.submit-bar{align-items:stretch;flex-direction:column}.item-navigation button,.submit-bar button{width:100%}}
+
+/* UX cleanup: every foreground inside semantic red surfaces remains readable. */
+.error,.validation-report.error{background:var(--danger);border-color:var(--danger);color:#fff}
+.error :is(h1,h2,h3,h4,p,span,small,strong,li,a,label),.validation-report.error :is(h1,h2,h3,h4,p,span,small,strong,li,a,label){color:#fff}
+.error a,.validation-report.error a{text-decoration-color:#fff}
+.error button,.validation-report.error button,.danger:not(.secondary){color:#fff}
