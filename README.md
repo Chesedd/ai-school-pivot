@@ -64,7 +64,8 @@ docker compose ps
 ### Checking Phase 4.10 acceptance
 
 Phase 4.9 is accepted at `cd0dbbd`. Phase 4.10's executable 60-case application
-gate and real PostgreSQL technical gate are documented in
+gate is implemented; PostgreSQL technical acceptance remains pending until the
+real local continuation gate passes without failures or skips. Both gates are documented in
 [the acceptance specification](docs/checking-engine-phase410-acceptance.md).
 Real-provider quality evaluation remains separately pending and explicitly
 configured; fake-provider success is not quality acceptance.

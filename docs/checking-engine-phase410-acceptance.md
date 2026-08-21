@@ -6,13 +6,13 @@ schema or any Phase 4.9 migration.
 
 ## Versioned boundary and corpus
 
-The exact versions are `checking_golden_dataset_v1`,
-`checking_acceptance_report_v1`, and `checking_acceptance_thresholds_v1`.
+The exact versions are `checking_golden_dataset_v2`,
+`checking_acceptance_report_v2`, and `checking_acceptance_thresholds_v1`.
 The stable synthetic corpus contains exactly 60 independently identified cases:
 8 exact-text, 12 choice (single, multiple, OR and weighted), 10 numeric,
 10 structured-expression, 12 LLM-rubric candidate-output, and 8 boundary cases.
 Its SHA-256 contract fingerprint is
-`41a3aadd87c40b5e41e85ea878f1ca573d8925efe1ac69614995ca3145687a8b`.
+`c8222d2bc0152e6d44edf37fd1db5a0ac2f7bcc317c211ca4a468f70c2aeae1c`.
 It is technical synthetic test data—not teacher-approved, human-approved,
 production-quality, or evidence of real-provider model quality.
 
@@ -34,4 +34,4 @@ prose, provider output and person/assignment identities are excluded from report
 and privacy-safe errors.
 
 There are no final grades, Teacher Review, frontend/public API, workers/queues, or
-AI Content Authoring Phase 4A behavior. Phase 4.10 deterministic/application/PostgreSQL technical acceptance may be claimed only when the real PostgreSQL vertical passes. Real-provider quality evaluation remains a separate pending, explicitly configured gate.
+AI Content Authoring Phase 4A behavior. Phase 4.10 application/deterministic technical acceptance is implemented. PostgreSQL technical acceptance remains pending until the real local 40-test continuation gate passes with no failures or skips. Real-provider quality evaluation remains a separate pending, explicitly configured gate.

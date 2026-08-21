@@ -846,4 +846,8 @@ Phase 4.9 is accepted at `cd0dbbd`. The versioned synthetic technical acceptance
 contract, its privacy boundary, PostgreSQL qualification, and pending
 real-provider quality gate are specified in
 [`checking-engine-phase410-acceptance.md`](checking-engine-phase410-acceptance.md).
+The breaking executable corpus/report contract is explicitly versioned as
+`checking_golden_dataset_v2` / `checking_acceptance_report_v2`; v1 datasets are
+rejected rather than reinterpreted. PostgreSQL Phase 4.10 acceptance remains
+pending until the complete local 40-test continuation gate passes.
 It adds no final grades, Teacher Review, or Phase 4A authoring behavior.
