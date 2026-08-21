@@ -25,6 +25,8 @@ os.environ.setdefault("CONTENT_BANK_DEV_ACTOR_ID", "00000000-0000-4000-8000-0000
 from app.db.session import async_session_factory, engine  # noqa: E402
 from app.main import app  # noqa: E402
 from app.infrastructure.repository import SQLAlchemyContentBankRepository  # noqa: E402
+from app.infrastructure.repository import SQLAlchemyUnitOfWork  # noqa: E402
+from app.application.content_bank import ActorContext, CreateVersionCommand, CreateVersionService  # noqa: E402
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
@@ -298,6 +300,14 @@ def methodology(ids):
     return {"expected_solution":{"solution_text":"Solution","final_answer":"3","solution_steps":["First","Second"]},"rubric":{"grading_mode":"points","notes":None,"items":[{"criterion":"First criterion","max_points":"1.2500","required":True,"common_failure":None},{"criterion":"Second criterion","max_points":"0.7500","required":False,"common_failure":"Failure"}]},"accepted_answers":[{"answer_value":"3","tolerance":"0.01","unit":None,"normalization_rule":None}],"typical_errors":[{"skill_id":str(ids["skill"]),"code":"sign","title":"Sign","description":"Wrong sign","severity":"medium","remediation_hint":None,"detection_hint":"See line"}],"hints":[{"level":1,"hint_text":"One"},{"level":2,"hint_text":"Two"}]}
 
 
+async def _clone_revision(task_id, source_version_no=1):
+    """Exercise the retained internal revision mechanism, not a public route."""
+    return await CreateVersionService(SQLAlchemyUnitOfWork(async_session_factory)).create(
+        CreateVersionCommand(UUID(str(task_id)), source_version_no),
+        ActorContext(UUID(os.environ["CONTENT_BANK_DEV_ACTOR_ID"])),
+    )
+
+
 async def test_methodology_put_get_replace_and_catalog_reuse(catalog):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         created = await client.post("/api/content-bank/tasks", json=payload(catalog))
@@ -364,16 +374,13 @@ async def test_approve_clone_archive_and_server_metadata(catalog):
         assert (await client.put(f"/api/content-bank/task-versions/{v1}/methodology", json=methodology(catalog))).status_code == 200
         assert (await client.post(f"/api/content-bank/tasks/{task_id}/versions/1/submit-review", json={})).status_code == 200
         approved = await client.post(f"/api/content-bank/tasks/{task_id}/versions/1/approve", json={})
-        created_v2 = await client.post(f"/api/content-bank/tasks/{task_id}/versions", json={"source_version_no":1})
-        duplicate = await client.post(f"/api/content-bank/tasks/{task_id}/versions", json={"source_version_no":1})
+        created_v2 = await _clone_revision(task_id)
         assert (await client.post(f"/api/content-bank/tasks/{task_id}/versions/2/submit-review", json={})).status_code == 200
         approved_v2 = await client.post(f"/api/content-bank/tasks/{task_id}/versions/2/approve", json={})
         card = await client.get(f"/api/content-bank/tasks/{task_id}")
     assert approved.status_code == 200 and approved.json()["approved_by"] == "00000000-0000-4000-8000-000000000001"
     assert approved.json()["approved_at"] is not None
-    assert created_v2.status_code == 201 and created_v2.json()["status"] == "draft" and created_v2.json()["approved_at"] is None
-    assert created_v2.headers["Location"] == f"/api/content-bank/tasks/{task_id}"
-    assert duplicate.status_code == 409 and duplicate.json()["error"]["code"] == "invalid_source_version"
+    assert created_v2.status == "draft" and created_v2.approved_at is None
     assert approved_v2.status_code == 200
     latest = card.json()["latest_version"]
     assert latest["id"] != v1 and latest["version_no"] == 2
@@ -418,10 +425,8 @@ async def test_status_command_not_found_and_invalid_uuid_envelopes(catalog):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         missing = await client.post(f"/api/content-bank/tasks/{uuid4()}/versions/1/submit-review", json={})
         invalid = await client.post("/api/content-bank/tasks/nope/versions/1/submit-review", json={})
-        missing_source = await client.post(f"/api/content-bank/tasks/{uuid4()}/versions", json={"source_version_no":1})
-        missing_body = await client.post(f"/api/content-bank/tasks/{uuid4()}/versions", json={})
-    assert missing.status_code == missing_source.status_code == 404 and missing.json()["error"]["code"] == "not_found"
-    assert invalid.status_code == missing_body.status_code == 422
+    assert missing.status_code == 404 and missing.json()["error"]["code"] == "not_found"
+    assert invalid.status_code == 422 and invalid.json()["error"]["code"] == "validation_error"
 
 
 async def _create_search_task(client, catalog, *, title=None, statement="Нейтральное условие", source=None):
@@ -472,8 +477,8 @@ async def test_search_is_limited_to_latest_version(catalog):
         async with async_session_factory() as session:
             await session.execute(text("UPDATE task_versions SET status='approved', approved_at=now(), approved_by=created_by WHERE task_id=:id"), {"id": task_id})
             await session.commit()
-        cloned = await client.post(f"/api/content-bank/tasks/{task_id}/versions", json={"source_version_no": 1})
-        assert cloned.status_code == 201
+        cloned = await _clone_revision(task_id)
+        assert cloned.version_no == 2 and cloned.status == "draft"
         async with async_session_factory() as session:
             await session.execute(text("UPDATE task_versions SET statement='Только актуальный интеграл' WHERE task_id=:id AND version_no=2"), {"id": task_id})
             await session.commit()
@@ -598,7 +603,8 @@ async def test_updated_at_lifecycle_and_read_model_consistency(catalog):
         async with async_session_factory() as session:
             await session.execute(text("UPDATE tasks SET updated_at='2000-01-01T00:00:00Z' WHERE id=:id"), {"id":task_id})
             await session.commit()
-        assert (await client.post(f"/api/content-bank/tasks/{task_id}/versions", json={"source_version_no":1})).status_code == 201
+        cloned = await _clone_revision(task_id)
+        assert cloned.version_no == 2 and cloned.status == "draft"
         after_clone = (await client.get(f"/api/content-bank/tasks/{task_id}")).json()
         assert after_clone["updated_at"] != past
         assert after_clone["latest_version"]["updated_at"]

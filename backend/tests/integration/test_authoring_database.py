@@ -31,7 +31,11 @@ async def make_session(factory):
     async with factory() as db,db.begin(): return (await AuthoringRepository(db).create_session(uuid4(),req(),FrozenCatalogContext("math","g7","fractions",None,("reasoning",)))).id
 
 async def test_session_roundtrip_attempt_lifecycle_usage_cost_and_no_tasks(context):
-    engine,factory=context; sid=await make_session(factory)
+    engine,factory=context
+    async with factory() as db:
+        initial_task_count=await db.scalar(text("SELECT count(*) FROM tasks"))
+        initial_version_count=await db.scalar(text("SELECT count(*) FROM task_versions"))
+    sid=await make_session(factory)
     async with factory() as db,db.begin():
         repo=AuthoringRepository(db); row,created=await repo.create_attempt(sid,execution()); assert created and row.status=="pending"; aid=row.id
     async with factory() as db,db.begin(): assert await AuthoringRepository(db).claim(aid)
@@ -41,7 +45,10 @@ async def test_session_roundtrip_attempt_lifecycle_usage_cost_and_no_tasks(conte
         row=await db.get(AuthoringProviderAttempt,aid); session=(await db.execute(text("SELECT frozen_request,frozen_allowlist FROM authoring_sessions WHERE id=:id"),{"id":sid})).one()
         assert row.status=="succeeded" and row.cost_amount==Decimal("1.23000000") and (row.input_tokens,row.output_tokens,row.cached_tokens)==(3,4,1) and row.response_hash==result.response_hash
         assert session.frozen_request["task_goal"]=="One task" and session.frozen_allowlist["skills"]==["reasoning"]
-        assert await db.scalar(text("SELECT count(*) FROM tasks"))==0
+        assert await db.scalar(text("SELECT count(*) FROM tasks"))==initial_task_count
+        assert await db.scalar(text("SELECT count(*) FROM task_versions"))==initial_version_count
+        assert await db.scalar(text("SELECT count(*) FROM authoring_sessions WHERE id=:id"),{"id":sid})==1
+        assert await db.scalar(text("SELECT count(*) FROM authoring_provider_attempts WHERE session_id=:id AND status='succeeded'"),{"id":sid})==1
     async with factory() as db,db.begin(): assert not await AuthoringRepository(db).claim(aid) and not await AuthoringRepository(db).finalize_failure(aid,FailureCode.TIMEOUT)
 
 async def test_idempotency_conflict_retry_numbering_and_failure_states(context):
