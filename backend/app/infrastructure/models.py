@@ -166,6 +166,23 @@ class TaskVersion(IdMixin, Base):
     tag_links: Mapped[list[TaskVersionTag]] = relationship(back_populates="task_version", cascade="all, delete-orphan")
 
 
+class Attachment(IdMixin, Base):
+    """Opaque file metadata; bytes live in configured object/local storage."""
+    __tablename__ = "attachments"
+    filename: Mapped[str] = mapped_column(String(255))
+    mime_type: Mapped[str] = mapped_column(String(64))
+    storage_reference: Mapped[str] = mapped_column(String(255), unique=True)
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+
+
+class TaskVersionAttachment(Base):
+    __tablename__ = "task_version_attachments"
+    task_version_id: Mapped[UUID] = mapped_column(ForeignKey("task_versions.id", ondelete="CASCADE"), primary_key=True)
+    attachment_id: Mapped[UUID] = mapped_column(ForeignKey("attachments.id", ondelete="CASCADE"), primary_key=True)
+    role: Mapped[str] = mapped_column(String(40))
+
+
 class TaskSkillLink(IdMixin, Base):
     __tablename__ = "task_skill_links"
     __table_args__ = (UniqueConstraint("task_version_id", "skill_id", name="uq_task_skill_links_version_skill"), CheckConstraint("weight > 0 AND weight <= 1", name="ck_task_skill_links_weight_range"), Index("ix_task_skill_links_skill_id", "skill_id"), Index("uq_task_skill_links_one_primary_per_version", "task_version_id", unique=True, postgresql_where=text("is_primary IS TRUE")))

@@ -31,6 +31,9 @@ export function getTaskAudit(taskId:string,{offset=0,limit=50,action,signal}:Aud
 const json=(body:unknown):RequestInit=>({method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
 export const getTaskCard=(id:string)=>request(`/api/content-bank/tasks/${id}`);
 export const putMethodology=(versionId:string,payload:unknown):Promise<Methodology>=>request(`/api/content-bank/task-versions/${versionId}/methodology`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+export type Attachment={id:string;filename:string;mime_type:"image/png"|"image/jpeg"|"image/webp";size_bytes:number;created_at:string;role:string|null;url:string};
+export const listTaskAttachments=(versionId:string):Promise<{items:Attachment[]}>=>(request(`/api/content-bank/task-versions/${enc(versionId)}/attachments`));
+export const uploadTaskAttachment=(versionId:string,role:string,file:File):Promise<Attachment>=>request(`/api/content-bank/task-versions/${enc(versionId)}/attachments?role=${enc(role)}`,{method:"POST",headers:{"Content-Type":file.type,"X-Filename":file.name},body:file});
 export const submitReview=(taskId:string,versionNo:number)=>request(`/api/content-bank/tasks/${taskId}/versions/${versionNo}/submit-review`,json({}));
 export const returnToDraft=(taskId:string,versionNo:number,reason:string)=>request(`/api/content-bank/tasks/${taskId}/versions/${versionNo}/return-to-draft`,json({reason}));
 export const approveVersion=(taskId:string,versionNo:number)=>request(`/api/content-bank/tasks/${taskId}/versions/${versionNo}/approve`,json({}));
@@ -101,6 +104,8 @@ export type StudentRawAnswer=string|string[]|null|boolean|number|Record<string,u
 export type StudentAnswer={item_id:string;raw_answer:StudentRawAnswer;normalized_answer:unknown;created_at:string;updated_at:string};
 export type StudentSubmission={id:string;attempt_no:number;status:"draft"|"submitted";assigned_variant_id:string;resumed:boolean;started_at:string;submitted_at:string|null;answers:StudentAnswer[];items:StudentExecutionItem[]};
 const studentRoot="/api/assessment-core/student";
+export const listAnswerAttachments=(submissionId:string,itemId:string):Promise<{items:Attachment[]}>=>(request(`${studentRoot}/attempts/${enc(submissionId)}/answers/${enc(itemId)}/attachments`));
+export const uploadAnswerAttachment=(submissionId:string,itemId:string,file:File):Promise<Attachment>=>request(`${studentRoot}/attempts/${enc(submissionId)}/answers/${enc(itemId)}/attachments`,{method:"POST",headers:{"Content-Type":file.type,"X-Filename":file.name},body:file});
 export const listStudentAssignments=(offset=0,limit=20,signal?:AbortSignal):Promise<StudentAssignmentPage>=>request(`${studentRoot}/assignments?${new URLSearchParams({offset:String(offset),limit:String(limit)})}`,{signal});
 export const getStudentAssignment=(id:string,signal?:AbortSignal):Promise<StudentAssignmentDetail>=>request(`${studentRoot}/assignments/${enc(id)}`,{signal});
 export const startStudentAttempt=(assignmentId:string,key:string):Promise<StudentSubmission>=>request(`${studentRoot}/assignments/${enc(assignmentId)}/attempts/start`,{method:"POST",headers:{"Content-Type":"application/json","Idempotency-Key":key},body:"{}"});

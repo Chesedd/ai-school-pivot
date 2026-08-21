@@ -25,6 +25,10 @@ services:
       CONTENT_BANK_DEV_ACTOR_ID: ${CONTENT_BANK_DEV_ACTOR_ID}
       ASSESSMENT_DEV_STUDENT_ID: ${ASSESSMENT_DEV_STUDENT_ID:-00000000-0000-4000-8000-000000000002}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      ATTACHMENT_STORAGE_PATH: /data/attachments
+      ATTACHMENT_MAX_BYTES: ${ATTACHMENT_MAX_BYTES:-5242880}
+    volumes:
+      - attachment_data:/data/attachments
     depends_on:
       postgres:
         condition: service_healthy
@@ -47,3 +51,4 @@ services:
 
 volumes:
   postgres_data:
+  attachment_data:
