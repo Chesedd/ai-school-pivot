@@ -13,6 +13,7 @@ from app.config import get_settings
 from app.presentation.routes import router
 from app.presentation.assessment_routes import router as assessment_router
 from app.presentation.student_assessment_routes import router as student_assessment_router
+from app.presentation.attachment_routes import router as attachment_router
 
 
 app = FastAPI()
@@ -21,6 +22,7 @@ app.add_middleware(CORSMiddleware, allow_origins=[x.strip() for x in settings.co
 app.include_router(router)
 app.include_router(assessment_router)
 app.include_router(student_assessment_router)
+app.include_router(attachment_router)
 
 @app.exception_handler(AssessmentError)
 async def assessment_error(_: Request, exc: AssessmentError) -> JSONResponse:

@@ -93,6 +93,12 @@ class StudentAnswer(IdMixin, Base):
     raw_answer: Mapped[object] = mapped_column(JSONB); normalized_answer: Mapped[object] = mapped_column(JSONB); created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=clock); updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=clock)
 
 
+class StudentAnswerAttachment(Base):
+    __tablename__ = "student_answer_attachments"
+    student_answer_id: Mapped[UUID] = mapped_column(ForeignKey("student_answers.id", ondelete="CASCADE"), primary_key=True)
+    attachment_id: Mapped[UUID] = mapped_column(ForeignKey("attachments.id", ondelete="CASCADE"), primary_key=True)
+
+
 class AssessmentIdempotencyKey(IdMixin, Base):
     __tablename__ = "assessment_idempotency_keys"
     __table_args__ = (UniqueConstraint("assignment_participant_id", "key", name="uq_assessment_idempotency_participant_key"), CheckConstraint("operation IN ('start','submit')", name="ck_assessment_idempotency_operation"), CheckConstraint("request_hash ~ '^[0-9a-f]{64}$'", name="ck_assessment_idempotency_request_hash"), CheckConstraint("http_status IN (200,201)", name="ck_assessment_idempotency_http_status"), Index("ix_assessment_idempotency_submission_id", "submission_id"))

@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from app.application.content_bank import AcceptedAnswerDTO, ChoiceOptionDTO, ChoiceOptionRuleDTO, ChoiceScoringPolicyDTO, ActorContext, assess_automation_readiness, ArchiveResult, AuditEventDTO, AuditEventRecord, AuditPage, CatalogRecord, CatalogRef, ConflictError, CreateTaskCommand, DUPLICATE_CANDIDATE_THRESHOLD, DuplicateCandidate, DuplicateCandidateRecord, DuplicateQuery, EMPTY_METHODOLOGY, ExpectedSolutionDTO, HintDTO, LockedVersion, MethodologyDTO, RubricDTO, RubricItemDTO, SaveMethodologyCommand, SkillLinkDTO, TagRefDTO, TaskCard, TaskCardVersion, TaskDTO, TaskListItem, TaskListPage, TaskListQuery, TaskVersionDTO, TaskVersionSummary, TypicalErrorDTO, VersionState
-from app.infrastructure.models import AcceptedAnswer, AcceptedAnswerOption, ChoiceOption, ChoiceOptionRule, ChoiceScoringPolicy, AuditLog, FolderAuditLog, TaskFolder, ExpectedSolution, Grade, Hint, ImportPreview, Rubric, RubricItem, Skill, Subject, Subtopic, Tag, TagCategory, Task, TaskErrorLink, TaskSkillLink, TaskVersion, TaskVersionTag, Topic, TypicalError
+from app.infrastructure.models import AcceptedAnswer, AcceptedAnswerOption, ChoiceOption, ChoiceOptionRule, ChoiceScoringPolicy, AuditLog, FolderAuditLog, TaskFolder, ExpectedSolution, Grade, Hint, ImportPreview, Rubric, RubricItem, Skill, Subject, Subtopic, Tag, TagCategory, Task, TaskErrorLink, TaskSkillLink, TaskVersion, TaskVersionAttachment, TaskVersionTag, Topic, TypicalError
 from app.application.folders import FolderSummaryDTO, FolderTreeNodeDTO, TaskLocationDTO
 from app.application.content_bank import ImportCatalogContext, ImportIssue, ImportPreviewRecord, ImportPreviewRow, ImportResolvedTag, ImportTagRecord, SkillLinkInput, VersionContentInput
 
@@ -353,6 +353,8 @@ class SQLAlchemyContentBankRepository:
         self.session.add_all([TaskSkillLink(task_version_id=target.id, skill_id=x.skill_id, weight=x.weight, is_primary=x.is_primary) for x in links])
         tag_ids=(await self.session.scalars(select(TaskVersionTag.tag_id).where(TaskVersionTag.task_version_id==source.id))).all()
         self.session.add_all([TaskVersionTag(task_version_id=target.id,tag_id=x,attached_by=actor.actor_id) for x in tag_ids])
+        attachments=(await self.session.execute(select(TaskVersionAttachment.attachment_id,TaskVersionAttachment.role).where(TaskVersionAttachment.task_version_id==source.id))).all()
+        self.session.add_all([TaskVersionAttachment(task_version_id=target.id,attachment_id=attachment_id,role=role) for attachment_id,role in attachments])
         solution = await self.session.scalar(select(ExpectedSolution).where(ExpectedSolution.task_version_id == source.id))
         if solution: self.session.add(ExpectedSolution(task_version_id=target.id, solution_text=solution.solution_text, final_answer=solution.final_answer, solution_steps_json=list(solution.solution_steps_json)))
         rubric = await self.session.scalar(select(Rubric).options(selectinload(Rubric.items)).where(Rubric.task_version_id == source.id))
