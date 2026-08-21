@@ -1,5 +1,8 @@
 # Документация
 
+- [AI Content Authoring Phase 4A.1](ai-content-authoring-phase4a1.md) —
+  provider boundary, durable session/attempt foundation и отложенный scope.
+
 - [AI Content Authoring v1 — контракт Phase 4A](ai-content-authoring-v1-contract.md) —
   Phase 4A.0, только документация и архитектура. Принадлежащие Content Bank
   реализационные Phases 4A.1–4A.6 ещё не начаты.

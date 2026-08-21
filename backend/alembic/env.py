@@ -12,6 +12,7 @@ from app.config import get_settings
 from app.infrastructure.models import Base
 from app.infrastructure import assessment_models  # noqa: F401  (register tables)
 from app.infrastructure import checking_models  # noqa: F401  (register tables)
+from app.infrastructure import authoring_models  # noqa: F401  (register tables)
 
 config = context.config
 if config.config_file_name is not None:

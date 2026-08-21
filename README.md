@@ -21,11 +21,11 @@ Phase 4.9 findings/confidence принята. Техническая приём�
 заявляется до успешного PostgreSQL прогона. Real-provider quality evaluation
 остаётся отдельным явно конфигурируемым gate, а fake provider её не заменяет.
 
-AI-генерация заданий пользователям пока недоступна. Она запланирована как
-отдельный, принадлежащий Content Bank трек Phase 4A. Текущая Phase 4A.0
-фиксирует только [контракт и roadmap AI Content Authoring v1](docs/ai-content-authoring-v1-contract.md);
-реализация API, persistence, UI и provider workflow отложена до Phases
-4A.1–4A.6. Аналитика, OCR и полноценные IAM/авторизация также не реализованы.
+AI-генерация заданий пользователям пока недоступна. Принадлежащая Content Bank
+Phase 4A.1 реализует только provider boundary и durable attempt foundation по
+[контракту AI Content Authoring v1](docs/ai-content-authoring-v1-contract.md);
+generation semantics, API, preview, confirmation и UI отложены до Phases
+4A.2–4A.6. Аналитика, OCR и полноценные IAM/авторизация также не реализованы.
 Demo/dev seed не является реальным методически принятым корпусом 50–100
 заданий.
 

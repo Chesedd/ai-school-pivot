@@ -2,10 +2,11 @@
 
 ## 1. Статус и назначение
 
-**Phase 4A.0 — только документация и архитектура.** AI-генерация заданий ещё
-недоступна пользователям. Этот PR не реализует authoring API, persistence,
-схему/миграции, UI, provider workflow или вызовы provider; реализация
-запланирована в Phases 4A.1–4A.6. Phase 4A входит в общую программу Phase 4, но
+**Phase 4A.1 — provider boundary и durable attempts.** AI-генерация заданий ещё
+недоступна пользователям. Реализованы только strict request/frozen catalog,
+provider-neutral execution contract и Content Bank-owned session/attempt
+persistence; authoring API, preview, task generation/creation и UI остаются
+запланированы в Phases 4A.2–4A.6. Phase 4A входит в общую программу Phase 4, но
 принадлежит Content Bank, а не Checking Engine.
 
 Цель v1 — по ограниченному brief и выбранному catalog context получить от LLM
