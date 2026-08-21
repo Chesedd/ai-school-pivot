@@ -35,7 +35,8 @@ _REASONS = {
 _ID = re.compile(r"[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?\Z")
 _FINDING_KEYS = {"finding_type", "rubric_item_id", "typical_error_id", "skill_id", "code"}
 _FORBIDDEN = {"answer", "solution", "rubric_prose", "provider_output", "raw_output", "student_id", "person_id", "assignment_id", "email", "name"}
-_CONFIDENCE_REASON_ORDER = tuple(reason.value for reason in ConfidenceReason)
+_CONFIDENCE_REASON_ORDER = {reason.value: index for index, reason in enumerate(ConfidenceReason)}
+_MAX_CONFIDENCE_REASONS = 8
 
 
 class AcceptanceContractError(ValueError):
@@ -80,6 +81,16 @@ def _confidence(value: Any) -> Decimal:
     result=Decimal(value)
     if not Decimal("0") <= result <= Decimal("1"): raise AcceptanceContractError("invalid_confidence")
     return result
+
+
+def _confidence_reasons(value: Any) -> tuple[str, ...]:
+    if (type(value) is not tuple or len(value) > _MAX_CONFIDENCE_REASONS or
+            any(type(reason) is not str or reason not in _CONFIDENCE_REASON_ORDER for reason in value) or
+            len(value) != len(set(value))):
+        raise AcceptanceContractError("invalid_confidence_reasons")
+    if tuple(sorted(value, key=_CONFIDENCE_REASON_ORDER.__getitem__)) != value:
+        raise AcceptanceContractError("invalid_confidence_reasons")
+    return value
 
 
 def _freeze(value: Any, *, depth: int = 0) -> Any:
@@ -139,22 +150,6 @@ def _validate_result(checker: str, outcome: str, reason: str, score: Decimal | N
     if keys != sorted(keys) or len(keys) != len(set(keys)): raise AcceptanceContractError("invalid_findings")
 
 
-def _validate_review_and_confidence_reasons(review: bool, review_reason: str | None,
-                                            reasons: tuple[str, ...]) -> None:
-    if (review_reason is not None) is not review:
-        raise AcceptanceContractError("invalid_review_reason")
-    if review_reason is not None and (type(review_reason) is not str or not _ID.fullmatch(review_reason)):
-        raise AcceptanceContractError("invalid_review_reason")
-    if type(reasons) is not tuple or len(reasons) > len(_CONFIDENCE_REASON_ORDER):
-        raise AcceptanceContractError("invalid_confidence_reasons")
-    try:
-        positions = tuple(_CONFIDENCE_REASON_ORDER.index(reason) for reason in reasons)
-    except (ValueError, TypeError):
-        raise AcceptanceContractError("invalid_confidence_reasons") from None
-    if positions != tuple(sorted(positions)) or len(positions) != len(set(positions)):
-        raise AcceptanceContractError("invalid_confidence_reasons")
-
-
 @dataclass(frozen=True)
 class GoldenCaseV2:
     case_id: str; category: str; expected_checker: str; expected_outcome: str; expected_reason: str
@@ -170,11 +165,14 @@ class GoldenCaseV2:
         findings = tuple(_finding(x) for x in self.expected_findings)
         metadata = _freeze(self.metadata); input_value=_freeze_input(self.input)
         object.__setattr__(self, "expected_findings", findings); object.__setattr__(self, "metadata", metadata); object.__setattr__(self,"input",input_value)
-        _validate_review_and_confidence_reasons(self.expected_review, self.expected_review_reason,
-                                                self.expected_confidence_reasons)
+        if ((self.expected_review_reason is not None) != self.expected_review or
+                self.expected_review_reason is not None and
+                (type(self.expected_review_reason) is not str or not _ID.fullmatch(self.expected_review_reason))):
+            raise AcceptanceContractError("invalid_review_reason")
         if type(self.expected_confidence_policy) is not str or not _ID.fullmatch(self.expected_confidence_policy): raise AcceptanceContractError("invalid_confidence_policy")
         if type(self.expected_confidence) is not Decimal or not self.expected_confidence.is_finite() or not 0 <= self.expected_confidence <= 1 or self.expected_confidence.as_tuple().exponent != -4:
             raise AcceptanceContractError("invalid_confidence")
+        _confidence_reasons(self.expected_confidence_reasons)
         if type(self.expected_structured_output_valid) is not bool or type(self.expected_provider_failed) is not bool: raise AcceptanceContractError("invalid_provider_flags")
         _validate_result(self.expected_checker, self.expected_outcome, self.expected_reason, self.expected_score,
                          self.max_score, self.expected_review, findings)
@@ -218,10 +216,13 @@ class ObservedCheckingResultV2:
         if any(type(x) is not int or x<0 for x in (self.latency_ms,self.input_tokens,self.output_tokens)): raise AcceptanceContractError("invalid_observation")
         if type(self.cost) is not Decimal or not self.cost.is_finite() or self.cost<0: raise AcceptanceContractError("invalid_observation")
         if type(self.confidence) is not Decimal or not self.confidence.is_finite() or not 0<=self.confidence<=1: raise AcceptanceContractError("invalid_observation")
-        _validate_review_and_confidence_reasons(self.review_required, self.review_reason,
-                                                self.confidence_reasons)
+        if ((self.review_reason is not None) != self.review_required or
+                self.review_reason is not None and
+                (type(self.review_reason) is not str or not _ID.fullmatch(self.review_reason))):
+            raise AcceptanceContractError("invalid_review_reason")
         if type(self.confidence_policy) is not str or not _ID.fullmatch(self.confidence_policy): raise AcceptanceContractError("invalid_confidence_policy")
         if self.confidence.as_tuple().exponent != -4: raise AcceptanceContractError("invalid_confidence")
+        _confidence_reasons(self.confidence_reasons)
     @classmethod
     def from_dict(cls,v:Mapping[str,Any])->"ObservedCheckingResultV2":
         required={"case_id","checker","outcome","reason","score","max_score","review_required","findings"}; optional={"privacy_violation","structured_output_valid","provider_failed","latency_ms","input_tokens","output_tokens","cost","review_reason","confidence_policy","confidence","confidence_reasons"}

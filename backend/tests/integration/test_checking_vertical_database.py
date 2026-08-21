@@ -1,9 +1,12 @@
-"""One genuine Phase 4.10 vertical through PostgreSQL and production boundaries."""
+"""One real PostgreSQL vertical through the complete Checking production path."""
+from __future__ import annotations
+
 import json
 import os
-from dataclasses import replace
+import re
+from dataclasses import asdict, replace
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
@@ -11,112 +14,286 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.application.checking_intake import CheckingIntakeRequest, CheckingIntakeService
 from app.application.checking_llm_rubric import ConfidencePolicy, LLMRubricChecker, OUTPUT_SCHEMA_VERSION, SYSTEM_MESSAGE
-from app.application.checking_provider import Pricing, PromptSpec, ProviderExecutionKey, ProviderExecutionService, ProviderResponse, ProviderUsage
+from app.application.checking_provider import (Pricing, PromptSpec, ProviderExecutionKey,
+    ProviderExecutionService, ProviderFailure, ProviderResponse, ProviderUsage)
 from app.application.checking_results import ConfidenceGatePolicy, ResultReplayConflict
-from app.application.checking_routing import CheckerRequest, CheckerType, route_snapshot
+from app.application.checking_routing import (CheckerOutcome, CheckerRequest, CheckerType,
+    ResultReason, route_snapshot)
 from app.application.checking_deterministic import execute_deterministic
 from app.application.student_assessments import normalize_answer
 from app.infrastructure.checking_intake_repository import SQLAlchemyCheckingIntakeUnitOfWorkFactory
-from app.infrastructure.checking_repository import CheckingRepository, SQLAlchemyCheckingResultPersistence, SQLAlchemyProviderAttemptStore
+from app.infrastructure.checking_repository import (CheckingRepository,
+    SQLAlchemyCheckingResultPersistence, SQLAlchemyProviderAttemptStore)
 
 URL = os.environ.get("TEST_DATABASE_URL", "")
 if URL and not URL.rsplit("/", 1)[-1].split("?", 1)[0].endswith("_test"):
     raise RuntimeError("Phase 4.10 requires a disposable database ending in _test")
 pytestmark = [pytest.mark.asyncio, pytest.mark.skipif(not URL, reason="TEST_DATABASE_URL is required")]
-TABLES = "cost_events,model_runs,checker_events,check_findings,check_results,prompt_versions,check_runs,assessment_audit_log,assessment_idempotency_keys,student_answers,student_submissions,assignment_participants,assignments,assessment_items,assessment_variants,assessments,students,class_groups,audit_log,task_error_links,rubric_items,rubrics,expected_solutions,accepted_answer_options,choice_option_rules,choice_scoring_policies,choice_options,accepted_answers,task_skill_links,task_versions,tasks,import_previews,typical_errors,skills,subtopics,topics,grades,subjects"
+TABLES = """cost_events,model_runs,checker_events,check_findings,check_results,
+prompt_versions,check_runs,assessment_audit_log,assessment_idempotency_keys,
+student_answers,student_submissions,assignment_participants,assignments,
+assessment_items,assessment_variants,assessments,students,class_groups,audit_log,
+choice_option_rules,choice_scoring_policies,accepted_answer_options,choice_options,
+accepted_answers,task_error_links,rubric_items,rubrics,expected_solutions,
+task_skill_links,task_versions,tasks,import_previews,typical_errors,skills,
+subtopics,topics,grades,subjects""".replace("\n", "")
 
 
 class SyntheticProvider:
-    """The sole fake: an implementation of the production LLM provider port."""
-    def __init__(self, rubric_item): self.rubric_item, self.calls = rubric_item, 0
+    """The only synthetic boundary: injected through the LLM provider port."""
+    def __init__(self, script): self.script, self.calls = list(script), 0
     async def evaluate(self, request):
-        self.calls += 1
-        candidate={"schema_version":"llm_rubric_output_v1","rubric_items":[{"rubric_item_id":str(self.rubric_item),"status":"met","suggested_points":"2","evidence":[{"source":"student_answer","kind":"quote","quote":"force equals mass times acceleration","start":0,"end":36}],"limitations":[]}],"findings":[],"teacher_summary":"technical","student_feedback_draft":"technical","model_limitations":[]}
-        return ProviderResponse("synthetic-response",json.dumps(candidate,separators=(",",":")),usage=ProviderUsage(17,11,3),latency_ms=999)
+        self.calls += 1; value = self.script.pop(0)
+        if isinstance(value, Exception): raise value
+        return value
 
 
-def gate(): return ConfidenceGatePolicy("phase410-gate-v1",Decimal("0.5000"),*(Decimal("0.1000"),)*4)
+class SyntheticClock:
+    def __init__(self): self.values = iter((10.000, 10.125, 20.000, 20.250, 30.000, 30.375))
+    def __call__(self): return next(self.values)
 
 
-async def seed(engine):
-    names=("actor","subject","grade","topic","subtopic","skill","error","group","student","assessment","variant","assignment","participant","submission","rubric","rubric_item")
-    ids={name:uuid4() for name in names}; kinds=("exact","choice","numeric","expression","llm","unanswered","manual","insufficient")
-    ids.update({f"task_{k}":uuid4() for k in kinds}); ids.update({f"version_{k}":uuid4() for k in kinds}); ids.update({f"item_{k}":uuid4() for k in kinds})
-    ids.update({"accepted_exact":uuid4(),"accepted_choice":uuid4(),"accepted_numeric":uuid4(),"accepted_expression":uuid4(),"accepted_manual":uuid4(),"option_a":uuid4(),"option_b":uuid4(),"choice_policy":uuid4()})
-    formats={"exact":"short_text","choice":"multiple_choice","numeric":"number","expression":"expression","llm":"long_text","unanswered":"short_text","manual":"expression","insufficient":"long_text"}
-    raw={"exact":"Alpha","choice":[str(ids["option_a"])],"numeric":"12.5","expression":"x+1","llm":"force equals mass times acceleration","unanswered":None,"manual":"x","insufficient":"work"}
-    async with engine.begin() as c:
-        await c.execute(text(f"TRUNCATE {TABLES} CASCADE"))
-        base=("INSERT INTO subjects(id,code,name) VALUES (:subject,'phase410','Phase 410')","INSERT INTO grades(id,number,name) VALUES (:grade,10,'10')","INSERT INTO topics(id,subject_id,grade_id,code,name) VALUES (:topic,:subject,:grade,'phase410','Phase 410')","INSERT INTO subtopics(id,topic_id,code,name) VALUES (:subtopic,:topic,'phase410','Phase 410')","INSERT INTO skills(id,subtopic_id,code,name) VALUES (:skill,:subtopic,'P410','Phase 410 skill')","INSERT INTO typical_errors(id,skill_id,code,title,description,severity) VALUES (:error,:skill,'P410E','Technical error','technical','major')","INSERT INTO class_groups(id,name,created_by) VALUES (:group,'PRIVATE CLASS',:actor)","INSERT INTO students(id,class_group_id,display_name) VALUES (:student,:group,'PRIVATE PERSON')","INSERT INTO assessments(id,title,created_by) VALUES (:assessment,'PRIVATE ASSESSMENT',:actor)","INSERT INTO assessment_variants(id,assessment_id,name,position) VALUES (:variant,:assessment,'A',1)","INSERT INTO assignments(id,assessment_id,class_group_id,start_at,due_at,created_by) VALUES (:assignment,:assessment,:group,clock_timestamp(),clock_timestamp()+interval '1 hour',:actor)","INSERT INTO assignment_participants(id,assignment_id,student_id,assigned_variant_id,variant_assigned_at) VALUES (:participant,:assignment,:student,:variant,clock_timestamp())","INSERT INTO student_submissions(id,assignment_participant_id,attempt_no,status,submitted_at) VALUES (:submission,:participant,1,'submitted',clock_timestamp())")
-        for sql in base: await c.execute(text(sql),ids)
-        for position,k in enumerate(kinds,1):
-            await c.execute(text("INSERT INTO tasks(id,subject_id,grade_id,topic_id,subtopic_id,created_by) VALUES (:task,:subject,:grade,:topic,:subtopic,:actor)"),{**ids,"task":ids[f"task_{k}"]})
-            await c.execute(text("INSERT INTO task_versions(id,task_id,version_no,statement,task_type,answer_format,difficulty,status,created_by,approved_by,approved_at) VALUES (:version,:task,1,:statement,'problem',:format,50,'approved',:actor,:actor,clock_timestamp())"),{**ids,"version":ids[f"version_{k}"],"task":ids[f"task_{k}"],"statement":f"PRIVATE TASK {k}","format":formats[k]})
-            await c.execute(text("INSERT INTO task_skill_links(task_version_id,skill_id,weight,is_primary) VALUES (:version,:skill,1,true)"),{**ids,"version":ids[f"version_{k}"]})
-            await c.execute(text("INSERT INTO assessment_items(id,variant_id,task_version_id,position,points) VALUES (:item,:variant,:version,:position,2)"),{**ids,"item":ids[f"item_{k}"],"version":ids[f"version_{k}"],"position":position})
-            if raw[k] is not None:
-                normalized=normalize_answer(formats[k],raw[k])
-                await c.execute(text("INSERT INTO student_answers(submission_id,assessment_item_id,raw_answer,normalized_answer) VALUES (:submission,:item,CAST(:raw AS jsonb),CAST(:normalized AS jsonb))"),{**ids,"item":ids[f"item_{k}"],"raw":json.dumps(raw[k]),"normalized":json.dumps(normalized)})
-        answers=(("exact","accepted_exact","Alpha","text","Alpha",None,"exact_text_v1"),("numeric","accepted_numeric","12.5","decimal",None,Decimal("12.5"),"decimal_v1"),("expression","accepted_expression","x+1","expression","x+1",None,"expression_identity_v1"),("manual","accepted_manual","x","expression","x",None,"expression_identity_v2"))
-        for kind,key,value,value_kind,canonical_text,canonical_decimal,policy in answers:
-            await c.execute(text("INSERT INTO accepted_answers(id,task_version_id,answer_value,value_kind,canonical_text,canonical_decimal,absolute_tolerance,relative_tolerance,normalization_policy_code,normalization_policy_version) VALUES (:id,:version,:value,:kind,:ct,:cd,0,0,:policy,1)"),{"id":ids[key],"version":ids[f"version_{kind}"],"value":value,"kind":value_kind,"ct":canonical_text,"cd":canonical_decimal,"policy":policy})
-        await c.execute(text("INSERT INTO choice_options(id,task_version_id,option_key,content,order_index) VALUES (:option_a,:version_choice,'a','PRIVATE OPTION A',0),(:option_b,:version_choice,'b','PRIVATE OPTION B',1)"),ids)
-        await c.execute(text("INSERT INTO accepted_answers(id,task_version_id,answer_value,value_kind) VALUES (:accepted_choice,:version_choice,'a','choice_set')"),ids)
-        await c.execute(text("INSERT INTO accepted_answer_options(accepted_answer_id,choice_option_id,task_version_id) VALUES (:accepted_choice,:option_a,:version_choice)"),ids)
-        await c.execute(text("INSERT INTO choice_scoring_policies(id,task_version_id,mode,policy_version) VALUES (:choice_policy,:version_choice,'all_or_nothing',1)"),ids)
-        await c.execute(text("INSERT INTO expected_solutions(task_version_id,solution_text,final_answer,solution_steps_json) VALUES (:version_llm,'PRIVATE SOLUTION','PRIVATE EXPECTED','[]'::jsonb)"),ids)
-        await c.execute(text("INSERT INTO rubrics(id,task_version_id,max_score,grading_mode,notes) VALUES (:rubric,:version_llm,2,'points','PRIVATE RUBRIC NOTES')"),ids)
-        await c.execute(text("INSERT INTO rubric_items(id,rubric_id,criterion,max_points,required,order_index) VALUES (:rubric_item,:rubric,'PRIVATE RUBRIC PROSE',2,true,0)"),ids)
-        await c.execute(text("INSERT INTO task_error_links(task_version_id,typical_error_id,detection_hint) VALUES (:version_llm,:error,'PRIVATE DETECTION')"),ids)
-    return ids,kinds
+async def _no_sleep(_): return None
+def _normalized(answer_format, raw):
+    return json.dumps(normalize_answer(answer_format, raw), ensure_ascii=False, separators=(",", ":"))
 
 
 async def test_phase410_real_postgresql_production_vertical():
-    engine=create_async_engine(URL); factory=async_sessionmaker(engine,expire_on_commit=False)
+    engine = create_async_engine(URL); factory = async_sessionmaker(engine, expire_on_commit=False)
+    names = ("actor", "subject", "grade", "topic", "subtopic", "skill", "typical_error",
+        "group", "student", "assessment", "variant", "assignment", "participant", "submission",
+        "rubric", "rubric_item", "expected_solution", "choice_policy", "choice_a", "choice_b",
+        "choice_c", "choice_answer", "exact_answer", "numeric_answer", "expression_answer",
+        "manual_answer", "unanswered_answer")
+    ids = {name: uuid4() for name in names}
+    item_names = ("exact", "choice", "numeric", "expression", "manual", "llm", "unanswered", "insufficient")
+    for name in item_names:
+        ids[f"task_{name}"], ids[f"version_{name}"], ids[f"item_{name}"] = uuid4(), uuid4(), uuid4()
+    tasks = (
+        ("exact", "problem", "short_text", "PRIVATE_TASK_STATEMENT_EXACT", Decimal("2.00")),
+        ("choice", "test", "multiple_choice", "PRIVATE_TASK_STATEMENT_CHOICE", Decimal("3.00")),
+        ("numeric", "calculation", "number", "PRIVATE_TASK_STATEMENT_NUMERIC", Decimal("2.50")),
+        ("expression", "calculation", "expression", "PRIVATE_TASK_STATEMENT_EXPRESSION", Decimal("1.50")),
+        ("manual", "calculation", "expression", "PRIVATE_TASK_STATEMENT_MANUAL", Decimal("1.50")),
+        ("llm", "essay", "long_text", "PRIVATE_TASK_STATEMENT_LLM", Decimal("4.00")),
+        ("unanswered", "problem", "short_text", "PRIVATE_TASK_STATEMENT_UNANSWERED", Decimal("1.00")),
+        ("insufficient", "calculation", "number", "PRIVATE_TASK_STATEMENT_INSUFFICIENT", Decimal("1.00")),
+    )
+    raw_answers = {"exact": "EXACT_PRIVATE_ANSWER",
+        "choice": [str(ids["choice_a"]), str(ids["choice_c"])], "numeric": "420042.00",
+        "expression": "PRIVATE_EXPRESSION_ANSWER", "manual": "PRIVATE_MANUAL_EXPRESSION",
+        "llm": "PRIVATE_NORMALIZED_ANSWER", "insufficient": "700007"}
     try:
-        ids,kinds=await seed(engine)
-        intake=CheckingIntakeService(SQLAlchemyCheckingIntakeUnitOfWorkFactory(factory))
-        run=await intake.create(CheckingIntakeRequest(ids["submission"],"phase410-real-vertical","routing-v1","checker-v1",gate().semantic_version,"fake-provider-v1"))
-        async with factory() as session,session.begin(): running=await CheckingRepository(session).transition_run(run.id,run.row_version,"running")
-        async with engine.connect() as c:
-            frozen=(await c.execute(text("SELECT input_snapshot,input_fingerprint FROM check_runs WHERE id=:r"),{"r":run.id})).one()
-        snapshot=frozen.input_snapshot; assert [x["assessment_item_id"] for x in snapshot["items"]]==[str(ids[f"item_{k}"]) for k in kinds]
-        decisions=route_snapshot(snapshot); provider=SyntheticProvider(ids["rubric_item"])
-        service=ProviderExecutionService(SQLAlchemyProviderAttemptStore(factory),provider,sleeper=lambda _: _nothing(),jitter=lambda:0,monotonic=iter((1,1.125)).__next__)
-        prompt=PromptSpec("checking.llm-rubric.phase410","1.0.0",SYSTEM_MESSAGE,OUTPUT_SCHEMA_VERSION)
-        drafts=[]
-        for item,decision in zip(snapshot["items"],decisions):
-            checkers=None
-            if decision.checker_type is CheckerType.LLM_RUBRIC and decision.execution_required:
-                checker=LLMRubricChecker(service,ProviderExecutionKey(run.id,ids["item_llm"]),provider_id="synthetic-port",model_id="phase410",prompt=prompt,settings={"temperature":"0"},confidence_policy=ConfidencePolicy(gate().semantic_version,Decimal("0.7500"),("rubric_evidence",)),pricing=Pricing("USD","phase410-price-v1","test",Decimal("0.01"),Decimal("0.02"),Decimal("0.005")))
-                checkers={CheckerType.LLM_RUBRIC:checker}
-            drafts.append(await execute_deterministic(CheckerRequest(item,decision),checkers))
-        persistence=SQLAlchemyCheckingResultPersistence(factory)
-        first=await persistence.finalize(run.id,running.row_version,gate(),tuple(drafts))
-        async with engine.connect() as c:
-            results=(await c.execute(text("SELECT assessment_item_id,checker_type,result_status,reason_code,score_suggested,max_score,needs_human_review,review_reason,confidence_policy_version,confidence,confidence_details,validated_result,summary,student_feedback_draft,teacher_summary,model_limitations FROM check_results WHERE check_run_id=:r ORDER BY assessment_item_id"),{"r":run.id})).mappings().all()
-            findings=(await c.execute(text("SELECT finding_type,rubric_item_id,typical_error_id,skill_id,snapshot_code,snapshot_title,snapshot_criterion,severity,confidence,evidence FROM check_findings f JOIN check_results r ON r.id=f.check_result_id WHERE r.check_run_id=:r ORDER BY f.id"),{"r":run.id})).mappings().all()
-            events=(await c.execute(text("SELECT event_type,from_status,to_status,reason_code,details FROM checker_events WHERE check_run_id=:r ORDER BY occurred_at,id"),{"r":run.id})).mappings().all()
-            attempts=(await c.execute(text("SELECT attempt_no,status,check_result_id,latency_ms,input_tokens,output_tokens,cached_tokens FROM model_runs WHERE check_run_id=:r ORDER BY attempt_no"),{"r":run.id})).mappings().all()
-            costs=(await c.execute(text("SELECT amount FROM cost_events e JOIN model_runs m ON m.id=e.model_run_id WHERE m.check_run_id=:r"),{"r":run.id})).scalars().all()
-        by_item={str(x["assessment_item_id"]):x for x in results}; assert len(by_item)==len(kinds)==8
-        expected={"exact":("exact","correct","exact_match",Decimal("2"),False),"choice":("multiple_choice","correct","choice_match",Decimal("2"),False),"numeric":("numeric","correct","numeric_match",Decimal("2"),False),"expression":("structured_expression","correct","expression_identity_match",Decimal("2"),False),"llm":("llm_rubric","correct","llm_rubric_evaluated",Decimal("2"),True),"unanswered":("exact","incorrect","unanswered",Decimal("0"),False),"manual":("manual_required","manual_required","routing_manual_required",None,True),"insufficient":("manual_required","insufficient_rubric","routing_insufficient_rubric",None,True)}
-        for kind,want in expected.items():
-            row=by_item[str(ids[f"item_{kind}"])]; assert tuple(row[x] for x in ("checker_type","result_status","reason_code","score_suggested","needs_human_review"))==want; assert row["max_score"]==Decimal("2"); assert row["confidence_policy_version"]==gate().semantic_version; assert row["confidence"].as_tuple().exponent==-4; assert row["confidence_details"]["reasons"]==sorted(row["confidence_details"]["reasons"],key=lambda x:list(__import__('app.application.checking_results',fromlist=['ConfidenceReason']).ConfidenceReason).index(__import__('app.application.checking_results',fromlist=['ConfidenceReason']).ConfidenceReason(x)))
-        assert first.run_status=="completed_with_review_required" and first.item_count==first.result_count==8 and first.review_required_count==3
-        assert len(attempts)==1 and attempts[0]["attempt_no"]==1 and attempts[0]["status"]=="succeeded" and attempts[0]["check_result_id"] and attempts[0]["latency_ms"]==125 and tuple(attempts[0][x] for x in ("input_tokens","output_tokens","cached_tokens"))==(17,11,3)
-        assert costs and all(type(x) is Decimal for x in costs); assert first.total_measured_provider_latency==125 and first.input_tokens==17 and first.output_tokens==11 and first.cached_tokens==3
-        assert len(events)==12 and [x["event_type"] for x in events]==["run_created","run_transition","model_attempt",*(["result_recorded"]*8),"run_transition"]; assert sum(x["event_type"]=="run_transition" and x["to_status"] in ("completed","completed_with_review_required") for x in events)==1; assert provider.calls==1
-        before=(len(results),len(findings),len(events),len(attempts)); replay=await persistence.finalize(run.id,running.row_version,gate(),tuple(drafts)); assert replay==first
-        with pytest.raises(ResultReplayConflict): await persistence.finalize(run.id,running.row_version,gate(),tuple([replace(drafts[0],summary="changed"),*drafts[1:]]))
-        async with engine.begin() as c:
-            after=tuple((await c.execute(text("SELECT (SELECT count(*) FROM check_results WHERE check_run_id=:r),(SELECT count(*) FROM check_findings f JOIN check_results x ON x.id=f.check_result_id WHERE x.check_run_id=:r),(SELECT count(*) FROM checker_events WHERE check_run_id=:r),(SELECT count(*) FROM model_runs WHERE check_run_id=:r)"),{"r":run.id})).one()); assert after==before
-            await c.execute(text("UPDATE assignments SET status='closed',closed_at=clock_timestamp(),closed_by=:actor WHERE id=:assignment"),ids); await c.execute(text("UPDATE tasks SET archived_at=clock_timestamp() WHERE id=:task"),{"task":ids["task_exact"]})
-        async with engine.connect() as c: assert await c.scalar(text("SELECT input_fingerprint FROM check_runs WHERE id=:r"),{"r":run.id})==frozen.input_fingerprint
-        private=["PRIVATE","raw_answer","normalized_answer","accepted_answers","statement","solution","rubric","raw_output",str(ids["student"]),str(ids["participant"]),str(ids["assignment"]),str(ids["group"])]
-        persisted=json.dumps({"results":[dict(x) for x in results],"findings":[dict(x) for x in findings],"events":[dict(x) for x in events],"observability":first.__dict__},default=str,sort_keys=True)
-        assert not any(value in persisted for value in private)
-    finally: await engine.dispose()
+        async with engine.begin() as connection:
+            await connection.execute(text(f"TRUNCATE {TABLES} CASCADE"))
+            for statement in (
+                "INSERT INTO subjects(id,code,name) VALUES (:subject,'phase410','Phase 410')",
+                "INSERT INTO grades(id,number,name) VALUES (:grade,10,'10')",
+                "INSERT INTO topics(id,subject_id,grade_id,code,name) VALUES (:topic,:subject,:grade,'phase410','Phase 410')",
+                "INSERT INTO subtopics(id,topic_id,code,name) VALUES (:subtopic,:topic,'phase410','Phase 410')",
+                "INSERT INTO skills(id,subtopic_id,code,name) VALUES (:skill,:subtopic,'skill_technical_v1','technical_skill_v1')",
+                "INSERT INTO typical_errors(id,skill_id,code,title,description,severity) VALUES (:typical_error,:skill,'error_technical_v1','PRIVATE_TYPICAL_ERROR_TITLE','PRIVATE_TYPICAL_ERROR_DESCRIPTION','high')",
+                "INSERT INTO class_groups(id,name,created_by) VALUES (:group,'PRIVATE_GROUP',:actor)",
+                "INSERT INTO students(id,class_group_id,display_name) VALUES (:student,:group,'PRIVATE_PERSON')",
+                "INSERT INTO assessments(id,title,created_by) VALUES (:assessment,'PRIVATE_ASSESSMENT',:actor)",
+                "INSERT INTO assessment_variants(id,assessment_id,name,position) VALUES (:variant,:assessment,'A',1)"):
+                await connection.execute(text(statement), ids)
+            for position, (name, task_type, answer_format, statement, points) in enumerate(tasks, 1):
+                values = {**ids, "task": ids[f"task_{name}"], "version": ids[f"version_{name}"],
+                    "item": ids[f"item_{name}"], "position": position, "task_type": task_type,
+                    "answer_format": answer_format, "statement": statement, "points": points}
+                await connection.execute(text("INSERT INTO tasks(id,subject_id,grade_id,topic_id,subtopic_id,created_by) VALUES (:task,:subject,:grade,:topic,:subtopic,:actor)"), values)
+                await connection.execute(text("INSERT INTO task_versions(id,task_id,version_no,statement,task_type,answer_format,difficulty,status,created_by,approved_by,approved_at) VALUES (:version,:task,1,:statement,CAST(:task_type AS task_type),CAST(:answer_format AS answer_format),50,'approved',:actor,:actor,clock_timestamp())"), values)
+                await connection.execute(text("INSERT INTO task_skill_links(task_version_id,skill_id,weight,is_primary) VALUES (:version,:skill,1,true)"), values)
+                await connection.execute(text("INSERT INTO assessment_items(id,variant_id,task_version_id,position,points) VALUES (:item,:variant,:version,:position,:points)"), values)
+            accepted_rows = (
+                ("exact_answer", "version_exact", "text", "EXACT_PRIVATE_ANSWER", None, "exact_text_v1"),
+                ("numeric_answer", "version_numeric", "decimal", None, Decimal("420042"), "decimal_v1"),
+                ("expression_answer", "version_expression", "expression", "PRIVATE_EXPRESSION_ANSWER", None, "expression_identity_v1"),
+                ("manual_answer", "version_manual", "expression", "DIFFERENT_PRIVATE_EXPRESSION", None, "expression_identity_v1"),
+                ("unanswered_answer", "version_unanswered", "text", "PRIVATE_UNANSWERED_ACCEPTED", None, "exact_text_v1"))
+            for answer, version, kind, canonical_text, canonical_decimal, policy in accepted_rows:
+                await connection.execute(text("INSERT INTO accepted_answers(id,task_version_id,answer_value,value_kind,canonical_text,canonical_decimal,absolute_tolerance,relative_tolerance,normalization_policy_code,normalization_policy_version) VALUES (:answer,:version,:answer_value,:kind,:canonical_text,:canonical_decimal,:absolute,:relative,:policy,1)"),
+                    {"answer": ids[answer], "version": ids[version], "answer_value": canonical_text or str(canonical_decimal),
+                     "kind": kind, "canonical_text": canonical_text, "canonical_decimal": canonical_decimal,
+                     "absolute": Decimal("0") if kind == "decimal" else None,
+                     "relative": Decimal("0") if kind == "decimal" else None, "policy": policy})
+            for order, key in enumerate(("choice_a", "choice_b", "choice_c")):
+                await connection.execute(text("INSERT INTO choice_options(id,task_version_id,option_key,content,order_index) VALUES (:option,:version,:key,:content,:order)"),
+                    {"option": ids[key], "version": ids["version_choice"], "key": key,
+                     "content": f"PRIVATE_OPTION_{key}", "order": order})
+            await connection.execute(text("INSERT INTO accepted_answers(id,task_version_id,answer_value,value_kind) VALUES (:answer,:version,'technical-choice','choice_set')"),
+                {"answer": ids["choice_answer"], "version": ids["version_choice"]})
+            for key in ("choice_a", "choice_b"):
+                await connection.execute(text("INSERT INTO accepted_answer_options(accepted_answer_id,choice_option_id,task_version_id) VALUES (:answer,:option,:version)"),
+                    {"answer": ids["choice_answer"], "option": ids[key], "version": ids["version_choice"]})
+            await connection.execute(text("INSERT INTO choice_scoring_policies(id,task_version_id,mode,policy_version) VALUES (:policy,:version,'per_option',1)"),
+                {"policy": ids["choice_policy"], "version": ids["version_choice"]})
+            for key, role, weight in (("choice_a", "correct", "0.600000"), ("choice_b", "correct", "0.400000"), ("choice_c", "distractor", "-0.200000")):
+                await connection.execute(text("INSERT INTO choice_option_rules(policy_id,choice_option_id,task_version_id,role,weight) VALUES (:policy,:option,:version,:role,:weight)"),
+                    {"policy": ids["choice_policy"], "option": ids[key], "version": ids["version_choice"],
+                     "role": role, "weight": Decimal(weight)})
+            await connection.execute(text("INSERT INTO expected_solutions(id,task_version_id,solution_text,final_answer,solution_steps_json) VALUES (:expected_solution,:version,'PRIVATE_EXPECTED_SOLUTION','PRIVATE_FINAL_ANSWER',CAST(:steps AS jsonb))"),
+                {"expected_solution": ids["expected_solution"], "version": ids["version_llm"], "steps": json.dumps(["PRIVATE_SOLUTION_STEP"])})
+            await connection.execute(text("INSERT INTO rubrics(id,task_version_id,max_score,grading_mode,notes) VALUES (:rubric,:version,2,'points','PRIVATE_RUBRIC_PROSE')"),
+                {"rubric": ids["rubric"], "version": ids["version_llm"]})
+            await connection.execute(text("INSERT INTO rubric_items(id,rubric_id,criterion,max_points,required,common_failure,order_index) VALUES (:item,:rubric,'criterion_v1',2,true,'PRIVATE_COMMON_FAILURE',0)"),
+                {"item": ids["rubric_item"], "rubric": ids["rubric"]})
+            await connection.execute(text("INSERT INTO task_error_links(task_version_id,typical_error_id,detection_hint) VALUES (:version,:error,'PRIVATE_DETECTION_HINT')"),
+                {"version": ids["version_llm"], "error": ids["typical_error"]})
+            for statement in (
+                "INSERT INTO assignments(id,assessment_id,class_group_id,start_at,due_at,created_by) VALUES (:assignment,:assessment,:group,clock_timestamp(),clock_timestamp()+interval '1 hour',:actor)",
+                "INSERT INTO assignment_participants(id,assignment_id,student_id,assigned_variant_id,variant_assigned_at) VALUES (:participant,:assignment,:student,:variant,clock_timestamp())",
+                "INSERT INTO student_submissions(id,assignment_participant_id,attempt_no,status,submitted_at) VALUES (:submission,:participant,1,'submitted',clock_timestamp())"):
+                await connection.execute(text(statement), ids)
+            formats = {name: fmt for name, _, fmt, _, _ in tasks}
+            for name, raw in raw_answers.items():
+                await connection.execute(text("INSERT INTO student_answers(submission_id,assessment_item_id,raw_answer,normalized_answer) VALUES (:submission,:item,CAST(:raw AS jsonb),CAST(:normalized AS jsonb))"),
+                    {"submission": ids["submission"], "item": ids[f"item_{name}"],
+                     "raw": json.dumps(raw, ensure_ascii=False), "normalized": _normalized(formats[name], raw)})
 
+        intake = CheckingIntakeService(SQLAlchemyCheckingIntakeUnitOfWorkFactory(factory))
+        run = await intake.create(CheckingIntakeRequest(ids["submission"], "phase-4.10.3",
+            "checking_routing_contract_v1", "checking_checkers_v1", "confidence_v1",
+            "checking_prompt_model_policy_v1"))
+        ids["run"] = run.id
+        async with engine.connect() as connection:
+            persisted = (await connection.execute(text("SELECT input_snapshot,input_fingerprint,status::text,row_version FROM check_runs WHERE id=:run"), {"run": run.id})).mappings().one()
+        snapshot = persisted["input_snapshot"]; original_snapshot = json.loads(json.dumps(snapshot))
+        original_fingerprint = persisted["input_fingerprint"]
+        assert persisted["status"] == "pending" and len(snapshot["items"]) == 8
+        assert [item["assessment_item_id"] for item in snapshot["items"]] == [str(ids[f"item_{name}"]) for name in item_names]
+        for item in snapshot["items"]:
+            if item["raw_answer"] is not None:
+                assert item["normalized_answer"] == normalize_answer(item["answer_format"], item["raw_answer"])
+        async with factory() as session, session.begin():
+            running = await CheckingRepository(session).transition_run(run.id, run.row_version, "running")
 
-async def _nothing(): pass
+        candidate = {"schema_version": OUTPUT_SCHEMA_VERSION,
+            "rubric_items": [{"rubric_item_id": str(ids["rubric_item"]), "status": "partial",
+                "suggested_points": "1", "evidence": [], "limitations": []}],
+            "findings": [{"finding_type": "rubric_miss", "rubric_item_id": str(ids["rubric_item"]),
+                "typical_error_id": str(ids["typical_error"]), "skill_id": None,
+                "message": "PRIVATE_PROVIDER_CANDIDATE_PROSE"}],
+            "teacher_summary": "PRIVATE_PROVIDER_TEACHER_PROSE",
+            "student_feedback_draft": "PRIVATE_PROVIDER_STUDENT_PROSE", "model_limitations": []}
+        provider = SyntheticProvider((
+            ProviderResponse("invalid-attempt", "not-json", usage=ProviderUsage(5, 2, 1)),
+            ProviderFailure("transport"),
+            ProviderResponse("success-attempt", json.dumps(candidate, separators=(",", ":")), usage=ProviderUsage(17, 11, 3))))
+        service = ProviderExecutionService(SQLAlchemyProviderAttemptStore(factory), provider,
+            sleeper=_no_sleep, jitter=lambda: 0, monotonic=SyntheticClock())
+        llm_checker = LLMRubricChecker(service, ProviderExecutionKey(run.id, ids["item_llm"]),
+            provider_id="phase410-synthetic", model_id="phase410-synthetic-v1",
+            prompt=PromptSpec("checking.llm-rubric", "1.0.0", SYSTEM_MESSAGE, OUTPUT_SCHEMA_VERSION),
+            settings={"temperature": "0", "seed": 4103, "max_output_tokens": 1000},
+            confidence_policy=ConfidencePolicy("confidence_v1", Decimal("0.7500"), ("rubric_evidence",)),
+            pricing=Pricing("USD", "price-v1", "phase410-test", Decimal("0.01"), Decimal("0.02"), Decimal("0.005")))
+        decisions = route_snapshot(snapshot)
+        assert [x.assessment_item_id for x in decisions] == [x["assessment_item_id"] for x in snapshot["items"]]
+        drafts = []
+        for item, decision in zip(snapshot["items"], decisions):
+            checkers = {CheckerType.LLM_RUBRIC: llm_checker} if decision.checker_type is CheckerType.LLM_RUBRIC and decision.execution_required else None
+            drafts.append(await execute_deterministic(CheckerRequest(item, decision), checkers))
+        drafts = tuple(drafts); assert provider.calls == 3
+        gate = ConfidenceGatePolicy("confidence_v1", Decimal("0.5000"), Decimal("0.1000"),
+            Decimal("0.1000"), Decimal("0.1000"), Decimal("0.1000"))
+        persistence = SQLAlchemyCheckingResultPersistence(factory)
+        first = await persistence.finalize(run.id, running.row_version, gate, drafts)
+
+        async with engine.connect() as connection:
+            run_row = (await connection.execute(text("SELECT status::text,input_snapshot,input_fingerprint,row_version FROM check_runs WHERE id=:run"), {"run": run.id})).mappings().one()
+            result_rows = (await connection.execute(text("SELECT i.position,r.id,r.assessment_item_id,r.checker_type::text,r.result_status::text,r.reason_code,r.score_suggested,r.max_score,r.needs_human_review,r.review_reason,r.confidence_policy_version,r.confidence,r.confidence_details,r.validated_result FROM check_results r JOIN assessment_items i ON i.id=r.assessment_item_id WHERE r.check_run_id=:run ORDER BY i.position"), {"run": run.id})).mappings().all()
+            finding_rows = (await connection.execute(text("SELECT f.finding_type::text,f.rubric_item_id,f.typical_error_id,f.skill_id,f.snapshot_code,f.snapshot_title,f.snapshot_criterion,f.severity::text,f.confidence,f.evidence,e.skill_id AS source_skill_id FROM check_findings f JOIN check_results r ON r.id=f.check_result_id LEFT JOIN typical_errors e ON e.id=f.typical_error_id WHERE r.check_run_id=:run ORDER BY f.id"), {"run": run.id})).mappings().all()
+            event_rows = (await connection.execute(text("SELECT event_type::text,from_status::text,to_status::text,reason_code,details FROM checker_events WHERE check_run_id=:run ORDER BY occurred_at,id"), {"run": run.id})).mappings().all()
+            model_rows = (await connection.execute(text("SELECT status::text,attempt_no,check_result_id,provider_request_id,latency_ms,input_tokens,output_tokens,cached_tokens,error_code FROM model_runs WHERE check_run_id=:run ORDER BY attempt_no"), {"run": run.id})).mappings().all()
+            cost_rows = (await connection.execute(text("SELECT m.attempt_no,c.currency,c.amount,c.input_tokens,c.output_tokens,c.cached_tokens,c.pricing_version,c.pricing_source FROM cost_events c JOIN model_runs m ON m.id=c.model_run_id WHERE m.check_run_id=:run ORDER BY m.attempt_no"), {"run": run.id})).mappings().all()
+        assert run_row["status"] == "completed_with_review_required"
+        assert run_row["input_snapshot"] == original_snapshot and run_row["input_fingerprint"] == original_fingerprint
+        assert len(result_rows) == len(snapshot["items"]) == 8
+        assert [x["assessment_item_id"] for x in result_rows] == [UUID(x["assessment_item_id"]) for x in snapshot["items"]]
+        expected = (
+            ("exact", "correct", "exact_match", Decimal("2.00"), Decimal("2.00"), False, None, Decimal("1.0000"), ["deterministic_proof"]),
+            ("multiple_choice", "partially_correct", "choice_partial", Decimal("1.20"), Decimal("3.00"), False, None, Decimal("1.0000"), ["deterministic_proof"]),
+            ("numeric", "correct", "numeric_match", Decimal("2.50"), Decimal("2.50"), False, None, Decimal("1.0000"), ["deterministic_proof"]),
+            ("structured_expression", "correct", "expression_identity_match", Decimal("1.50"), Decimal("1.50"), False, None, Decimal("1.0000"), ["deterministic_proof"]),
+            ("structured_expression", "manual_required", "expression_equivalence_unproven", None, Decimal("1.50"), True, "expression_equivalence_unproven", Decimal("0.0000"), ["manual_required", "below_review_threshold"]),
+            ("llm_rubric", "partially_correct", "llm_rubric_evaluated", Decimal("2.00"), Decimal("4.00"), True, "llm_human_review_required", Decimal("0.6500"), ["llm_calibrated_base", "missing_rubric_evidence"]),
+            ("exact", "incorrect", "unanswered", Decimal("0.00"), Decimal("1.00"), False, None, Decimal("1.0000"), ["unanswered"]),
+            ("manual_required", "insufficient_rubric", "routing_insufficient_rubric", None, Decimal("1.00"), True, "missing_typed_accepted_answer", Decimal("0.0000"), ["insufficient_rubric", "below_review_threshold"]))
+        for row, values in zip(result_rows, expected):
+            assert (row["checker_type"], row["result_status"], row["reason_code"], row["score_suggested"],
+                row["max_score"], row["needs_human_review"], row["review_reason"], row["confidence"],
+                row["confidence_details"]["reasons"]) == values
+            assert row["confidence_policy_version"] == "confidence_v1"
+            assert re.fullmatch(r"[a-z0-9_]{1,64}", row["reason_code"])
+            assert row["confidence_details"]["effective"] == format(row["confidence"], ".4f")
+        assert len(finding_rows) == 1
+        finding = finding_rows[0]
+        assert (finding["finding_type"], finding["rubric_item_id"], finding["typical_error_id"], finding["source_skill_id"]) == ("rubric", ids["rubric_item"], ids["typical_error"], ids["skill"])
+        assert finding["skill_id"] is None and finding["snapshot_criterion"] == "criterion_v1"
+        assert finding["snapshot_code"] is None and finding["snapshot_title"] is None
+        assert finding["severity"] == "major" and finding["confidence"] == Decimal("0.6500")
+        assert set(finding["evidence"]) == {"schema_version", "source_finding_kind", "rubric_item_id", "typical_error_id", "skill_id", "reason_code"}
+        expected_events = ["run_created", "run_transition"] + ["model_attempt"] * 3 + ["result_recorded"] * 8 + ["run_transition"]
+        assert [x["event_type"] for x in event_rows] == expected_events
+        assert [(x["from_status"], x["to_status"]) for x in event_rows if x["event_type"] == "run_transition"] == [("pending", "running"), ("running", "completed_with_review_required")]
+        assert sum(x["to_status"] == "completed_with_review_required" for x in event_rows) == 1
+        assert all(len(json.dumps(x["details"], sort_keys=True)) <= 1000 for x in event_rows)
+        llm_result_id = next(x["id"] for x in result_rows if x["checker_type"] == "llm_rubric")
+        assert [(x["status"], x["attempt_no"], x["error_code"]) for x in model_rows] == [("invalid", 1, "invalid_json"), ("failed", 2, "transport"), ("succeeded", 3, None)]
+        assert all(x["check_result_id"] == llm_result_id for x in model_rows)
+        assert [x["latency_ms"] for x in model_rows] == [125, 250, 375]
+        assert [(x["input_tokens"], x["output_tokens"], x["cached_tokens"]) for x in model_rows] == [(5, 2, 1), (0, 0, 0), (17, 11, 3)]
+        assert [(x["attempt_no"], x["amount"]) for x in cost_rows] == [(1, Decimal("0.09500000")), (3, Decimal("0.40500000"))]
+        assert first.item_count == first.result_count == 8 and first.review_required_count == 3 and first.finding_count == 1
+        assert first.result_counts_by_status == (("correct", 3), ("incorrect", 1), ("insufficient_rubric", 1), ("manual_required", 1), ("partially_correct", 2))
+        assert first.result_counts_by_checker_type == (("exact", 2), ("llm_rubric", 1), ("manual_required", 1), ("multiple_choice", 1), ("numeric", 1), ("structured_expression", 2))
+        assert first.result_counts_by_reason == (("choice_partial", 1), ("exact_match", 1),
+            ("expression_equivalence_unproven", 1), ("expression_identity_match", 1),
+            ("llm_rubric_evaluated", 1), ("numeric_match", 1),
+            ("routing_insufficient_rubric", 1), ("unanswered", 1))
+        assert first.model_attempt_counts_by_status == (("failed", 1), ("invalid", 1), ("succeeded", 1))
+        assert first.provider_retry_count == 3 and first.total_measured_provider_latency == 750
+        assert (first.input_tokens, first.output_tokens, first.cached_tokens) == (22, 13, 4)
+        assert first.costs == (("USD", "price-v1", "phase410-test", "0.50000000"),)
+
+        async def counts():
+            async with engine.connect() as connection:
+                return tuple((await connection.execute(text("SELECT (SELECT count(*) FROM check_results WHERE check_run_id=:run),(SELECT count(*) FROM check_findings f JOIN check_results r ON r.id=f.check_result_id WHERE r.check_run_id=:run),(SELECT count(*) FROM checker_events WHERE check_run_id=:run),(SELECT count(*) FROM model_runs WHERE check_run_id=:run),(SELECT count(*) FROM model_runs WHERE check_run_id=:run AND check_result_id IS NOT NULL)"), {"run": run.id})).one())
+        before_replay = await counts(); replay = await persistence.finalize(run.id, running.row_version, gate, drafts)
+        assert replay == first and await counts() == before_replay
+        changed = replace(drafts[0], outcome=CheckerOutcome.INCORRECT,
+            reason_code=ResultReason.EXACT_MISMATCH, score_suggested=Decimal("0.00"))
+        with pytest.raises(ResultReplayConflict):
+            await persistence.finalize(run.id, running.row_version, gate, (changed,) + drafts[1:])
+        assert await counts() == before_replay
+        privacy_payload = {"results": [{"validated_result": x["validated_result"], "confidence_details": x["confidence_details"]} for x in result_rows],
+            "findings": [dict(x) for x in finding_rows], "events": [dict(x) for x in event_rows], "observability": asdict(first)}
+        serialized = json.dumps(privacy_payload, ensure_ascii=False, sort_keys=True, default=str)
+        forbidden = ("EXACT_PRIVATE_ANSWER", "420042.00", "PRIVATE_EXPRESSION_ANSWER",
+            "PRIVATE_MANUAL_EXPRESSION", "700007", str(ids["choice_a"]), str(ids["choice_c"]),
+            "PRIVATE_NORMALIZED_ANSWER", "PRIVATE_UNANSWERED_ACCEPTED",
+            "PRIVATE_TASK_STATEMENT", "PRIVATE_EXPECTED_SOLUTION", "PRIVATE_FINAL_ANSWER", "PRIVATE_SOLUTION_STEP",
+            "PRIVATE_RUBRIC_PROSE", "PRIVATE_COMMON_FAILURE", "PRIVATE_PROVIDER_CANDIDATE_PROSE",
+            "PRIVATE_PROVIDER_TEACHER_PROSE", "PRIVATE_PROVIDER_STUDENT_PROSE", "not-json", "PRIVATE_PERSON",
+            str(ids["student"]), str(ids["participant"]), str(ids["assignment"]), str(ids["group"]))
+        assert not any(secret in serialized for secret in forbidden)
+
+        historical_results = json.loads(json.dumps([dict(x) for x in result_rows], default=str))
+        historical_findings = json.loads(json.dumps([dict(x) for x in finding_rows], default=str))
+        historical_events = json.loads(json.dumps([dict(x) for x in event_rows], default=str))
+        async with engine.begin() as connection:
+            await connection.execute(text("UPDATE assignments SET status='closed',closed_at=clock_timestamp(),closed_by=:actor WHERE id=:assignment"), ids)
+            await connection.execute(text("UPDATE tasks SET archived_at=clock_timestamp() WHERE id=:task"), {"task": ids["task_llm"]})
+        async with engine.connect() as connection:
+            after = (await connection.execute(text("SELECT input_snapshot,input_fingerprint FROM check_runs WHERE id=:run"), {"run": run.id})).mappings().one()
+            after_results = (await connection.execute(text("SELECT i.position,r.id,r.assessment_item_id,r.checker_type::text,r.result_status::text,r.reason_code,r.score_suggested,r.max_score,r.needs_human_review,r.review_reason,r.confidence_policy_version,r.confidence,r.confidence_details,r.validated_result FROM check_results r JOIN assessment_items i ON i.id=r.assessment_item_id WHERE r.check_run_id=:run ORDER BY i.position"), {"run": run.id})).mappings().all()
+            after_findings = (await connection.execute(text("SELECT f.finding_type::text,f.rubric_item_id,f.typical_error_id,f.skill_id,f.snapshot_code,f.snapshot_title,f.snapshot_criterion,f.severity::text,f.confidence,f.evidence,e.skill_id AS source_skill_id FROM check_findings f JOIN check_results r ON r.id=f.check_result_id LEFT JOIN typical_errors e ON e.id=f.typical_error_id WHERE r.check_run_id=:run ORDER BY f.id"), {"run": run.id})).mappings().all()
+            after_events = (await connection.execute(text("SELECT event_type::text,from_status::text,to_status::text,reason_code,details FROM checker_events WHERE check_run_id=:run ORDER BY occurred_at,id"), {"run": run.id})).mappings().all()
+        assert after["input_snapshot"] == original_snapshot and after["input_fingerprint"] == original_fingerprint
+        assert json.loads(json.dumps([dict(x) for x in after_results], default=str)) == historical_results
+        assert json.loads(json.dumps([dict(x) for x in after_findings], default=str)) == historical_findings
+        assert json.loads(json.dumps([dict(x) for x in after_events], default=str)) == historical_events
+    finally:
+        await engine.dispose()
