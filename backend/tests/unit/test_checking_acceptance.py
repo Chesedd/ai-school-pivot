@@ -77,11 +77,28 @@ def test_confidence_reasons_reject_duplicates_order_unknown_and_overlong(kind,re
  with pytest.raises(AcceptanceContractError,match="invalid_confidence_reasons"):
   replace(value,**{field:reasons})
 
-@pytest.mark.parametrize('field,value',[('review_required',True),('review_reason','changed'),('confidence_policy','changed'),('confidence',Decimal('0.0000')),('confidence_reasons',('changed',)),('structured_output_valid',False),('provider_failed',True)])
-def test_per_case_output_gates_are_fatal(field,value):
- d=dataset();obs=list(observations(d)); from dataclasses import replace; x=obs[0]
- changed=replace(x,**{field:value})
- obs[0]=changed; assert not evaluate_golden_dataset(d,obs,AcceptanceThresholdPolicy()).accepted
+@pytest.mark.parametrize("gate", ["review_state", "review_reason", "confidence_policy", "confidence", "confidence_reasons", "structured_output_valid", "provider_failed"])
+def test_per_case_output_gates_are_fatal(gate):
+ d=dataset();obs=list(observations(d)); scored={"correct","incorrect","partially_correct"}; index=0
+ if gate=="review_state":
+  index=next(i for i,x in enumerate(obs) if x.outcome in scored and not x.review_required)
+  changes={"review_required":True,"review_reason":"acceptance_review"}
+ elif gate=="review_reason":
+  index=next(i for i,x in enumerate(obs) if x.outcome in scored and x.review_required)
+  assert obs[index].review_reason is not None
+  changes={"review_reason":"changed"}
+ elif gate=="confidence_reasons":
+  index=next(i for i,x in enumerate(obs) if x.confidence_reasons != ("unanswered",))
+  changes={"confidence_reasons":("unanswered",)}
+ else:
+  changes={
+   "confidence_policy":{"confidence_policy":"changed"},
+   "confidence":{"confidence":Decimal("0.0000")},
+   "structured_output_valid":{"structured_output_valid":False},
+   "provider_failed":{"provider_failed":True},
+  }[gate]
+ obs[index]=replace(obs[index],**changes)
+ assert not evaluate_golden_dataset(d,obs,AcceptanceThresholdPolicy()).accepted
 
 def test_maximum_score_mismatch_is_individually_fatal():
  d=dataset();obs=list(observations(d)); from dataclasses import replace
