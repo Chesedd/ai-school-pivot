@@ -40,7 +40,7 @@ async def db(engine):
     async with engine.begin() as connection:
         current = await connection.scalar(text("SELECT current_database()"))
         assert current.endswith("_test")
-        await connection.execute(text("TRUNCATE assessment_audit_log, assessment_idempotency_keys, student_answers, student_submissions, assignment_participants, assignments, assessment_items, assessment_variants, assessments, students, class_groups, audit_log, task_skill_links, task_versions, tasks, import_previews, skills, subtopics, topics, grades, subjects CASCADE"))
+        await connection.execute(text("TRUNCATE assessment_audit_log, assessment_idempotency_keys, student_answers, student_submissions, assignment_participants, assignments, assessment_items, assessment_variants, assessments, students, class_groups, audit_log, task_skill_links, task_versions, tasks, skills, subtopics, topics, grades, subjects CASCADE"))
         catalog = {key: uuid4() for key in ("subject", "grade", "topic")}
         for sql in ("INSERT INTO subjects(id,code,name) VALUES (:subject,'assessment-test','Assessment test')", "INSERT INTO grades(id,number,name) VALUES (:grade,7,'7')", "INSERT INTO topics(id,subject_id,grade_id,code,name) VALUES (:topic,:subject,:grade,'assessment-test','Assessment test')"):
             await connection.execute(text(sql), catalog)

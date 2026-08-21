@@ -81,28 +81,6 @@ class CatalogRecord:
     number: int | None = None
 
 @dataclass(frozen=True)
-class ImportCatalogContext:
-    subjects: dict[UUID, CatalogRecord]
-    grades: dict[UUID, CatalogRecord]
-    topics: dict[UUID, CatalogRecord]
-    subtopics: dict[UUID, CatalogRecord]
-    skills: dict[UUID, CatalogRecord]
-
-@dataclass(frozen=True)
-class ImportTagRecord:
-    id: UUID; name: str; normalized_name: str; category_code: str
-    category_sort_order: int; subject_id: UUID | None; status: str
-    replacement: dict | None; updated_at: datetime
-
-    @property
-    def fingerprint(self) -> dict[str, object]:
-        return {"id":str(self.id),"updated_at":self.updated_at.isoformat(),"status":self.status,
-            "subject_id":str(self.subject_id) if self.subject_id else None,
-            "normalized_name":self.normalized_name,
-            "replacement_tag_id":str(self.replacement["id"]) if self.replacement else None}
-
-
-@dataclass(frozen=True)
 class SkillLinkDTO:
     id: UUID
     skill_id: UUID
@@ -688,13 +666,7 @@ class ContentBankRepository(Protocol):
     async def archive_task_versions(self, task_id: UUID, archived_at: datetime) -> ArchiveResult | None: ...
     async def append_audit(self, event: AuditEventRecord) -> None: ...
     async def list_audit(self, task_id: UUID, offset: int, limit: int, action: str | None) -> AuditPage | None: ...
-    async def save_import_preview(self, preview: ImportPreviewRecord) -> None: ...
-    async def get_import_preview_for_update(self, token: UUID) -> ImportPreviewRecord | None: ...
-    async def mark_import_preview_committed(self, token: UUID, at: datetime) -> None: ...
-    async def get_import_catalog_context(self, commands: tuple[CreateTaskCommand, ...]) -> ImportCatalogContext: ...
     async def find_duplicate_candidates(self, query: DuplicateQuery) -> tuple[DuplicateCandidateRecord, ...]: ...
-    async def get_import_tags_by_names(self, names: set[str]) -> dict[str, ImportTagRecord]: ...
-    async def lock_import_tags(self, ids: tuple[UUID, ...]) -> dict[UUID, ImportTagRecord]: ...
 
 
 class UnitOfWork(Protocol):
@@ -736,21 +708,15 @@ class CreateTaskOperation:
     """Shared transaction-neutral task/v1/skills/audit operation."""
     def __init__(self, repository: ContentBankRepository) -> None: self.repository = repository
 
-    async def create(self, command: CreateTaskCommand, actor: ActorContext, catalog: ImportCatalogContext | None = None) -> TaskDTO:
+    async def create(self, command: CreateTaskCommand, actor: ActorContext) -> TaskDTO:
             details = self.validate_values(command)
             repository = self.repository
-            if catalog is None:
-                subject = await repository.get_subject(command.subject_id)
-                grade = await repository.get_grade(command.grade_id)
-                topic = await repository.get_topic(command.topic_id)
-                subtopic = await repository.get_subtopic(command.subtopic_id) if command.subtopic_id else None
-                skills = await repository.get_skills({link.skill_id for link in command.initial_version.skills})
-            else:
-                subject, grade = catalog.subjects.get(command.subject_id), catalog.grades.get(command.grade_id)
-                topic = catalog.topics.get(command.topic_id)
-                subtopic = catalog.subtopics.get(command.subtopic_id) if command.subtopic_id else None
-                skills = catalog.skills
-            if command.folder_id is not None and catalog is None:
+            subject = await repository.get_subject(command.subject_id)
+            grade = await repository.get_grade(command.grade_id)
+            topic = await repository.get_topic(command.topic_id)
+            subtopic = await repository.get_subtopic(command.subtopic_id) if command.subtopic_id else None
+            skills = await repository.get_skills({link.skill_id for link in command.initial_version.skills})
+            if command.folder_id is not None:
                 folder = await repository.get_folder(command.folder_id)
                 if folder is None:
                     from app.application.folders import FolderDomainError
@@ -863,149 +829,6 @@ class DuplicateCheckService:
         return DuplicateResult(bool(items), items)
 
 
-@dataclass(frozen=True)
-class ImportRow:
-    row_number: int
-    command: CreateTaskCommand
-    tag_names: tuple[str, ...] = ()
-
-@dataclass(frozen=True)
-class ImportIssue:
-    code: str; field: str; message: str; severity: str = "error"
-    duplicate_candidates: tuple[DuplicateCandidate, ...] = ()
-    duplicate_row_number: int | None = None
-    value: str | None = None
-
-@dataclass(frozen=True)
-class ImportResolvedTag:
-    input: str; tag_id: UUID; name: str; category_code: str; subject_id: UUID | None
-    status: str; replacement: dict | None; fingerprint: dict[str, object]
-
-@dataclass(frozen=True)
-class ImportPreviewRow:
-    row_number: int; status: str; command: CreateTaskCommand; issues: tuple[ImportIssue, ...]
-    raw_tag_names: tuple[str, ...] = ()
-    resolved_tags: tuple[ImportResolvedTag, ...] = ()
-
-@dataclass(frozen=True)
-class ImportPreviewRecord:
-    import_token: UUID; format: str; actor_id: UUID; rows: tuple[ImportPreviewRow, ...]
-    created_at: datetime; expires_at: datetime; committed_at: datetime | None = None
-
-class ImportPreviewService:
-    def __init__(self, uow: UnitOfWork, ttl_minutes: int = 30) -> None: self.uow, self.ttl_minutes = uow, ttl_minutes
-    async def preview(self, format: str, rows: tuple[ImportRow, ...], actor: ActorContext) -> ImportPreviewRecord:
-        if format not in {"csv", "xlsx"} or not rows or len(rows) > 500 or len({r.row_number for r in rows}) != len(rows):
-            raise IssuesError("import_validation_error", "Импорт содержит ошибки.", [ValidationDetail("rows", "invalid", "Нужны 1–500 строк с уникальными row_number.")])
-        now = datetime.now(timezone.utc); checked = []
-        async with self.uow:
-            op = CreateTaskOperation(self.uow.repository)
-            catalog = await self.uow.repository.get_import_catalog_context(tuple(r.command for r in rows))
-            from app.application.managed_tags import TagError, normalize_tag_name
-            normalized_by_row: dict[int,list[tuple[str,str]]] = {}
-            unique_names: set[str] = set()
-            for row in rows:
-                values=[]
-                for raw in row.tag_names:
-                    try: normalized=normalize_tag_name(raw)
-                    except TagError: normalized=""
-                    values.append((raw,normalized))
-                    if normalized: unique_names.add(normalized)
-                normalized_by_row[row.row_number]=values
-            tag_catalog=await self.uow.repository.get_import_tags_by_names(unique_names) if unique_names else {}
-            for row in rows:
-                issues = [ImportIssue(x.code, x.field, x.message) for x in op.validate_values(row.command)]
-                # Catalog validation uses the same operation without writes via a dedicated check.
-                issues += [ImportIssue(x.code, x.field, x.message) for x in self._catalog_issues(catalog, row.command)]
-                resolved=[]; seen=set()
-                for raw,normalized in normalized_by_row[row.row_number]:
-                    if not normalized:
-                        issues.append(ImportIssue("tag_name_invalid","tags","Имя тега некорректно.",value=raw)); continue
-                    if normalized in seen:
-                        issues.append(ImportIssue("duplicate_import_tag","tags","Тег повторяется и учтён один раз.","warning",value=raw)); continue
-                    seen.add(normalized); tag=tag_catalog.get(normalized)
-                    if not tag:
-                        issues.append(ImportIssue("unknown_import_tag","tags","Тег не найден.",value=raw)); continue
-                    item=ImportResolvedTag(raw,tag.id,tag.name,tag.category_code,tag.subject_id,tag.status,tag.replacement,tag.fingerprint)
-                    resolved.append((tag,item))
-                    if tag.status!="active": issues.append(ImportIssue("deprecated_import_tag","tags","Тег устарел.",value=raw))
-                    if tag.subject_id not in (None,row.command.subject_id): issues.append(ImportIssue("tag_subject_mismatch","tags","Тег относится к другому предмету.",value=raw))
-                if len(seen)>8: issues.append(ImportIssue("tag_limit_exceeded","tags","Можно указать не более восьми тегов."))
-                resolved.sort(key=lambda x:(0 if x[0].subject_id==row.command.subject_id else 1,x[0].category_sort_order,x[0].normalized_name,str(x[0].id)))
-                command=replace(row.command,tag_ids=tuple(x[0].id for x in resolved))
-                fatal=any(x.severity=="error" for x in issues)
-                checked.append(ImportPreviewRow(row.row_number,"invalid" if fatal else "valid",command,tuple(issues),row.tag_names,tuple(x[1] for x in resolved)))
-            # Invalid rows never incur a duplicate query. Warnings do not alter
-            # row validity or commit eligibility.
-            enriched=[]
-            for current in checked:
-                issues=list(current.issues)
-                if current.status == "valid":
-                    primary=next(x.skill_id for x in current.command.initial_version.skills if x.is_primary)
-                    duplicates=await DuplicateCheckService(self.uow.repository).check(
-                        DuplicateQuery(current.command.initial_version.statement,primary))
-                    if duplicates.items:
-                        issues.append(ImportIssue("possible_duplicate","statement","Найдены возможные дубликаты.","warning",duplicates.items))
-                enriched.append(replace(current,issues=tuple(issues)))
-            # Only the later row points to the earlier row: no symmetric warnings.
-            for index,current in enumerate(enriched):
-                if current.status != "valid": continue
-                for previous in enriched[:index]:
-                    if previous.status != "valid": continue
-                    q=DuplicateQuery(current.command.initial_version.statement,
-                        next(x.skill_id for x in current.command.initial_version.skills if x.is_primary))
-                    p=previous.command
-                    same_statement=normalize_duplicate_text(q.statement)==normalize_duplicate_text(p.initial_version.statement)
-                    same_skill=q.primary_skill_id==next(x.skill_id for x in p.initial_version.skills if x.is_primary)
-                    similarity=application_trigram_similarity(q.statement,p.initial_version.statement)
-                    if same_statement or similarity >= DUPLICATE_HIGH_SIMILARITY_THRESHOLD or (same_skill and similarity >= DUPLICATE_SKILL_SIMILARITY_THRESHOLD):
-                        issue=ImportIssue("possible_duplicate","statement","Возможный дубликат другой строки preview.","warning",(),previous.row_number)
-                        enriched[index]=replace(current,issues=current.issues+(issue,)); current=enriched[index]
-            checked=enriched
-            record = ImportPreviewRecord(uuid4(), format, actor.actor_id, tuple(checked), now, now + __import__('datetime').timedelta(minutes=self.ttl_minutes))
-            await self.uow.repository.save_import_preview(record); await self.uow.commit(); return record
-
-    @staticmethod
-    def _catalog_issues(catalog: ImportCatalogContext, command: CreateTaskCommand) -> list[ValidationDetail]:
-        d=[]; subject=catalog.subjects.get(command.subject_id); grade=catalog.grades.get(command.grade_id); topic=catalog.topics.get(command.topic_id); sub=catalog.subtopics.get(command.subtopic_id) if command.subtopic_id else None; skills=catalog.skills
-        if not subject:d.append(ValidationDetail("subject_id","not_found","Предмет не найден."))
-        if not grade:d.append(ValidationDetail("grade_id","not_found","Класс не найден."))
-        if not topic:d.append(ValidationDetail("topic_id","not_found","Тема не найдена."))
-        elif topic.subject_id!=command.subject_id or topic.grade_id!=command.grade_id:d.append(ValidationDetail("topic_id","invalid_relation","Нарушена иерархия каталога."))
-        if command.subtopic_id and not sub:d.append(ValidationDetail("subtopic_id","not_found","Подтема не найдена."))
-        elif sub and sub.topic_id!=command.topic_id:d.append(ValidationDetail("subtopic_id","invalid_relation","Нарушена иерархия каталога."))
-        for i,x in enumerate(command.initial_version.skills):
-            s=skills.get(x.skill_id)
-            if not s:d.append(ValidationDetail(f"initial_version.skills.{i}.skill_id","not_found","Навык не найден."))
-            elif s.topic_id!=command.topic_id or (command.subtopic_id and s.subtopic_id!=command.subtopic_id):d.append(ValidationDetail(f"initial_version.skills.{i}.skill_id","invalid_relation","Нарушена иерархия каталога."))
-        return d
-
-class ImportCommitService:
-    def __init__(self, uow: UnitOfWork) -> None: self.uow=uow
-    async def commit(self, token: UUID, row_numbers: tuple[int,...], actor: ActorContext) -> tuple[tuple[int,TaskDTO],...]:
-        if not row_numbers or len(row_numbers)>500 or len(set(row_numbers))!=len(row_numbers): raise IssuesError("import_validation_error","Некорректный выбор строк.",[ValidationDetail("row_numbers","invalid","Укажите уникальные номера строк.")])
-        async with self.uow:
-            p=await self.uow.repository.get_import_preview_for_update(token)
-            if not p or p.actor_id!=actor.actor_id: raise NotFoundError("Preview импорта не найден.","import_token_not_found")
-            now=datetime.now(timezone.utc)
-            if p.committed_at: raise ConflictError("Token уже использован.","import_token_already_committed")
-            if p.expires_at<=now: raise GoneError("Token истёк.","import_token_expired")
-            by_no={r.row_number:r for r in p.rows}; selected=[]
-            for n in row_numbers:
-                r=by_no.get(n)
-                if not r or r.status!="valid": raise IssuesError("import_validation_error","Некорректный выбор строк.",[ValidationDetail("row_numbers","invalid","Выбрана отсутствующая или невалидная строка.")])
-                selected.append(r)
-            referenced=tuple(sorted({tag_id for r in selected for tag_id in r.command.tag_ids},key=str))
-            locked=await self.uow.repository.lock_import_tags(referenced) if referenced else {}
-            for r in selected:
-                for resolved in r.resolved_tags:
-                    current=locked.get(resolved.tag_id)
-                    if current is None or current.fingerprint!=resolved.fingerprint or current.status!="active" or current.subject_id not in (None,r.command.subject_id):
-                        raise ConflictError("Каталог тегов изменился. Выполните preview повторно.","tag_catalog_changed")
-            result=[]; op=CreateTaskOperation(self.uow.repository)
-            catalog=await self.uow.repository.get_import_catalog_context(tuple(r.command for r in selected))
-            for r in selected: result.append((r.row_number,await op.create(r.command,actor,catalog)))
-            await self.uow.repository.mark_import_preview_committed(token,now); await self.uow.commit(); return tuple(result)
 
 
 class ListTasksService:

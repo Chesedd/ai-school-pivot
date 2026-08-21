@@ -18,7 +18,7 @@ if URL and not URL.rsplit("/",1)[-1].split("?",1)[0].endswith("_test"):
     raise RuntimeError("checking result tests require a disposable database ending in _test")
 pytestmark=pytest.mark.asyncio
 
-TABLES="cost_events,model_runs,checker_events,check_findings,check_results,prompt_versions,check_runs,assessment_audit_log,assessment_idempotency_keys,student_answers,student_submissions,assignment_participants,assignments,assessment_items,assessment_variants,assessments,students,class_groups,audit_log,task_error_links,rubric_items,rubrics,expected_solutions,task_skill_links,task_versions,tasks,import_previews,typical_errors,skills,subtopics,topics,grades,subjects"
+TABLES="cost_events,model_runs,checker_events,check_findings,check_results,prompt_versions,check_runs,assessment_audit_log,assessment_idempotency_keys,student_answers,student_submissions,assignment_participants,assignments,assessment_items,assessment_variants,assessments,students,class_groups,audit_log,task_error_links,rubric_items,rubrics,expected_solutions,task_skill_links,task_versions,tasks,typical_errors,skills,subtopics,topics,grades,subjects"
 
 @pytest_asyncio.fixture
 async def db():

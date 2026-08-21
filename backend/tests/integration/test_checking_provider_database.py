@@ -28,7 +28,7 @@ async def context():
     engine=create_async_engine(URL); factory=async_sessionmaker(engine,expire_on_commit=False)
     ids={key:uuid4() for key in ("actor","subject","grade","topic","task","version","group","student","assessment","variant","item","assignment","participant","submission")}
     async with engine.begin() as c:
-        await c.execute(text("TRUNCATE cost_events,model_runs,checker_events,check_findings,check_results,prompt_versions,check_runs,assessment_audit_log,assessment_idempotency_keys,student_answers,student_submissions,assignment_participants,assignments,assessment_items,assessment_variants,assessments,students,class_groups,audit_log,task_skill_links,task_versions,tasks,import_previews,skills,subtopics,topics,grades,subjects CASCADE"))
+        await c.execute(text("TRUNCATE cost_events,model_runs,checker_events,check_findings,check_results,prompt_versions,check_runs,assessment_audit_log,assessment_idempotency_keys,student_answers,student_submissions,assignment_participants,assignments,assessment_items,assessment_variants,assessments,students,class_groups,audit_log,task_skill_links,task_versions,tasks,skills,subtopics,topics,grades,subjects CASCADE"))
         sqls=("INSERT INTO subjects(id,code,name) VALUES (:subject,'provider-test','Provider')",
           "INSERT INTO grades(id,number,name) VALUES (:grade,7,'7')",
           "INSERT INTO topics(id,subject_id,grade_id,code,name) VALUES (:topic,:subject,:grade,'provider','Provider')",
