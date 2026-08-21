@@ -59,6 +59,6 @@ try {
 6. Откройте direct URL с active, deprecated, unknown и duplicate `tag_id`; проверьте labels, дедупликацию и отсутствие raw UUID/error.
 7. Проверьте списки и карточку: 0, 1–3 и 4+ тегов, доступное `+N`; убедитесь по Network, что нет запросов тегов на строку.
 8. Проверьте клавиатуру, visible focus и ширины 320/375/520 px, затем browser console и backend logs: без raw JSON, stack trace и неожиданных ошибок.
-9. Проверьте lifecycle, методику, folders, difficulty 1–100, pagination, импорт CSV/XLSX и единственную action «Импорт».
+9. Проверьте lifecycle, методику, folders, difficulty 1–100, pagination.
 
 Теги физически не удаляются. В dev создавайте только канонические теги, которые планируется сохранить; mutation smoke безопаснее выполнять на disposable БД с `_test`.

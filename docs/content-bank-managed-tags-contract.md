@@ -34,7 +34,7 @@ assignment/copy/read/AND-filter фазы 2 реализованы без нов�
   preview token ограничен actor и сроком, блокируется при commit и одноразовый; commit
   повторно проверяет catalogs и атомарно создаёт выбранные задания и audit;
 - frontend содержит create form, карточку, history/status actions,
-  `MethodologyEditor`, compact list filters, folder browser и единую страницу импорта;
+  `MethodologyEditor`, compact list filters, folder browser;
 - actor во всех routes сейчас берётся из `Settings.content_bank_dev_actor_id` и
   помещается в `ActorContext`. Модели пользователей, sessions, ownership и ролей нет.
 
@@ -388,7 +388,6 @@ Idempotency не скрывает stale write: уже deprecated с совпав
 - в `TaskCardVersionResponse` для `latest_version`;
 - в каждый history version DTO, чтобы выбранная версия показывала свой набор;
 - в `TaskListItemResponse` и task item внутри subject/folder contents;
-- в import preview resolved data и commit item.
 
 Task version/card shape:
 
@@ -471,46 +470,6 @@ count/sort projections; поэтому не выбран.
 Глобальный поиск `q` остаётся по title/statement/source; tag names не добавляются в
 `search_vector`, чтобы rename не требовал перестройки версий. Явный `tag_id` filter
 комбинируется с `q` через AND.
-
-## 13. CSV/XLSX import
-
-В конец `Tasks` headers добавляется `tags`. Формат: `ОГЭ; С параметром; Для повторения`.
-Внутри canonical name `;` запрещён. CSV quoting остаётся обязанностью CSV parser:
-сама cell может содержать semicolon-separated tags независимо от delimiter файла.
-XLSX template добавляет обычную string cell/header и instruction, без formulas.
-
-Preview для каждой строки split по `;`, применяет §6, игнорирует пустые fragments как
-ошибку `tag_name_invalid`, безопасные normalized duplicates удаляет с warning
-`duplicate_import_tag`, находит **только exact normalized** existing tags, требует
-active, проверяет subject и максимум 8. Unknown/deprecated/mismatch делает строку
-`invalid`; новые tags не создаются.
-
-```json
-{
-  "row_number":2,
-  "status":"invalid",
-  "normalized":{"subject_id":"...","title":"..."},
-  "resolved_tags":[
-    {"input":" ОГЭ","tag_id":"...","name":"ОГЭ","category_code":"exam","subject_id":null}
-  ],
-  "issues":[
-    {"severity":"error","code":"unknown_import_tag","field":"tags","message":"Тег не найден.","value":"Для повторения"}
-  ]
-}
-```
-
-Server preview record сохраняет для каждой resolved позиции `tag_id` и immutable
-catalog fingerprint: `updated_at`, status, subject scope, normalized name; общий token
-также сохраняет fingerprint набора. Commit использует IDs из preview token, **не ищет
-заново display names**. Под row lock проверяет, что tag существует, остаётся active,
-его `updated_at`, normalized name и scope совпадают. Rename, deprecation или scope
-change после preview дают 409 `tag_catalog_changed`, весь commit rollback и требуют
-новый preview. Совместимый unrelated catalog change не блокирует commit.
-
-Tags initial v1 вставляются атомарно с task, version, skills, import token consumption и
-`task_created`; version tag audit events создаются по initial empty→resolved diff.
-Commit response использует shape §10.5. Ни одна выбранная строка не импортируется при
-ошибке любой выбранной строки.
 
 ## 14. Audit
 

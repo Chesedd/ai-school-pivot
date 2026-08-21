@@ -23,7 +23,7 @@ npm run dev -- --host 0.0.0.0
 
 ## Ручной checklist
 
-1. Открыть `http://localhost:5173/content-bank/admin/tags`, reload, Back/Forward, active «Теги»; «Импорт» должен быть один.
+1. Открыть `http://localhost:5173/content-bank/admin/tags`, reload, Back/Forward, active «Теги»; ссылки импорта быть не должно.
 2. Проверить loading/error/retry, empty/filtered empty, search Enter/trim/reset, category/status/subject-compatible filters, URL и pagination.
 3. Создать global/subject tags; проверить validation, fuzzy similarity confirmation, exact duplicate и double submit.
 4. Изменить name/category/scope. Проверить PATCH и `expected_updated_at`; в двух вкладках получить CAS без silent overwrite.

@@ -17,7 +17,6 @@ class Settings(BaseSettings):
     content_bank_dev_actor_id: UUID
     assessment_dev_student_id: UUID
     cors_origins: str = "http://localhost:5173"
-    content_bank_import_preview_ttl_minutes: int = 30
     attachment_storage_path: str = "/tmp/ai-school-pivot-attachments"
     attachment_max_bytes: int = 5 * 1024 * 1024
 

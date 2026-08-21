@@ -22,7 +22,7 @@
   схема, состояния, API, конкурентность, идемпотентность и исторические гарантии
   до начала production-реализации.
 - [Контракт управляемых тегов Content Bank](content-bank-managed-tags-contract.md) —
-  схема, API, импорт, поиск, аудит и границы pilot-доступа.
+  схема, API, поиск, аудит и границы pilot-доступа.
 - [Финальная техническая приёмка Content Bank](content-bank-stage2-acceptance.md).
 - [Контракт иерархии папок заданий](content-bank-folder-hierarchy-contract.md) —
   исходный contract-first дизайн; backend и frontend папок уже реализованы.

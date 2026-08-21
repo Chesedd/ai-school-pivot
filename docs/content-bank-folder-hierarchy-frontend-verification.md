@@ -6,7 +6,7 @@
 
 Состояние задания сериализуется в query string с именами API (`grade_id`, `topic_id`, `subtopic_id`, `skill_id`, `task_type`, `status`, `difficulty_min`, `difficulty_max`, `q`, `offset`, `limit`, `sort_by`, `sort_order`). Пустые и неизвестные enum-значения не отправляются. Изменения создают browser-history entries, поэтому reload и Back/Forward восстанавливают состояние. Без явной сортировки backend выбирает `created_at desc`, а при непустом `q` — `relevance desc`. Фильтры затрагивают только direct tasks: папки и breadcrumb сохраняются.
 
-На главной оставлена единственная стабильная точка импорта — ссылка **«Импорт»** в глобальной навигации. Удалены дубли из старой панели `TaskList` и его empty state; глобальная навигация доступна при пустом и непустом банке. Прямой `/content-bank/import` и root-only workflow не изменены.
+Глобальная навигация доступна при пустом и непустом банке; старый import workflow удалён.
 
 Название задания теперь является настоящей ссылкой на `/content-bank/tasks/{task_id}` в FolderBrowser и табличном TaskList. Правая ссылка «Открыть» удалена; пустое название получает ссылку-fallback «Задание без названия». Действие перемещения остаётся справа.
 
@@ -66,14 +66,13 @@ docker compose stop
 11. Проверить Back/Forward.
 12. Перейти во вложенную папку с активными фильтрами.
 13. При нулевом результате убедиться, что папки остаются.
-14. На главной проверить ровно одну ссылку импорта в навигации.
-15. Открыть import page и проверить preview/commit.
-16. Открыть карточку по ссылке в title.
-17. Проверить fallback для nullable/пустого title.
+14. На главной проверить отсутствие ссылки импорта в навигации.
+15. Открыть карточку по ссылке в title.
+16. Проверить fallback для nullable/пустого title.
 18. Пройти controls клавиатурой и проверить focus после add/remove.
 19. Проверить ширины 320, 375 и 520 px.
 20. Проверить browser console и Network: query names, direct endpoint, отсутствие stale rendering.
 
 ## Известные ограничения
 
-Импорт по-прежнему root-only. Нет drag-and-drop папок, recursive delete и импорта folder path. PostgreSQL integration tests требуют явно заданный `TEST_DATABASE_URL`; ручной browser checklist и визуальная проверка не объявляются пройденными этим документом.
+Нет drag-and-drop папок, recursive delete folder path. PostgreSQL integration tests требуют явно заданный `TEST_DATABASE_URL`; ручной browser checklist и визуальная проверка не объявляются пройденными этим документом.

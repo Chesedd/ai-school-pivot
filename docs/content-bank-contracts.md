@@ -15,11 +15,11 @@
 Content Bank хранит и предоставляет учебные задания и их методическое
 содержание: предметную классификацию, навыки, версии условия, эталоны,
 рубрики, допустимые ответы, типичные ошибки и подсказки. Он отвечает за
-жизненный цикл авторской версии задания, а также за импорт и поиск возможных
+жизненный цикл авторской версии задания, а также за поиск возможных
 дубликатов.
 
 В этап 2 входят этот каталог, справочники, версионирование, методические
-блоки, статусы, аудит, импорт и дедупликация. Не входят Assessment, отправка
+блоки, статусы, аудит и дедупликация. Не входят Assessment, отправка
 или хранение ответов учеников, AI-проверка, авторизация и аналитика. Будущая
 работа ученика должна ссылаться на конкретную неизменяемую `task_version`, а
 не только на `task`.
@@ -88,7 +88,6 @@ Content Bank хранит и предоставляет учебные зада�
 | Архивировать | `task_id`, reason | архивная карточка | task существует | `not_found`, `conflict` |
 | Методические блоки | task/version, блок или набор блоков | сохранённые version-scoped блоки | только draft | `validation_error`, `conflict` |
 | Справочники | тип справочника, optional filters | subjects/grades/topics/subtopics/skills | — | `validation_error` |
-| Import preview | format, rows/file reference | строки, ошибки, warnings, import_token | валидный формат | `import_validation_error` |
 | Import commit | `import_token`, выбранные строки | summary созданных задач | preview действителен и не устарел | `import_validation_error`, `conflict` |
 | Найти дубликаты | текст условия, классификация, optional task_id | candidates с причиной и score | непустое условие | `validation_error` |
 
@@ -112,7 +111,6 @@ class ContentBankService(Protocol):
     def approve_version(self, command: VersionCommand, actor: ActorContext) -> TaskVersionDTO: ...
     def archive_task(self, command: ArchiveTaskCommand, actor: ActorContext) -> TaskCardDTO: ...
     def save_methodology(self, command: SaveMethodologyCommand, actor: ActorContext) -> MethodologyDTO: ...
-    def preview_import(self, command: ImportPreviewCommand, actor: ActorContext) -> ImportPreviewDTO: ...
     def commit_import(self, command: ImportCommitCommand, actor: ActorContext) -> ImportResultDTO: ...
 
 class ContentBankQueryService(Protocol):
@@ -145,8 +143,6 @@ class ContentBankRepository(Protocol):
     def save_methodology(self, methodology: MethodologyRecord) -> MethodologyDTO: ...
     def archive_task(self, task_id: UUID, archived_at: datetime, actor_id: UUID, reason: str | None) -> TaskCardDTO: ...
     def append_audit(self, event: AuditEventRecord) -> None: ...
-    def save_import_preview(self, preview: ImportPreviewRecord) -> ImportPreviewDTO: ...
-    def get_import_preview_for_update(self, token: UUID) -> ImportPreviewRecord | None: ...
 ```
 
 `create_task_with_initial_version` атомарно создаёт `tasks`, v1 `task_versions`
@@ -178,8 +174,6 @@ offset-пагинацию: `offset` (>=0, default 0), `limit` (1..100, default 2
 | POST `/tasks/{task_id}/versions/{version_no}/approve` | `{}` | 200 TaskVersion | 404, 409, 422 |
 | POST `/tasks/{task_id}/archive` | optional `{ "reason": "..." }` | 200 TaskCard | 404, 409 |
 | GET `/catalog/{catalog_name}` | `catalog_name`: subjects, grades, topics, subtopics, skills; optional parent filters | 200 CatalogDTO | 404, 422 |
-| POST `/imports/preview` | `{ "format": "csv", "rows": [...] }` (`format`: `csv` или `xlsx`) | 200 ImportPreview | 422 |
-| POST `/imports/commit` | `{ "import_token": "uuid", "row_numbers": [1] }` | 201 ImportResult | 409, 422 |
 | POST `/task-versions/check-duplicates` | `{ "statement": "...", "primary_skill_id": "uuid", "final_answer": null, "exclude_task_id": null, "limit": 5 }` | 200 DuplicateCandidates | 422 |
 
 ## 2.11A Базовая дедупликация (warning-only)
@@ -209,54 +203,10 @@ SQL-область состоит только из неархивных `tasks`
 исторические версии и `exclude_task_id` исключаются. Primary skill присоединён
 с условием `is_primary`, поэтому дополнительные skill links не размножают item.
 
-Проверка никогда не блокирует создание, импорт, смену статуса или утверждение.
+Проверка никогда не блокирует создание, смену статуса или утверждение.
 Создание выполняет проверку в той же UoW до insert, всё равно атомарно создаёт
 task и ровно один `task_created`, а `TaskResponse` аддитивно возвращает
-`duplicate_warnings` (по умолчанию `[]`) из тех же candidate items. Каждая
-backend-valid preview-строка получает warning `possible_duplicate` с
-`duplicate_candidates`; строка остаётся valid/can_commit и доступна commit.
-Для дубликата внутри файла warning только у более поздней строки содержит
-`duplicate_row_number` более ранней строки. Невалидные строки DB-проверку не
-запускают. Preview остаётся read-only для content entities и lifecycle token не
-меняется. В этой фазе отсутствуют LLM, embeddings, vector DB и внешние сервисы.
-
-Для табличного импорта с header в строке 1 первая data row имеет
-`row_number: 2`. Поэтому пример warning на следующей data row использует
-исходный номер строки, а не индекс массива: `{"code":"possible_duplicate",
-"severity":"warning","duplicate_candidates":[],"duplicate_row_number":2}`.
-
-### 2.10B Табличный frontend-импорт
-
-CSV и лист `Tasks` книги XLSX используют точные 13 колонок (порядок колонок
-может быть произвольным):
-
-```text
-subject_code
-grade_number
-topic_code
-subtopic_code
-title
-statement
-task_type
-answer_format
-difficulty
-source
-primary_skill_code
-primary_skill_weight
-additional_skills
-```
-
-Frontend принимает только `.csv` и `.xlsx`; форматы `.xls` и `.xlsm` не
-поддерживаются. Размер файла ограничен 5 МиБ до parsing, а таблица — 500
-непустыми строками данных. Для XLSX допускается ровно один лист с точным
-именем `Tasks`; остальные листы не участвуют в импорте.
-
-Frontend не выполняет формулы. Публичный browser API `read-excel-file` может
-вернуть сохранённое вычисленное значение формульной ячейки и не гарантирует
-предоставление признака исходной формулы. Поэтому MVP не гарантирует
-обнаружение и отклонение всех формульных ячеек. Создаваемый frontend
-XLSX-шаблон формул не содержит. Ручной разбор XLSX ZIP/XML, добавление
-формульного движка и исполнение содержимого ячеек запрещены.
+`duplicate_warnings` (по умолчанию `[]`) из тех же candidate items. В этой фазе отсутствуют LLM, embeddings, vector DB и внешние сервисы.
 
 ## 2.9A Audit Log
 
@@ -416,49 +366,6 @@ HTTP-валидация пути, query или JSON возвращает 422 `va
 Неожиданная ошибка — 500 `internal_error` без внутренних деталей и traceback.
 Каждая валидационная проблема всегда имеет `field`, `code`, `message`.
 
-## 18. Фаза 2.10A — token-based JSON import
-
-Backend не получает файлы: в 2.10B frontend разбирает CSV/XLSX, а сервер заново
-валидирует нормализованный JSON. Preview принимает `format` (`csv`/`xlsx`) и
-`rows` (1–500). Каждая строка содержит уникальный положительный `row_number` и
-ровно поля обычного create: `subject_id`, `grade_id`, `topic_id`, nullable
-`subtopic_id`, `initial_version` (`title`, `statement`, `task_type`,
-`answer_format`, `difficulty`, `source`, `skills` с `skill_id`, `weight`,
-`is_primary`). UUID и actor задания серверные; импорт всегда создаёт draft v1.
-
-```json
-{"format":"csv","rows":[{"row_number":2,"subject_id":"uuid","grade_id":"uuid","topic_id":"uuid","subtopic_id":"uuid","initial_version":{"title":"Циклы","statement":"Решите задачу","task_type":"problem","answer_format":"number","difficulty":25,"source":null,"skills":[{"skill_id":"uuid","weight":"1.0000","is_primary":true}]}}]}
-```
-
-`POST /api/content-bank/imports/preview` сохраняет только preview и возвращает
-`import_token`, `format`, `expires_at`, `can_commit`, summary с
-`rows_total/rows_valid/rows_invalid`, а также rows с `row_number`, `status` и
-issues (`code`, `field`, `message`, `severity`). Mixed preview допустим.
-
-`POST /api/content-bank/imports/commit` принимает
-`{"import_token":"uuid","row_numbers":[2]}`. Выбор обязан быть непустым,
-уникальным и включать только существующие valid rows. Ответ 201 содержит
-`imported_count` и items (`row_number`, `task_id`, `task_version_id`,
-`version_no`, `status`).
-
-Preview token — UUID, генерируемый сервером, принадлежит actor и действует 30
-минут (настройка `CONTENT_BANK_IMPORT_PREVIEW_TTL_MINUTES`). Он одноразовый.
-Commit блокирует preview через `SELECT FOR UPDATE`, создаёт все выбранные
-task/v1/skills/audit, отмечает `committed_at` и делает один commit. Любая ошибка
-откатывает всё, включая отметку. Коды lifecycle: `import_token_not_found` (404),
-`import_token_expired` (410), `import_token_already_committed` (409);
-структура/выбор строк — `import_validation_error` (422).
-
-PostgreSQL `import_previews` хранит token, format, actor_id, нормализованные rows
-и validation result в JSONB, created_at, expires_at, committed_at; исходный файл
-и секреты не сохраняются. Повторный новый preview тех же данных может создать
-новые UUID: semantic deduplication отложена до 2.11. Методика не импортируется.
-
-Возможный дубль не является фатальной ошибкой: успешные create/preview могут
-вернуть `warnings: [{"code":"duplicate_warning","message":"...",
-"candidate_task_ids":["uuid"]}]`. При commit клиент подтверждает решение
-выбором строк; только фактический конфликт состояния возвращает 409.
-
 ## 10. Статусы и переходы
 
 | Из | В | Команда | Предусловия / кто | Запрещённый результат |
@@ -498,7 +405,6 @@ skills, а числовые поля не отрицательны. Она по�
 | Список заданий | TaskPage, filters, catalog options | фильтровать, сортировать, перейти в карточку/создание | loading, empty, error с retry | GET `/tasks`, GET `/catalog/{catalog_name}` |
 | Создание/редактирование | catalogs, create payload или TaskCard/latest draft | создать, изменить draft, создать следующую версию, submit/return/approve | loading form, validation errors, saving, conflict, error | POST `/tasks`, PATCH version, POST version/status routes, catalogs |
 | Карточка | полный TaskCard, versions, methodology, audit | просмотреть, редактировать draft, статусные команды, архивировать | loading, not found, error, archived read-only | GET `/tasks/{task_id}` и соответствующие commands |
-| Импорт | rows/file input, ImportPreview, catalog options | preview, исправить вход, выбрать строки, commit, просмотреть warnings | idle, previewing, validation errors by row, committing, completed, error | POST `/imports/preview`, POST `/imports/commit`, catalogs |
 
 Это поведенческие контракты, а не требования к визуальному дизайну.
 
@@ -523,7 +429,7 @@ skills, а числовые поля не отрицательны. Она по�
 * **2.5** — полная карточка.
 * **2.6** — методическая структура.
 * **2.7** — статусы и переходы.
-* **2.8–2.11** — поиск, аудит, импорт и дедупликация.
+* **2.8–2.11** — поиск, аудит и дедупликация.
 
 Этот порядок — план последующих фаз, а не разрешение реализовывать их в фазе
 2.1.

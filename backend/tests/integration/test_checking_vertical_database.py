@@ -35,7 +35,7 @@ student_answers,student_submissions,assignment_participants,assignments,
 assessment_items,assessment_variants,assessments,students,class_groups,audit_log,
 choice_option_rules,choice_scoring_policies,accepted_answer_options,choice_options,
 accepted_answers,task_error_links,rubric_items,rubrics,expected_solutions,
-task_skill_links,task_versions,tasks,import_previews,typical_errors,skills,
+task_skill_links,task_versions,tasks,typical_errors,skills,
 subtopics,topics,grades,subjects""".replace("\n", "")
 
 

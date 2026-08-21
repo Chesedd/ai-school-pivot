@@ -4,7 +4,7 @@ Run against a migrated database whose name ends in ``_test``.  The guard is
 deliberately evaluated before any destructive cleanup.
 """
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 from uuid import UUID, uuid4
 
 import pytest
@@ -53,7 +53,7 @@ async def _cleanup_catalog() -> None:
             await _assert_test_database(session)
             await session.execute(
                 text(
-                    "TRUNCATE audit_log, task_skill_links, task_versions, tasks, import_previews, skills, "
+                    "TRUNCATE audit_log, task_skill_links, task_versions, tasks, skills, "
                     "subtopics, topics, grades, subjects CASCADE"
                 )
             )
@@ -65,7 +65,7 @@ async def catalog():
     async with async_session_factory() as session:
         async with session.begin():
             await _assert_test_database(session)
-            await session.execute(text("TRUNCATE audit_log, task_skill_links, task_versions, tasks, import_previews, skills, subtopics, topics, grades, subjects CASCADE"))
+            await session.execute(text("TRUNCATE audit_log, task_skill_links, task_versions, tasks, skills, subtopics, topics, grades, subjects CASCADE"))
             await session.execute(text("INSERT INTO subjects(id,code,name) VALUES (:id,'s','Subject')"), {"id": ids["subject"]})
             await session.execute(text("INSERT INTO grades(id,number,name) VALUES (:id,7,'Grade')"), {"id": ids["grade"]})
             await session.execute(text("INSERT INTO topics(id,subject_id,grade_id,code,name) VALUES (:id,:s,:g,'t','Topic'),(:other,:s,:g,'o','Other')"), {"id": ids["topic"], "other": ids["other_topic"], "s": ids["subject"], "g": ids["grade"]})
@@ -126,18 +126,6 @@ async def test_duplicate_endpoint_create_warning_exclude_and_audit(catalog):
     async with async_session_factory() as session:
         assert await session.scalar(text("SELECT count(*) FROM tasks"))==2
         assert await session.scalar(text("SELECT count(*) FROM audit_log WHERE action='task_created'"))==2
-
-
-async def test_import_duplicate_warning_stays_valid_and_commits(catalog):
-    data=payload(catalog); data["initial_version"]["statement"]="Unique preview duplicate text"
-    async with AsyncClient(transport=ASGITransport(app=app),base_url="http://test") as client:
-        await client.post("/api/content-bank/tasks",json=data)
-        preview=await client.post("/api/content-bank/imports/preview",json={"format":"csv","rows":[{**data,"row_number":1},{**data,"row_number":2}]})
-        body=preview.json(); committed=await client.post("/api/content-bank/imports/commit",json={"import_token":body["import_token"],"row_numbers":[1,2]})
-    assert body["can_commit"] and all(x["status"]=="valid" for x in body["rows"])
-    assert all(any(i["code"]=="possible_duplicate" for i in x["issues"]) for x in body["rows"])
-    assert any(i["duplicate_row_number"]==1 for i in body["rows"][1]["issues"])
-    assert committed.status_code==201 and committed.json()["imported_count"]==2
 
 
 async def test_create_is_atomic_and_server_owned(catalog):
@@ -671,115 +659,6 @@ async def test_archive_reason_is_atomic_and_idempotent_in_audit(catalog):
     archived = [item for item in audit["items"] if item["action"] == "task_archived"]
     assert len(archived) == 1 and archived[0]["reason"] == "obsolete"
     assert not any(item["action"] == "version_approved" for item in audit["items"])
-
-def import_preview_payload(ids, count=1):
-    return {"format":"csv","rows":[{"row_number":i+2,**payload(ids)} for i in range(count)]}
-
-async def _preview(client, catalog, data=None):
-    return await client.post('/api/content-bank/imports/preview',json=data or import_preview_payload(catalog))
-
-async def test_import_preview_persists_without_content_entities(catalog):
-    async with AsyncClient(transport=ASGITransport(app=app),base_url='http://test') as client: response=await _preview(client,catalog)
-    assert response.status_code == 200, response.text
-    assert response.json()['can_commit'] is True
-    async with async_session_factory() as session:
-        assert await session.scalar(text('SELECT count(*) FROM import_previews'))==1
-        for table in ('tasks','task_versions','task_skill_links','audit_log'): assert await session.scalar(text(f'SELECT count(*) FROM {table}'))==0
-        result = await session.execute(text('SELECT actor_id, expires_at-created_at, committed_at FROM import_previews'))
-        actor, ttl, committed_at = result.one()
-        assert actor == UUID(os.environ["CONTENT_BANK_DEV_ACTOR_ID"])
-        assert ttl == timedelta(minutes=int(os.environ.get("CONTENT_BANK_IMPORT_PREVIEW_TTL_MINUTES", "30")))
-        assert committed_at is None
-
-async def test_import_preview_mixed_and_hierarchy(catalog):
-    data=import_preview_payload(catalog,2); data['rows'][1]['topic_id']=str(catalog['other_topic'])
-    async with AsyncClient(transport=ASGITransport(app=app),base_url='http://test') as client: r=await _preview(client,catalog,data)
-    assert r.status_code==200 and r.json()['summary']=={'rows_total':2,'rows_valid':1,'rows_invalid':1}
-
-async def test_import_preview_standard_validation_envelope(catalog):
-    async with AsyncClient(transport=ASGITransport(app=app),base_url='http://test') as client: r=await client.post('/api/content-bank/imports/preview',json={'format':'csv','rows':[]})
-    assert r.status_code == 422, r.text
-    assert r.json()['error']['code'] == 'validation_error'
-    assert r.json()['error']['request_id']
-
-async def test_import_preview_501_rejected(catalog):
-    async with AsyncClient(transport=ASGITransport(app=app),base_url='http://test') as client: r=await _preview(client,catalog,import_preview_payload(catalog,501))
-    assert r.status_code==422
-
-async def test_import_commit_multiple_rows_and_read_models(catalog):
-    async with AsyncClient(transport=ASGITransport(app=app),base_url='http://test') as client:
-        p=await _preview(client,catalog,import_preview_payload(catalog,2)); token=p.json()['import_token']
-        r=await client.post('/api/content-bank/imports/commit',json={'import_token':token,'row_numbers':[2,3]})
-        card=await client.get('/api/content-bank/tasks/'+r.json()['items'][0]['task_id']); listed=await client.get('/api/content-bank/tasks',params={'q':'Test'})
-    assert r.status_code==201 and len({x['task_id'] for x in r.json()['items']})==2 and card.status_code==200 and listed.json()['total']==2
-    async with async_session_factory() as session:
-        assert await session.scalar(text("SELECT count(*) FROM task_versions WHERE version_no=1 AND status='draft'"))==2
-        assert await session.scalar(text('SELECT count(*) FROM task_skill_links'))==2
-        assert await session.scalar(text("SELECT count(*) FROM audit_log WHERE action='task_created'"))==2
-        assert await session.scalar(text('SELECT count(*) FROM import_previews WHERE committed_at IS NOT NULL'))==1
-
-async def test_import_mixed_invalid_then_valid_subset(catalog):
-    data=import_preview_payload(catalog,2); data['rows'][1]['subject_id']=str(uuid4())
-    async with AsyncClient(transport=ASGITransport(app=app),base_url='http://test') as client:
-        p=await _preview(client,catalog,data); token=p.json()['import_token']
-        bad=await client.post('/api/content-bank/imports/commit',json={'import_token':token,'row_numbers':[3]})
-        good=await client.post('/api/content-bank/imports/commit',json={'import_token':token,'row_numbers':[2]})
-    assert bad.status_code == 422, bad.text
-    assert bad.json()['error']['code'] == 'import_validation_error'
-    assert good.status_code == 201, good.text
-
-@pytest.mark.parametrize('selection',[[],[2,2],[99]])
-async def test_import_invalid_selections_do_not_consume(catalog,selection):
-    async with AsyncClient(transport=ASGITransport(app=app),base_url='http://test') as client:
-        p=await _preview(client,catalog); token=p.json()['import_token']; bad=await client.post('/api/content-bank/imports/commit',json={'import_token':token,'row_numbers':selection})
-    assert bad.status_code == 422, bad.text
-    assert bad.json()['error']['code'] == 'import_validation_error'
-    async with async_session_factory() as session: assert await session.scalar(text('SELECT committed_at FROM import_previews WHERE import_token=:t'),{'t':token}) is None
-
-async def test_import_token_lifecycle(catalog):
-    async with AsyncClient(transport=ASGITransport(app=app),base_url='http://test') as client:
-        missing=await client.post('/api/content-bank/imports/commit',json={'import_token':str(uuid4()),'row_numbers':[2]})
-        p=await _preview(client,catalog); token=p.json()['import_token']
-        async with async_session_factory() as session:
-            async with session.begin():
-                await session.execute(text("UPDATE import_previews SET created_at=CURRENT_TIMESTAMP-INTERVAL '2 hours', expires_at=CURRENT_TIMESTAMP-INTERVAL '1 hour' WHERE import_token=:t"),{'t':token})
-            created_at, expires_at, current_time, committed_at = (await session.execute(text("SELECT created_at, expires_at, CURRENT_TIMESTAMP, committed_at FROM import_previews WHERE import_token=:t"), {'t': token})).one()
-            assert created_at < expires_at
-            assert expires_at < current_time
-            assert committed_at is None
-        expired=await client.post('/api/content-bank/imports/commit',json={'import_token':token,'row_numbers':[2]})
-    assert missing.status_code == 404, missing.text
-    assert missing.json()['error']['code'] == 'import_token_not_found'
-    assert expired.status_code == 410, expired.text
-    assert expired.json()['error']['code'] == 'import_token_expired'
-    async with async_session_factory() as session:
-        assert await session.scalar(text('SELECT committed_at FROM import_previews WHERE import_token=:t'), {'t': token}) is None
-        assert await session.scalar(text('SELECT count(*) FROM tasks')) == 0
-        assert await session.scalar(text('SELECT count(*) FROM audit_log')) == 0
-
-async def test_import_consumed_token_does_not_duplicate(catalog):
-    async with AsyncClient(transport=ASGITransport(app=app),base_url='http://test') as client:
-        p=await _preview(client,catalog); body={'import_token':p.json()['import_token'],'row_numbers':[2]}; first=await client.post('/api/content-bank/imports/commit',json=body); second=await client.post('/api/content-bank/imports/commit',json=body)
-    assert first.status_code == 201, first.text
-    assert second.status_code == 409, second.text
-    assert second.json()['error']['code'] == 'import_token_already_committed'
-    async with async_session_factory() as session: assert await session.scalar(text('SELECT count(*) FROM tasks'))==1 and await session.scalar(text('SELECT count(*) FROM audit_log'))==1
-
-async def test_import_concurrent_commit_exactly_once(catalog):
-    import asyncio
-    async with AsyncClient(transport=ASGITransport(app=app),base_url='http://test') as client:
-        p=await _preview(client,catalog); body={'import_token':p.json()['import_token'],'row_numbers':[2]}
-        a,b=await asyncio.gather(client.post('/api/content-bank/imports/commit',json=body),client.post('/api/content-bank/imports/commit',json=body))
-    assert sorted([a.status_code,b.status_code])==[201,409]
-    async with async_session_factory() as session: assert await session.scalar(text('SELECT count(*) FROM tasks'))==1 and await session.scalar(text('SELECT count(*) FROM audit_log'))==1
-
-async def test_import_schema_constraints_and_index(catalog):
-    async with async_session_factory() as session:
-        columns={r.column_name:r for r in (await session.execute(text("SELECT column_name,data_type,is_nullable FROM information_schema.columns WHERE table_name='import_previews'"))).all()}
-        indexes=(await session.execute(text("SELECT indexname FROM pg_indexes WHERE tablename='import_previews'"))).scalars().all()
-        constraints=(await session.execute(text("SELECT conname FROM pg_constraint WHERE conrelid='import_previews'::regclass"))).scalars().all()
-    assert columns['rows'].data_type=='jsonb' and columns['committed_at'].is_nullable=='YES' and 'ix_import_previews_expires_at' in indexes
-    assert {'ck_import_previews_format','ck_import_previews_expiry','ck_import_previews_committed_at'}<=set(constraints)
 
 async def test_direct_contents_filters_sort_total_and_pagination(catalog):
     """Exercise the real asyncpg contents path, including enforced direct scope."""
