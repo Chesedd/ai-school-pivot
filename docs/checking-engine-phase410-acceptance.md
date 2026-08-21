@@ -25,7 +25,7 @@ bounded case IDs and technical aggregates/fingerprints.
 
 ## Boundaries and status
 
-Every frozen case executes normalization, routing, its production checker, Phase 4.9 result preparation and the confidence gate. LLM cases use the real `LLMRubricChecker` and `ProviderExecutionService`, with a fake injected only at the provider port. Fake-provider success proves composition and safety only; it is not real-provider quality acceptance.
+Every frozen case executes normalization, routing, its production checker, Phase 4.9 result preparation and the confidence gate. LLM cases use the real `LLMRubricChecker` and `ProviderExecutionService`, with a fake injected only at the provider port. Fake-provider success proves composition and safety only; fake-provider PostgreSQL execution is not real-provider quality evidence or acceptance.
 
 The PostgreSQL vertical boundary uses production repositories/persistence at
 Alembic `20260820_01`; it is behavioral acceptance only when a disposable
