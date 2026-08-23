@@ -8,10 +8,14 @@ export const getAuthoringWorkspace=(id:string,signal?:AbortSignal):Promise<Autho
 export type AuthoringChoiceOption={key:string;content:string};
 export type AuthoringReviewDraft={schema_version:"authoring_review_draft.v1";title:string|null;statement:string;task_type:string;answer_format:string;choice_options:AuthoringChoiceOption[];expected_answer:string;solution:string;hints:string[]};
 export type AuthoringReviewResponse={schema_version:"authoring_review_response.v1";session_id:string;state:string;version:number;draft:AuthoringReviewDraft;created_at:string;updated_at:string};
-export type AuthoringReviewHistory={schema_version:"authoring_review_history.v1";session_id:string;current_revision:number;accepted_revision_id:string|null;revisions:{revision_number:number}[]};
+export type AuthoringReviewRevision={id:string;revision_number:number;snapshot:AuthoringReviewDraft;created_at:string;actor_id:string;change_summary:Record<string,unknown>};
+export type AuthoringReviewHistory={schema_version:"authoring_review_history.v1";session_id:string;current_revision:number;accepted_revision_id:string|null;revisions:AuthoringReviewRevision[]};
+export type AuthoringReviewDiffField="title"|"statement"|"choices"|"expected_answer"|"solution"|"hints";
+export type AuthoringReviewDiff={schema_version:"authoring_review_diff.v1";session_id:string;from_revision:number;to_revision:number;changes:{field:AuthoringReviewDiffField;from:unknown;to:unknown}[]};
 const authoringReviewPath=(id:string)=>`/api/content-bank/authoring/sessions/${encodeURIComponent(id)}/review`;
 export const getAuthoringReview=(id:string,signal?:AbortSignal):Promise<AuthoringReviewResponse>=>request(authoringReviewPath(id),{signal});
 export const getAuthoringReviewHistory=(id:string,signal?:AbortSignal):Promise<AuthoringReviewHistory>=>request(`${authoringReviewPath(id)}/history`,{signal});
+export const getAuthoringReviewDiff=(id:string,fromRevision:number,toRevision:number,signal?:AbortSignal):Promise<AuthoringReviewDiff>=>{const params=new URLSearchParams({from_revision:String(fromRevision),to_revision:String(toRevision)});return request(`${authoringReviewPath(id)}/diff?${params}`,{signal})};
 export const createAuthoringReviewRevision=(id:string,version:number,draft:AuthoringReviewDraft):Promise<AuthoringReviewResponse>=>request(authoringReviewPath(id),{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({version,draft})});
 export type Folder={id:string;subject_id:string;parent_id:string|null;name:string;depth:number;created_at:string;updated_at:string};
 export type FolderNode=Folder&{children:FolderNode[]};
