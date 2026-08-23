@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import hashlib
-from dataclasses import replace
+import json
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Any, Literal
@@ -142,6 +143,31 @@ class ValidatedGeneratedTaskV1(_Contract):
     validation_result: TaskValidationResultV1
 
 
+@dataclass(frozen=True)
+class PipelineResumeState:
+    """A validated view containing only committed semantic checkpoints."""
+    generated_draft: GeneratedTaskDraftV1 | None = None
+    generator_attempt_id: Any | None = None
+    solver_result: SolverResultV1 | None = None
+    solver_attempt_id: Any | None = None
+    validation_result: TaskValidationResultV1 | None = None
+
+    @classmethod
+    def from_persisted(cls, draft, generator_id, solver, solver_id, validation):
+        inconsistent=((draft is None) != (generator_id is None) or (solver is None) != (solver_id is None)
+            or solver is not None and draft is None or validation is not None and solver is None)
+        if inconsistent: raise AuthoringError("inconsistent_pipeline_checkpoint")
+        return cls(GeneratedTaskDraftV1.model_validate_json(json.dumps(draft)) if draft is not None else None,generator_id,
+            SolverResultV1.model_validate_json(json.dumps(solver)) if solver is not None else None,solver_id,
+            TaskValidationResultV1.model_validate_json(json.dumps(validation)) if validation is not None else None)
+
+    @property
+    def artifact(self):
+        if self.validation_result is None: return None
+        return ValidatedGeneratedTaskV1(generated_draft=self.generated_draft,
+            solver_result=self.solver_result,validation_result=self.validation_result)
+
+
 def _decimal(value: str) -> Decimal | None:
     try: result=Decimal(value)
     except InvalidOperation: return None
@@ -199,13 +225,25 @@ class SemanticPipelineService:
     """One generator run followed by an answer-isolated solver run; never creates Content Bank rows."""
     def __init__(self, repository: Any, providers: ProviderRegistry): self.repository=repository; self.providers=providers
 
-    async def _stage(self, session_id: Any, execution: ExecutionRequest, contract: type[_Contract]):
+    async def _stage(self, session_id: Any, identity: str, execution: ExecutionRequest, contract: type[_Contract], validate=None):
         last_failure=None
         for number in range(1,execution.retry_policy.max_attempts+1):
             current=execution if number==1 else replace(execution,idempotency_key=f"{execution.idempotency_key}-retry-{number}")
             attempt,created=await self.repository.create_attempt(session_id,current)
-            if not created: raise AuthoringError("pipeline_in_progress")
-            if not await self.repository.claim(attempt.id): raise AuthoringError("pipeline_in_progress")
+            if not created:
+                if attempt.status == "succeeded": return None,attempt.id
+                if attempt.status == "invalid_output": raise AuthoringError("generator_invalid" if current.role is AuthoringRole.GENERATOR else "solver_invalid")
+                if attempt.status == "failed_terminal": raise ProviderFailure(FailureCode(attempt.failure_code))
+                if attempt.status == "failed_retryable": last_failure=ProviderFailure(FailureCode(attempt.failure_code)); continue
+                if attempt.status == "running":
+                    recovered=await self.repository.recover_stale(attempt.id)
+                    await self.repository.commit()
+                    if recovered: last_failure=ProviderFailure(FailureCode.TIMEOUT); continue
+                    raise AuthoringError("pipeline_in_progress")
+            if not await self.repository.claim(attempt.id):
+                await self.repository.commit(); raise AuthoringError("pipeline_in_progress")
+            # The provider never runs while the claim/configuration transaction is open.
+            await self.repository.commit()
             try:
                 provider=self.providers.get(current.provider_id)
                 if not getattr(provider,"capabilities",None) or not provider.capabilities.structured_output:
@@ -214,11 +252,20 @@ class SemanticPipelineService:
                 try: parsed=contract.model_validate_json(canonical_json_bytes(result.technical_response))
                 except ValidationError:
                     await self.repository.finalize_success(attempt.id,result,invalid_output=True)
+                    await self.repository.commit()
                     raise AuthoringError("generator_invalid" if current.role is AuthoringRole.GENERATOR else "solver_invalid") from None
-                await self.repository.finalize_success(attempt.id,result)
+                if validate is not None:
+                    try: validate(parsed)
+                    except AuthoringError:
+                        await self.repository.finalize_success(attempt.id,result,invalid_output=True)
+                        await self.repository.commit()
+                        raise
+                await self.repository.checkpoint_stage_success(session_id,identity,attempt.id,current.role,result,parsed)
+                await self.repository.commit()
                 return parsed,attempt.id
             except ProviderFailure as failure:
                 await self.repository.finalize_failure(attempt.id,failure.code); last_failure=failure
+                await self.repository.commit()
                 from app.application.authoring import RETRYABLE
                 if failure.code not in RETRYABLE: raise
         raise last_failure or AuthoringError("provider_failed")
@@ -230,13 +277,28 @@ class SemanticPipelineService:
         identity=hashlib.sha256(canonical_json_bytes({"request":request.fingerprint,"generator":[generator_route.provider_id,generator_route.model_id],
             "solver":[solver_route.provider_id,solver_route.model_id],"prompts":[gp.template_hash,sp.template_hash],"key":idempotency_key})).hexdigest()
         existing=await self.repository.configure_pipeline(session_id,identity,generator_route,solver_route)
-        if existing is not None: return existing
+        await self.repository.commit()
+        state=existing
+        if state.artifact is not None: return state.artifact
         generator=_execution(AuthoringRole.GENERATOR,generator_route,gp,request.fingerprint,correlation_id,idempotency_key+"-generator",request)
-        draft,generator_attempt=await self._stage(session_id,generator,GeneratedTaskDraftV1)
-        draft.validate_against(request)
+        draft=state.generated_draft
+        if draft is None:
+            draft,_=await self._stage(session_id,identity,generator,GeneratedTaskDraftV1,
+                lambda value:value.validate_against(request))
+            if draft is None:
+                state=await self.repository.configure_pipeline(session_id,identity,generator_route,solver_route); await self.repository.commit()
+                draft=state.generated_draft
+                if draft is None: raise AuthoringError("inconsistent_pipeline_checkpoint")
         solver_input=draft.sanitize_for_solver()
         solver=_execution(AuthoringRole.SOLVER,solver_route,sp,solver_input.fingerprint,correlation_id,idempotency_key+"-solver",solver_input)
-        solved,solver_attempt=await self._stage(session_id,solver,SolverResultV1)
+        solved=state.solver_result
+        if solved is None:
+            solved,_=await self._stage(session_id,identity,solver,SolverResultV1)
+            if solved is None:
+                state=await self.repository.configure_pipeline(session_id,identity,generator_route,solver_route); await self.repository.commit()
+                solved=state.solver_result
+                if solved is None: raise AuthoringError("inconsistent_pipeline_checkpoint")
         validation=cross_check(draft,solved)
-        await self.repository.save_pipeline_result(session_id,identity,draft,solved,validation,generator_attempt,solver_attempt)
+        await self.repository.checkpoint_validation(session_id,identity,validation)
+        await self.repository.commit()
         return ValidatedGeneratedTaskV1(generated_draft=draft,solver_result=solved,validation_result=validation)

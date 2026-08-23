@@ -45,18 +45,40 @@ def test_deterministic_comparator_matrix():
     assert cross_check(draft(),solved(status="insufficient_information")).status==ValidationStatus.SOLVER_INSUFFICIENT
 
 
+def test_resume_state_decisions_and_inconsistent_checkpoints_fail_closed():
+    empty=PipelineResumeState.from_persisted(None,None,None,None,None)
+    assert empty.generated_draft is None
+    generated=PipelineResumeState.from_persisted(draft().model_dump(mode="json"),uuid4(),None,None,None)
+    assert generated.generated_draft is not None and generated.solver_result is None
+    checked=PipelineResumeState.from_persisted(draft().model_dump(mode="json"),uuid4(),solved().model_dump(mode="json"),uuid4(),None)
+    assert checked.solver_result is not None and checked.artifact is None
+    terminal=PipelineResumeState.from_persisted(draft().model_dump(mode="json"),uuid4(),solved().model_dump(mode="json"),uuid4(),
+        cross_check(draft(),solved()).model_dump(mode="json"))
+    assert terminal.artifact is not None
+    with pytest.raises(AuthoringError,match="inconsistent_pipeline_checkpoint"):
+        PipelineResumeState.from_persisted(draft().model_dump(mode="json"),None,None,None,None)
+    with pytest.raises(AuthoringError,match="inconsistent_pipeline_checkpoint"):
+        PipelineResumeState.from_persisted(None,None,solved().model_dump(mode="json"),uuid4(),None)
+
+
 class Repo:
     def __init__(self): self.attempts=[]; self.saved=None; self.identity=None
     async def configure_pipeline(self,sid,identity,g,s):
         if self.identity and self.identity != identity: raise AuthoringConflict()
         self.identity=identity
-        return ValidatedGeneratedTaskV1(generated_draft=self.saved[0],solver_result=self.saved[1],validation_result=self.saved[2]) if self.saved else None
+        return PipelineResumeState.from_persisted(*self.saved) if self.saved else PipelineResumeState()
+    async def commit(self): pass
     async def create_attempt(self,sid,execution):
         item=SimpleNamespace(id=uuid4(),status="pending",execution=execution); self.attempts.append(item); return item,True
     async def claim(self,aid): return True
     async def finalize_success(self,*args,**kwargs): return True
     async def finalize_failure(self,*args,**kwargs): return True
-    async def save_pipeline_result(self,sid,identity,*values): self.saved=values
+    async def recover_stale(self,*args,**kwargs): return False
+    async def checkpoint_stage_success(self,sid,identity,aid,role,result,value):
+        current=self.saved or (None,None,None,None,None)
+        self.saved=(value,aid,current[2],current[3],current[4]) if role is AuthoringRole.GENERATOR else (current[0],current[1],value,aid,current[4])
+    async def checkpoint_validation(self,sid,identity,value):
+        self.saved=(*self.saved[:4],value)
 
 
 class CapturingProvider:
