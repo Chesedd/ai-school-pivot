@@ -25,6 +25,7 @@ class AuthoringAcceptanceRequest(BaseModel):
     model_config=ConfigDict(extra="forbid",strict=True)
     acceptance_note: StrictStr|None=Field(default=None,min_length=1,max_length=2000)
     confirm_questionable: bool=False
+    warning_override_reason: StrictStr|None=Field(default=None,min_length=1,max_length=2000)
 
 class AuthoringReviewEditRequest(BaseModel):
     model_config=ConfigDict(extra="forbid",strict=True)

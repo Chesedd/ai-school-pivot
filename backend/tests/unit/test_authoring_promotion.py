@@ -37,8 +37,10 @@ def test_non_terminal_checkpoint_is_rejected():
 
 
 def test_acceptance_request_cannot_override_content_or_catalog():
-    request = AuthoringAcceptanceRequest.model_validate({"acceptance_note":"Reviewed", "confirm_questionable":True})
+    request = AuthoringAcceptanceRequest.model_validate({"acceptance_note":"Reviewed", "confirm_questionable":True,
+        "warning_override_reason":"Verified manually"})
     assert request.acceptance_note == "Reviewed"
+    assert request.warning_override_reason == "Verified manually"
     with pytest.raises(ValidationError):
         AuthoringAcceptanceRequest.model_validate({"task_id":str(uuid4())})
     with pytest.raises(ValidationError):

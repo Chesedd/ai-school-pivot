@@ -81,7 +81,7 @@ class AuthoringReview(IdMixin, Base):
 class AuthoringReviewAudit(IdMixin, Base):
     __tablename__ = "authoring_review_audit"
     __table_args__ = (
-        CheckConstraint("action IN ('review_started','review_changed','accepted','rejected')", name="ck_authoring_review_audit_action"),
+        CheckConstraint("action IN ('review_started','review_changed','quality_report_created','warning_overridden','accepted','rejected')", name="ck_authoring_review_audit_action"),
         CheckConstraint("review_version > 0", name="ck_authoring_review_audit_version"),
         Index("ix_authoring_review_audit_session_created", "session_id", "created_at"),
     )
