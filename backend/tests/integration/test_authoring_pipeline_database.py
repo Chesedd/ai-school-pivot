@@ -235,9 +235,19 @@ async def test_restart_during_solver_execution_waits_then_recovers_stale_attempt
 
     async with factory() as db:
         row = await db.get(AuthoringSession, session_id)
-        running_id = row.solver_attempt_id
-        running = await db.get(AuthoringProviderAttempt, running_id)
-        assert row.generated_draft is not None and running.status == "running"
+        attempts = (await db.scalars(select(AuthoringProviderAttempt).where(
+            AuthoringProviderAttempt.session_id == session_id,
+            AuthoringProviderAttempt.role == AuthoringRole.SOLVER.value,
+        ))).all()
+        assert row.generated_draft is not None
+        assert row.generator_attempt_id is not None
+        assert row.solver_result is None
+        assert row.solver_attempt_id is None
+        assert len(attempts) == 1
+        running = attempts[0]
+        running_id = running.id
+        assert running.status == "running"
+        assert running.started_at is not None
 
     resumed_solver = CountingProvider(SOLVED)
     resumed, _, _ = providers(generator, resumed_solver)
@@ -246,10 +256,16 @@ async def test_restart_during_solver_execution_waits_then_recovers_stale_attempt
     assert generator.calls == crashing_solver.calls == 1
     assert resumed_solver.calls == 0
     async with factory() as db:
-        assert await db.scalar(select(func.count()).select_from(AuthoringProviderAttempt).where(
+        row = await db.get(AuthoringSession, session_id)
+        attempts = (await db.scalars(select(AuthoringProviderAttempt).where(
             AuthoringProviderAttempt.session_id == session_id,
-            AuthoringProviderAttempt.role == "solver",
-        )) == 1
+            AuthoringProviderAttempt.role == AuthoringRole.SOLVER.value,
+        ))).all()
+        assert row.solver_result is None
+        assert row.solver_attempt_id is None
+        assert len(attempts) == 1
+        assert attempts[0].attempt_number == 1
+        assert attempts[0].status == "running"
         await db.execute(update(AuthoringProviderAttempt).where(
             AuthoringProviderAttempt.id == running_id,
         ).values(started_at=func.clock_timestamp() - text("interval '130 seconds'")))
@@ -266,6 +282,13 @@ async def test_restart_during_solver_execution_waits_then_recovers_stale_attempt
         assert [(attempt.attempt_number, attempt.status, attempt.failure_code) for attempt in attempts] == [
             (1, "failed_retryable", "timeout"), (2, "succeeded", None),
         ]
+        row = await db.get(AuthoringSession, session_id)
+        successful = attempts[1]
+        assert row.solver_result is not None
+        assert row.solver_attempt_id == successful.id
+        assert successful.status == "succeeded"
+        assert row.validation_result is not None
+        assert row.semantic_status == "validated"
 
 
 async def _stop():
