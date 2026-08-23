@@ -1,10 +1,11 @@
 """Transactional repository for Content Bank authoring attempts."""
+import json
 from uuid import UUID, uuid4
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.authoring import AuthoringConflict, ExecutionRequest, FailureCode, FrozenCatalogContext, ProviderResult, RETRYABLE, thaw_json
+from app.application.authoring import AuthoringConflict, AuthoringRole, ExecutionRequest, FailureCode, FrozenCatalogContext, ProviderResult, RETRYABLE, thaw_json
 from app.infrastructure.authoring_models import AuthoringProviderAttempt, AuthoringSession
 
 
@@ -25,7 +26,7 @@ class AuthoringRepository:
         # Lock aggregate: serializes retry numbering and creation for a session.
         session=await self.db.scalar(select(AuthoringSession).where(AuthoringSession.id==session_id).with_for_update())
         if session is None: raise AuthoringConflict()
-        if session.request_fingerprint != execution.request_fingerprint: raise AuthoringConflict()
+        if execution.role is AuthoringRole.GENERATOR and session.request_fingerprint != execution.request_fingerprint: raise AuthoringConflict()
         existing=await self.db.scalar(select(AuthoringProviderAttempt).where(AuthoringProviderAttempt.session_id==session_id,AuthoringProviderAttempt.idempotency_key==execution.idempotency_key))
         if existing:
             if (existing.request_fingerprint != execution.request_fingerprint or existing.provider_id != execution.provider_id or existing.model_id != execution.model_id): raise AuthoringConflict()
@@ -51,3 +52,28 @@ class AuthoringRepository:
     async def finalize_failure(self, attempt_id: UUID, code: FailureCode) -> bool:
         status="failed_retryable" if code in RETRYABLE else "failed_terminal"
         changed=await self.db.execute(update(AuthoringProviderAttempt).where(AuthoringProviderAttempt.id==attempt_id,AuthoringProviderAttempt.status=="running").values(status=status,failure_code=code.value,finished_at=func.clock_timestamp())); await self.db.flush(); return changed.rowcount==1
+
+    async def configure_pipeline(self, session_id: UUID, identity: str, generator_route, solver_route):
+        row=await self.db.scalar(select(AuthoringSession).where(AuthoringSession.id==session_id).with_for_update())
+        if row is None: raise AuthoringConflict()
+        if row.pipeline_identity is not None and row.pipeline_identity != identity: raise AuthoringConflict()
+        if row.pipeline_identity == identity and row.validation_result is not None:
+            from app.application.authoring_pipeline import GeneratedTaskDraftV1, SolverResultV1, TaskValidationResultV1, ValidatedGeneratedTaskV1
+            return ValidatedGeneratedTaskV1(
+                generated_draft=GeneratedTaskDraftV1.model_validate_json(json.dumps(row.generated_draft)),
+                solver_result=SolverResultV1.model_validate_json(json.dumps(row.solver_result)),
+                validation_result=TaskValidationResultV1.model_validate_json(json.dumps(row.validation_result)))
+        row.pipeline_identity=identity
+        row.generator_route={"provider_id":generator_route.provider_id,"model_id":generator_route.model_id}
+        row.solver_route={"provider_id":solver_route.provider_id,"model_id":solver_route.model_id}
+        await self.db.flush(); return None
+
+    async def save_pipeline_result(self, session_id: UUID, identity: str, draft, solver, validation,
+                                   generator_attempt_id: UUID, solver_attempt_id: UUID) -> None:
+        changed=await self.db.execute(update(AuthoringSession).where(AuthoringSession.id==session_id,
+            AuthoringSession.pipeline_identity==identity,AuthoringSession.validation_result.is_(None)).values(
+            generated_draft=draft.model_dump(mode="json"),solver_result=solver.model_dump(mode="json"),
+            validation_result=validation.model_dump(mode="json"),semantic_status=validation.status,
+            generator_attempt_id=generator_attempt_id,solver_attempt_id=solver_attempt_id,row_version=AuthoringSession.row_version+1))
+        await self.db.flush()
+        if changed.rowcount != 1: raise AuthoringConflict()
