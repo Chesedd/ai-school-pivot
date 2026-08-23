@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, String, UniqueConstraint, text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, Numeric, String, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import ENUM, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -21,6 +21,8 @@ class AuthoringSession(IdMixin,Base):
         CheckConstraint("request_fingerprint ~ '^[0-9a-f]{64}$'",name="ck_authoring_sessions_fingerprint"),
         CheckConstraint("char_length(schema_version) BETWEEN 1 AND 64 AND char_length(policy_version) BETWEEN 1 AND 128",name="ck_authoring_sessions_versions"),
         CheckConstraint("row_version > 0",name="ck_authoring_sessions_revision"),
+        ForeignKeyConstraint(["input_artifact_id", "owner_id"], ["input_artifacts.id", "input_artifacts.owner_id"],
+            name="fk_authoring_sessions_owned_input_artifact", ondelete="RESTRICT"),
         Index("ix_authoring_sessions_owner_status","owner_id","status"), Index("ix_authoring_sessions_status_created","status","created_at"),)
     owner_id: Mapped[UUID]=mapped_column(uuid_type)
     schema_version: Mapped[str]=mapped_column(String(64)); policy_version: Mapped[str]=mapped_column(String(128))
@@ -32,6 +34,27 @@ class AuthoringSession(IdMixin,Base):
     solver_result: Mapped[object|None]=mapped_column(JSONB); validation_result: Mapped[object|None]=mapped_column(JSONB)
     semantic_status: Mapped[str|None]=mapped_column(String(64))
     generator_attempt_id: Mapped[UUID|None]=mapped_column(uuid_type); solver_attempt_id: Mapped[UUID|None]=mapped_column(uuid_type)
+    input_artifact_id: Mapped[UUID|None]=mapped_column(uuid_type)
+
+
+class InputArtifact(IdMixin, Base):
+    """Immutable authoring metadata; raw bytes are never persisted here."""
+    __tablename__ = "input_artifacts"
+    __table_args__ = (
+        CheckConstraint("mime_type IN ('image/png','image/jpeg','image/webp','application/pdf')", name="ck_input_artifacts_mime"),
+        CheckConstraint("size_bytes BETWEEN 1 AND 26214400", name="ck_input_artifacts_size"),
+        CheckConstraint("content_hash_sha256 ~ '^[0-9a-f]{64}$'", name="ck_input_artifacts_hash"),
+        CheckConstraint("storage_reference=btrim(storage_reference) AND char_length(storage_reference) BETWEEN 1 AND 512", name="ck_input_artifacts_storage_reference"),
+        UniqueConstraint("storage_reference", name="uq_input_artifacts_storage_reference"),
+        UniqueConstraint("id", "owner_id", name="uq_input_artifacts_id_owner"),
+        Index("ix_input_artifacts_owner_created", "owner_id", "created_at"),
+    )
+    owner_id: Mapped[UUID] = mapped_column(uuid_type)
+    mime_type: Mapped[str] = mapped_column(String(32))
+    content_hash_sha256: Mapped[str] = mapped_column(String(64))
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    storage_reference: Mapped[str] = mapped_column(String(512))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=clock)
 
 
 class AuthoringProviderAttempt(IdMixin,Base):
