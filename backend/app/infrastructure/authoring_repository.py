@@ -1,11 +1,57 @@
-"""Transactional repository for Content Bank authoring attempts."""
+"""Transactional repositories for Content Bank authoring attempts and reads."""
+from dataclasses import dataclass
 from uuid import UUID, uuid4
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.application.authoring import AuthoringConflict, AuthoringRole, ExecutionRequest, FailureCode, FrozenCatalogContext, ProviderResult, RETRYABLE, thaw_json
-from app.infrastructure.authoring_models import AuthoringProviderAttempt, AuthoringSession
+from app.infrastructure.authoring_models import (AuthoringProviderAttempt, AuthoringReview,
+    AuthoringReviewAudit, AuthoringReviewRevision, AuthoringSession)
+from app.infrastructure.models import AuditLog
+
+
+@dataclass(frozen=True)
+class AuthoringWorkspaceRecord:
+    session: AuthoringSession
+    attempts: tuple[AuthoringProviderAttempt, ...]
+    review: AuthoringReview | None
+    revisions: tuple[AuthoringReviewRevision, ...]
+    review_audits: tuple[AuthoringReviewAudit, ...]
+    promotion: AuditLog | None
+
+
+class AuthoringWorkspaceRepository:
+    """Fixed-query projection loader: one owned root plus batched child reads.
+
+    The query count is constant regardless of attempt/revision counts. Children are
+    loaded in bulk in at most five further queries (the read-model equivalent of
+    select-in eager loading), avoiding
+    both N+1 access and the cartesian expansion of one large multi-collection join.
+    """
+    def __init__(self, db: AsyncSession): self.db = db
+
+    async def get(self, session_id: UUID, owner_id: UUID) -> AuthoringWorkspaceRecord | None:
+        session = await self.db.scalar(select(AuthoringSession).where(
+            AuthoringSession.id == session_id, AuthoringSession.owner_id == owner_id))
+        if session is None:
+            return None
+        attempts = tuple((await self.db.scalars(select(AuthoringProviderAttempt).where(
+            AuthoringProviderAttempt.session_id == session_id).order_by(
+            AuthoringProviderAttempt.created_at, AuthoringProviderAttempt.attempt_number))).all())
+        review = await self.db.scalar(select(AuthoringReview).where(
+            AuthoringReview.session_id == session_id, AuthoringReview.owner_id == owner_id))
+        revisions: tuple[AuthoringReviewRevision, ...] = ()
+        audits: tuple[AuthoringReviewAudit, ...] = ()
+        if review is not None:
+            revisions = tuple((await self.db.scalars(select(AuthoringReviewRevision).where(
+                AuthoringReviewRevision.review_id == review.id).order_by(
+                AuthoringReviewRevision.revision_number))).all())
+            audits = tuple((await self.db.scalars(select(AuthoringReviewAudit).where(
+                AuthoringReviewAudit.review_id == review.id).order_by(AuthoringReviewAudit.created_at))).all())
+        promotion = await self.db.scalar(select(AuditLog).where(AuditLog.action == "task_created",
+            AuditLog.details["authoring_session_id"].astext == str(session_id)))
+        return AuthoringWorkspaceRecord(session, attempts, review, revisions, audits, promotion)
 
 
 class AuthoringRepository:

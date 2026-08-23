@@ -9,6 +9,7 @@ from app.application.authoring_api import AuthoringApplicationService, Authoring
 from app.application.authoring_promotion import PromoteAuthoringArtifactService
 from app.application.authoring_quality import AuthoringQualityReportV1, AuthoringQualityService
 from app.application.authoring_review import AuthoringReviewService
+from app.application.authoring_workspace import AuthoringWorkspaceService, AuthoringWorkspaceViewV1
 from app.config import Settings, get_settings
 from app.db.session import get_session
 from app.infrastructure.authoring_providers import production_registry
@@ -50,6 +51,11 @@ async def run(session_id:UUID,payload:RunRequest,idempotency_key:str=Header(...,
 async def preview(session_id:UUID,svc=Depends(service),settings:Settings=Depends(get_settings)): return await svc.preview(session_id,settings.content_bank_dev_actor_id)
 @router.get("/sessions/{session_id}/attempts")
 async def attempts(session_id:UUID,svc=Depends(service),settings:Settings=Depends(get_settings)): return await svc.attempts(session_id,settings.content_bank_dev_actor_id)
+
+@router.get("/sessions/{session_id}/workspace", response_model=AuthoringWorkspaceViewV1)
+async def workspace(session_id:UUID,db=Depends(get_session),settings:Settings=Depends(get_settings)):
+    """Return the owned, read-only reviewer projection without invoking the pipeline."""
+    return await AuthoringWorkspaceService(db).get(session_id, settings.content_bank_dev_actor_id)
 
 @router.post("/sessions/{session_id}/review",response_model=AuthoringReviewResponseV1)
 async def start_review(session_id:UUID,db=Depends(get_session),settings:Settings=Depends(get_settings)):
