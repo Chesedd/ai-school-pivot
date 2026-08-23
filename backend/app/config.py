@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     attachment_max_bytes: int = 5 * 1024 * 1024
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
+    authoring_routes: str = "openai:gpt-4.1-mini,anthropic:claude-sonnet-4-20250514"
 
 
 @lru_cache
