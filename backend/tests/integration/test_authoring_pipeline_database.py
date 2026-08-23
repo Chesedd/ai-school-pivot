@@ -5,6 +5,7 @@ not a replacement for the fast repository fakes in the unit suite: their job is
 to prove commit visibility, restart behaviour, and PostgreSQL CAS semantics.
 """
 import asyncio
+import json
 import os
 from decimal import Decimal
 from uuid import uuid4
@@ -30,6 +31,8 @@ from app.application.authoring import (
     Usage,
 )
 from app.application.authoring_pipeline import (
+    GeneratedTaskDraftV1,
+    PipelineResumeState,
     SemanticPipelineService,
     ValidatedGeneratedTaskV1,
 )
@@ -143,13 +146,20 @@ async def test_normal_pipeline_commits_all_checkpoints_and_roundtrips_artifact(d
         row = await db.get(AuthoringSession, session_id)
         attempts = (await db.scalars(select(AuthoringProviderAttempt).where(
             AuthoringProviderAttempt.session_id == session_id).order_by(AuthoringProviderAttempt.attempt_number))).all()
-        persisted = ValidatedGeneratedTaskV1.model_validate({
-            "generated_draft": row.generated_draft, "solver_result": row.solver_result,
-            "validation_result": row.validation_result,
-        })
+        # JSONB correctly returns JSON arrays as lists.  Reconstruct strict DTOs
+        # through the production JSON boundary rather than validating DB Python
+        # objects directly (the draft intentionally has strict tuple fields).
+        assert isinstance(row.generated_draft["choice_options"], list)
+        assert isinstance(row.generated_draft["hints"], list)
+        state = PipelineResumeState.from_persisted(
+            row.generated_draft, row.generator_attempt_id, row.solver_result,
+            row.solver_attempt_id, row.validation_result,
+        )
+        persisted = state.artifact
         assert row.generator_attempt_id and row.solver_attempt_id
         assert row.semantic_status == "validated"
         assert [attempt.status for attempt in attempts] == ["succeeded", "succeeded"]
+        assert persisted is not None
         assert persisted.canonical_bytes() == artifact.canonical_bytes()
     assert (generator.calls, solver.calls) == (1, 1)
     assert await counts(factory) == before
@@ -171,9 +181,51 @@ async def test_generator_checkpoint_is_visible_to_solver_in_independent_session(
     assert solver.calls == 1
 
 
-async def test_restart_after_generator_checkpoint_skips_generator(database):
+class CrashBeforeSolverAttemptRepository(AuthoringRepository):
+    async def create_attempt(self, session_id, execution):
+        if execution.role is AuthoringRole.SOLVER:
+            raise StopProcess()
+        return await super().create_attempt(session_id, execution)
+
+
+async def test_restart_after_generator_checkpoint_before_solver_attempt_skips_generator(database):
     _, factory = database
     before = await counts(factory)
+    session_id = await new_authoring_session(factory)
+    generator = CountingProvider(DRAFT)
+    registry, _, _ = providers(generator, CountingProvider(SOLVED))
+    async with factory() as db:
+        with pytest.raises(StopProcess):
+            await SemanticPipelineService(CrashBeforeSolverAttemptRepository(db), registry).run(
+                session_id, request(), GENERATOR, SOLVER, correlation_id="integration-test",
+                idempotency_key="pipeline-key",
+            )
+
+    async with factory() as db:
+        row = await db.get(AuthoringSession, session_id)
+        attempt = await db.get(AuthoringProviderAttempt, row.generator_attempt_id)
+        assert row.generated_draft is not None and row.generator_attempt_id is not None
+        assert attempt.status == "succeeded"
+        assert await db.scalar(select(func.count()).select_from(AuthoringProviderAttempt).where(
+            AuthoringProviderAttempt.session_id == session_id,
+            AuthoringProviderAttempt.role == "solver",
+        )) == 0
+
+    resumed_solver = CountingProvider(SOLVED)
+    resumed, _, _ = providers(generator, resumed_solver)
+    artifact = await run(factory, session_id, resumed)
+    assert artifact.validation_result.status == "validated"
+    assert generator.calls == 1 and resumed_solver.calls == 1
+    async with factory() as db:
+        assert await db.scalar(select(func.count()).select_from(AuthoringProviderAttempt).where(
+            AuthoringProviderAttempt.session_id == session_id,
+            AuthoringProviderAttempt.role == "solver",
+        )) == 1
+    assert await counts(factory) == before
+
+
+async def test_restart_during_solver_execution_waits_then_recovers_stale_attempt(database):
+    _, factory = database
     session_id = await new_authoring_session(factory)
     generator = CountingProvider(DRAFT)
     crashing_solver = CountingProvider(SOLVED, before_execute=lambda _execution: _stop())
@@ -183,16 +235,37 @@ async def test_restart_after_generator_checkpoint_skips_generator(database):
 
     async with factory() as db:
         row = await db.get(AuthoringSession, session_id)
-        attempt = await db.get(AuthoringProviderAttempt, row.generator_attempt_id)
-        assert row.generated_draft is not None and row.generator_attempt_id is not None
-        assert attempt.status == "succeeded"
+        running_id = row.solver_attempt_id
+        running = await db.get(AuthoringProviderAttempt, running_id)
+        assert row.generated_draft is not None and running.status == "running"
 
     resumed_solver = CountingProvider(SOLVED)
     resumed, _, _ = providers(generator, resumed_solver)
+    with pytest.raises(AuthoringError, match="pipeline_in_progress"):
+        await run(factory, session_id, resumed)
+    assert generator.calls == crashing_solver.calls == 1
+    assert resumed_solver.calls == 0
+    async with factory() as db:
+        assert await db.scalar(select(func.count()).select_from(AuthoringProviderAttempt).where(
+            AuthoringProviderAttempt.session_id == session_id,
+            AuthoringProviderAttempt.role == "solver",
+        )) == 1
+        await db.execute(update(AuthoringProviderAttempt).where(
+            AuthoringProviderAttempt.id == running_id,
+        ).values(started_at=func.clock_timestamp() - text("interval '130 seconds'")))
+        await db.commit()
+
     artifact = await run(factory, session_id, resumed)
     assert artifact.validation_result.status == "validated"
     assert generator.calls == 1 and resumed_solver.calls == 1
-    assert await counts(factory) == before
+    async with factory() as db:
+        attempts = (await db.scalars(select(AuthoringProviderAttempt).where(
+            AuthoringProviderAttempt.session_id == session_id,
+            AuthoringProviderAttempt.role == "solver",
+        ).order_by(AuthoringProviderAttempt.attempt_number))).all()
+        assert [(attempt.attempt_number, attempt.status, attempt.failure_code) for attempt in attempts] == [
+            (1, "failed_retryable", "timeout"), (2, "succeeded", None),
+        ]
 
 
 async def _stop():
@@ -331,7 +404,6 @@ async def test_concurrent_new_pipeline_never_duplicates_provider_execution(datab
 @pytest.mark.parametrize("values", [
     {"generated_draft": DRAFT, "generator_attempt_id": None},
     {"solver_result": SOLVED, "solver_attempt_id": None},
-    {"solver_result": SOLVED, "solver_attempt_id": uuid4()},
     {"validation_result": {"schema_version": "task_validation_result.v1", "status": "validated", "comparator": "decimal_v1"}},
 ])
 async def test_inconsistent_postgresql_checkpoints_fail_closed(database, values):
@@ -343,6 +415,24 @@ async def test_inconsistent_postgresql_checkpoints_fail_closed(database, values)
             solver_route={"provider_id": SOLVER.provider_id, "model_id": SOLVER.model_id}, **values,
         ))
         await db.commit()
+    registry, generator, solver = providers()
+    with pytest.raises(AuthoringError, match="inconsistent_pipeline_checkpoint"):
+        await run(factory, session_id, registry)
+    assert generator.calls == solver.calls == 0
+
+
+async def test_solver_checkpoint_without_generator_uses_real_attempt_fk_and_fails_closed(database):
+    _, factory = database
+    session_id = await new_authoring_session(factory)
+    async with factory() as db:
+        repo = AuthoringRepository(db)
+        await repo.configure_pipeline(session_id, _identity(), GENERATOR, SOLVER)
+        attempt, _ = await repo.create_attempt(session_id, _solver_execution())
+        await db.execute(update(AuthoringSession).where(AuthoringSession.id == session_id).values(
+            solver_result=SOLVED, solver_attempt_id=attempt.id,
+        ))
+        await db.commit()
+
     registry, generator, solver = providers()
     with pytest.raises(AuthoringError, match="inconsistent_pipeline_checkpoint"):
         await run(factory, session_id, registry)
@@ -397,6 +487,14 @@ def _generator_execution():
     prompt = semantic_prompt_registry(request().policy_version).get("generator.task", "1.0.0")
     return _execution(AuthoringRole.GENERATOR, GENERATOR, prompt, request().fingerprint,
                       "integration-test", "pipeline-key-generator", request())
+
+
+def _solver_execution():
+    from app.application.authoring_pipeline import _execution, semantic_prompt_registry
+    prompt = semantic_prompt_registry(request().policy_version).get("solver.task", "1.0.0")
+    solver_input = GeneratedTaskDraftV1.model_validate_json(json.dumps(DRAFT)).sanitize_for_solver()
+    return _execution(AuthoringRole.SOLVER, SOLVER, prompt, solver_input.fingerprint,
+                      "integration-test", "pipeline-key-solver", solver_input)
 
 
 async def _persist_running(factory, session_id, *, stale=False):
