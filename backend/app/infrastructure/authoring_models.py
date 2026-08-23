@@ -58,3 +58,37 @@ class AuthoringProviderAttempt(IdMixin,Base):
     cache_read_tokens: Mapped[int]=mapped_column(Integer,server_default="0"); cache_write_tokens: Mapped[int]=mapped_column(Integer,server_default="0")
     cost_amount: Mapped[Decimal|None]=mapped_column(Numeric(18,8)); currency: Mapped[str|None]=mapped_column(String(3)); pricing_version: Mapped[str|None]=mapped_column(String(128)); pricing_source: Mapped[str|None]=mapped_column(String(128))
     created_at: Mapped[datetime]=mapped_column(DateTime(timezone=True),server_default=clock); started_at: Mapped[datetime|None]=mapped_column(DateTime(timezone=True)); finished_at: Mapped[datetime|None]=mapped_column(DateTime(timezone=True))
+
+
+class AuthoringReview(IdMixin, Base):
+    """Mutable human-owned copy; the generated checkpoint remains immutable."""
+    __tablename__ = "authoring_reviews"
+    __table_args__ = (
+        CheckConstraint("state IN ('reviewing','accepted','rejected')", name="ck_authoring_reviews_state"),
+        CheckConstraint("version > 0", name="ck_authoring_reviews_version"),
+        UniqueConstraint("session_id", name="uq_authoring_reviews_session"),
+        Index("ix_authoring_reviews_session_state", "session_id", "state"),
+    )
+    session_id: Mapped[UUID] = mapped_column(ForeignKey("authoring_sessions.id", ondelete="RESTRICT", name="fk_authoring_reviews_session"))
+    owner_id: Mapped[UUID] = mapped_column(uuid_type)
+    state: Mapped[str] = mapped_column(String(16), server_default="reviewing")
+    draft: Mapped[object] = mapped_column(JSONB)
+    version: Mapped[int] = mapped_column(Integer, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=clock)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=clock)
+
+
+class AuthoringReviewAudit(IdMixin, Base):
+    __tablename__ = "authoring_review_audit"
+    __table_args__ = (
+        CheckConstraint("action IN ('review_started','review_changed','accepted','rejected')", name="ck_authoring_review_audit_action"),
+        CheckConstraint("review_version > 0", name="ck_authoring_review_audit_version"),
+        Index("ix_authoring_review_audit_session_created", "session_id", "created_at"),
+    )
+    session_id: Mapped[UUID] = mapped_column(ForeignKey("authoring_sessions.id", ondelete="RESTRICT", name="fk_authoring_review_audit_session"))
+    review_id: Mapped[UUID] = mapped_column(ForeignKey("authoring_reviews.id", ondelete="RESTRICT", name="fk_authoring_review_audit_review"))
+    actor_id: Mapped[UUID] = mapped_column(uuid_type)
+    action: Mapped[str] = mapped_column(String(32))
+    review_version: Mapped[int] = mapped_column(Integer)
+    details: Mapped[object] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=clock)

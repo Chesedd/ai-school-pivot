@@ -7,11 +7,13 @@ from fastapi import APIRouter, Depends, Header, Query, Response
 from app.application.authoring import ModelRoute, Price, PricingCatalog
 from app.application.authoring_api import AuthoringApplicationService, AuthoringRouteCatalog
 from app.application.authoring_promotion import PromoteAuthoringArtifactService
+from app.application.authoring_review import AuthoringReviewService
 from app.config import Settings, get_settings
 from app.db.session import get_session
 from app.infrastructure.authoring_providers import production_registry
 from app.presentation.authoring_schemas import (AuthoringAcceptanceRequest, AuthoringCreateRequest,
-    AuthoringPromotionResponseV1, RunRequest, SessionResponse)
+    AuthoringPromotionResponseV1, AuthoringRejectRequest, AuthoringReviewEditRequest,
+    AuthoringReviewResponseV1, RunRequest, SessionResponse)
 
 router=APIRouter(prefix="/api/content-bank/authoring",tags=["authoring"])
 
@@ -46,6 +48,22 @@ async def run(session_id:UUID,payload:RunRequest,idempotency_key:str=Header(...,
 async def preview(session_id:UUID,svc=Depends(service),settings:Settings=Depends(get_settings)): return await svc.preview(session_id,settings.content_bank_dev_actor_id)
 @router.get("/sessions/{session_id}/attempts")
 async def attempts(session_id:UUID,svc=Depends(service),settings:Settings=Depends(get_settings)): return await svc.attempts(session_id,settings.content_bank_dev_actor_id)
+
+@router.post("/sessions/{session_id}/review",response_model=AuthoringReviewResponseV1)
+async def start_review(session_id:UUID,db=Depends(get_session),settings:Settings=Depends(get_settings)):
+    return await AuthoringReviewService(db).start(session_id,settings.content_bank_dev_actor_id)
+
+@router.get("/sessions/{session_id}/review",response_model=AuthoringReviewResponseV1)
+async def get_review(session_id:UUID,db=Depends(get_session),settings:Settings=Depends(get_settings)):
+    return await AuthoringReviewService(db).get(session_id,settings.content_bank_dev_actor_id)
+
+@router.put("/sessions/{session_id}/review",response_model=AuthoringReviewResponseV1)
+async def edit_review(session_id:UUID,payload:AuthoringReviewEditRequest,db=Depends(get_session),settings:Settings=Depends(get_settings)):
+    return await AuthoringReviewService(db).edit(session_id,settings.content_bank_dev_actor_id,payload.draft,payload.version)
+
+@router.post("/sessions/{session_id}/reject",response_model=AuthoringReviewResponseV1)
+async def reject(session_id:UUID,payload:AuthoringRejectRequest,db=Depends(get_session),settings:Settings=Depends(get_settings)):
+    return await AuthoringReviewService(db).reject(session_id,settings.content_bank_dev_actor_id,reason=payload.reason)
 
 @router.post("/sessions/{session_id}/accept",response_model=AuthoringPromotionResponseV1)
 async def accept(session_id:UUID,payload:AuthoringAcceptanceRequest,db=Depends(get_session),settings:Settings=Depends(get_settings)):

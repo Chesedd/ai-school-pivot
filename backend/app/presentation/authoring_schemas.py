@@ -3,6 +3,7 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from app.application.authoring_review import AuthoringReviewDraftV1
 
 class AuthoringCreateRequest(BaseModel):
     model_config=ConfigDict(extra="forbid",strict=True)
@@ -24,6 +25,19 @@ class AuthoringAcceptanceRequest(BaseModel):
     model_config=ConfigDict(extra="forbid",strict=True)
     acceptance_note: StrictStr|None=Field(default=None,min_length=1,max_length=2000)
     confirm_questionable: bool=False
+
+class AuthoringReviewEditRequest(BaseModel):
+    model_config=ConfigDict(extra="forbid",strict=True)
+    version:int=Field(ge=1); draft:AuthoringReviewDraftV1
+
+class AuthoringRejectRequest(BaseModel):
+    model_config=ConfigDict(extra="forbid",strict=True)
+    reason:StrictStr|None=Field(default=None,min_length=1,max_length=2000)
+
+class AuthoringReviewResponseV1(BaseModel):
+    schema_version:Literal["authoring_review_response.v1"]
+    session_id:UUID; state:Literal["reviewing","accepted","rejected"]; version:int
+    draft:AuthoringReviewDraftV1; created_at:datetime; updated_at:datetime
 
 class AuthoringPromotionResponseV1(BaseModel):
     session_id:UUID; task_id:UUID; task_version_id:UUID; created_at:datetime
