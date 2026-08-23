@@ -48,8 +48,13 @@ class OpenAIAdapter:
             raw=response.output_text; payload=json.loads(raw)
             if type(payload) is not dict: raise ValueError
             details=getattr(response.usage,"input_tokens_details",None)
-            usage=Usage(response.usage.input_tokens,response.usage.output_tokens,
-                        getattr(details,"cached_tokens",0) or 0,0)
+            total_input=response.usage.input_tokens
+            cache_read=getattr(details,"cached_tokens",0) or 0
+            # Responses API input_tokens includes cached input. Normalized Usage
+            # buckets are billing-exclusive; this path reports no cache writes.
+            ordinary_input=total_input-cache_read
+            if ordinary_input < 0: raise ValueError
+            usage=Usage(ordinary_input,response.usage.output_tokens,cache_read,0)
             return ProviderResult(payload,response.id,usage,self._pricing.calculate(request.route,usage),
                                   max(0,int((monotonic()-started)*1000)))
         except ProviderFailure: raise
@@ -71,6 +76,8 @@ class AnthropicAdapter:
             raw="".join(block.text for block in response.content if getattr(block,"type",None)=="text")
             payload=json.loads(raw)
             if type(payload) is not dict: raise ValueError
+            # Anthropic reports ordinary, cache-read, and cache-creation input as
+            # separate usage fields, so no subtraction or aggregation is needed.
             usage=Usage(response.usage.input_tokens,response.usage.output_tokens,
                         getattr(response.usage,"cache_read_input_tokens",0) or 0,
                         getattr(response.usage,"cache_creation_input_tokens",0) or 0)

@@ -16,9 +16,9 @@ if URL and not URL.rsplit("/",1)[-1].split("?",1)[0].endswith("_test"): raise Ru
 pytestmark=[pytest.mark.asyncio,pytest.mark.skipif(not URL,reason="TEST_DATABASE_URL is required")]
 
 def req(): return AuthoringRequestV1(schema_version="authoring-request.v1",task_goal="One task",subject="math",grade="g7",topic="fractions",task_type="test",answer_format="single_choice",difficulty=50,skills=("reasoning",),policy_version="authoring-v1")
-def execution(key="logical-key",fingerprint=None):
+def execution(key="logical-key",fingerprint=None,provider="fake",model="probe"):
     spec=PromptSpecification("contract-probe",AuthoringRole.GENERATOR,"1.0.0","probe-v1","a"*64,"authoring-provider-probe.v1","authoring-v1")
-    return ExecutionRequest(AuthoringRole.GENERATOR,"fake","probe",{"temperature":"0"},spec,fingerprint or req().fingerprint,1000,"correlation",key,RetryPolicy())
+    return ExecutionRequest(AuthoringRole.GENERATOR,provider,model,{"temperature":"0"},spec,fingerprint or req().fingerprint,1000,"correlation",key,RetryPolicy())
 
 @pytest_asyncio.fixture
 async def context():
@@ -56,6 +56,8 @@ async def test_idempotency_conflict_retry_numbering_and_failure_states(context):
     async with factory() as db,db.begin():
         repo=AuthoringRepository(db); first,_=await repo.create_attempt(sid,execution()); same,created=await repo.create_attempt(sid,execution()); assert same.id==first.id and not created
         with pytest.raises(AuthoringConflict): await repo.create_attempt(sid,execution(fingerprint="b"*64))
+        with pytest.raises(AuthoringConflict): await repo.create_attempt(sid,execution(provider="anthropic"))
+        with pytest.raises(AuthoringConflict): await repo.create_attempt(sid,execution(model="other-model"))
     for number,code in enumerate((FailureCode.TIMEOUT,FailureCode.AUTHENTICATION),start=1):
         key="logical-key" if number==1 else "logical-key-retry-2"
         async with factory() as db,db.begin():
