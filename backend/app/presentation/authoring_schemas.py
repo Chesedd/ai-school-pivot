@@ -20,6 +20,16 @@ class RunRequest(BaseModel):
     model_config=ConfigDict(extra="forbid",strict=True)
     generator_route: RouteRequest; solver_route: RouteRequest
 
+class AuthoringAcceptanceRequest(BaseModel):
+    model_config=ConfigDict(extra="forbid",strict=True)
+    acceptance_note: StrictStr|None=Field(default=None,min_length=1,max_length=2000)
+    confirm_questionable: bool=False
+
+class AuthoringPromotionResponseV1(BaseModel):
+    session_id:UUID; task_id:UUID; task_version_id:UUID; created_at:datetime
+    lifecycle_status:Literal["draft","review","approved","archived"]
+    already_existing:bool
+
 class CostTotal(BaseModel): currency:str; amount:Decimal
 class SessionResponse(BaseModel):
     id:UUID; schema_version:str; created_at:datetime; request:dict; request_fingerprint:str; execution_status:str; semantic_status:str|None
