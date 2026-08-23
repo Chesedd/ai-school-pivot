@@ -14,6 +14,8 @@ from app.presentation.routes import router
 from app.presentation.assessment_routes import router as assessment_router
 from app.presentation.student_assessment_routes import router as student_assessment_router
 from app.presentation.attachment_routes import router as attachment_router
+from app.presentation.authoring_routes import router as authoring_router
+from app.application.authoring_api import AuthoringApiError
 
 
 app = FastAPI()
@@ -23,6 +25,12 @@ app.include_router(router)
 app.include_router(assessment_router)
 app.include_router(student_assessment_router)
 app.include_router(attachment_router)
+app.include_router(authoring_router)
+
+@app.exception_handler(AuthoringApiError)
+async def authoring_error(_: Request, exc: AuthoringApiError) -> JSONResponse:
+    details=[] if exc.retryable is None else [{"field":"provider","code":"retryable","message":str(exc.retryable).lower()}]
+    return error_response(exc.code, "Authoring request could not be completed.", details, exc.status)
 
 @app.exception_handler(AssessmentError)
 async def assessment_error(_: Request, exc: AssessmentError) -> JSONResponse:
