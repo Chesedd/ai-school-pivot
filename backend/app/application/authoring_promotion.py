@@ -12,6 +12,7 @@ from sqlalchemy import select, update
 from app.application.authoring import AuthoringRequestV1, FrozenCatalogContext
 from app.application.authoring_pipeline import PipelineResumeState
 from app.application.authoring_review import AuthoringReviewDraftV1
+from app.application.authoring_quality import calculate_quality_report
 from app.application.content_bank import (
     AcceptedAnswerInput, ActorContext, ChoiceOptionInput, ChoiceScoringPolicyInput,
     CreateTaskCommand, CreateTaskOperation, ExpectedSolutionInput, HintInput,
@@ -44,7 +45,7 @@ class PromoteAuthoringArtifactService:
         self.content = SQLAlchemyContentBankRepository(session)
 
     async def accept(self, session_id: UUID, actor_id: UUID, *, acceptance_note: str | None,
-                     confirm_questionable: bool) -> AuthoringPromotionResponseV1:
+                     confirm_questionable: bool, warning_override_reason: str | None = None) -> AuthoringPromotionResponseV1:
         row = await self.db.scalar(select(AuthoringSession).where(
             AuthoringSession.id == session_id, AuthoringSession.owner_id == actor_id,
         ).with_for_update())
@@ -64,6 +65,21 @@ class PromoteAuthoringArtifactService:
             self._reject("authoring_review_not_started")
         if review.state != "reviewing":
             self._reject("authoring_review_not_accepting")
+
+        quality = calculate_quality_report(row, review)
+        self.db.add(AuthoringReviewAudit(session_id=session_id, review_id=review.id,
+            actor_id=actor_id, action="quality_report_created", review_version=review.version,
+            details={"quality_report_id":quality.report_id,"overall_status":quality.overall_status}))
+        if quality.overall_status == "blocked":
+            self._reject("authoring_quality_blocked")
+        warnings = [check.code for check in quality.checks if check.severity == "warning" and not check.passed]
+        if warnings and warning_override_reason is None:
+            self._reject("authoring_quality_warning_override_required")
+        if warnings:
+            self.db.add(AuthoringReviewAudit(session_id=session_id, review_id=review.id,
+                actor_id=actor_id, action="warning_overridden", review_version=review.version,
+                details={"quality_report_id":quality.report_id,"warning_codes":warnings,
+                    "reason":warning_override_reason}))
 
         state = self._artifact(row)
         status = state.validation_result.status

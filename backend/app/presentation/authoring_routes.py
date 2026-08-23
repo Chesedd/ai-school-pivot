@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Header, Query, Response
 from app.application.authoring import ModelRoute, Price, PricingCatalog
 from app.application.authoring_api import AuthoringApplicationService, AuthoringRouteCatalog
 from app.application.authoring_promotion import PromoteAuthoringArtifactService
+from app.application.authoring_quality import AuthoringQualityReportV1, AuthoringQualityService
 from app.application.authoring_review import AuthoringReviewService
 from app.config import Settings, get_settings
 from app.db.session import get_session
@@ -57,6 +58,10 @@ async def start_review(session_id:UUID,db=Depends(get_session),settings:Settings
 async def get_review(session_id:UUID,db=Depends(get_session),settings:Settings=Depends(get_settings)):
     return await AuthoringReviewService(db).get(session_id,settings.content_bank_dev_actor_id)
 
+@router.get("/sessions/{session_id}/quality",response_model=AuthoringQualityReportV1)
+async def get_quality(session_id:UUID,db=Depends(get_session),settings:Settings=Depends(get_settings)):
+    return await AuthoringQualityService(db).get(session_id,settings.content_bank_dev_actor_id)
+
 @router.put("/sessions/{session_id}/review",response_model=AuthoringReviewResponseV1)
 async def edit_review(session_id:UUID,payload:AuthoringReviewEditRequest,db=Depends(get_session),settings:Settings=Depends(get_settings)):
     return await AuthoringReviewService(db).edit(session_id,settings.content_bank_dev_actor_id,payload.draft,payload.version)
@@ -68,4 +73,5 @@ async def reject(session_id:UUID,payload:AuthoringRejectRequest,db=Depends(get_s
 @router.post("/sessions/{session_id}/accept",response_model=AuthoringPromotionResponseV1)
 async def accept(session_id:UUID,payload:AuthoringAcceptanceRequest,db=Depends(get_session),settings:Settings=Depends(get_settings)):
     return await PromoteAuthoringArtifactService(db).accept(session_id,settings.content_bank_dev_actor_id,
-        acceptance_note=payload.acceptance_note,confirm_questionable=payload.confirm_questionable)
+        acceptance_note=payload.acceptance_note,confirm_questionable=payload.confirm_questionable,
+        warning_override_reason=payload.warning_override_reason)
