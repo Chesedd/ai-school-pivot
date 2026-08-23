@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from app.application.authoring_review import AuthoringReviewDraftV1, review_dto
+from app.application.authoring_review import AuthoringReviewDraftV1, review_dto, revision_diff
 
 
 DRAFT = {"schema_version":"authoring_review_draft.v1","title":"Draft","statement":"2 + 2?",
@@ -39,3 +39,17 @@ def test_review_response_exposes_state_and_optimistic_version_only():
     response = review_dto(review)
     assert response["state"] == "reviewing" and response["version"] == 3
     assert "generated_draft" not in response and "frozen_request" not in response
+
+
+def test_revision_diff_is_deterministic_and_returns_changed_fields_only():
+    current = {**DRAFT, "title":"Human title", "choice_options":[{"key":"a","content":"Four"}],
+        "hints":["Add."]}
+    assert revision_diff(DRAFT, current) == [
+        {"field":"title","from":"Draft","to":"Human title"},
+        {"field":"choices","from":[],"to":[{"key":"a","content":"Four"}]},
+        {"field":"hints","from":["Count."],"to":["Add."]},
+    ]
+
+
+def test_revision_diff_reports_no_unchanged_fields():
+    assert revision_diff(DRAFT, dict(DRAFT)) == []

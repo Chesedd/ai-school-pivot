@@ -14,7 +14,8 @@ from app.db.session import get_session
 from app.infrastructure.authoring_providers import production_registry
 from app.presentation.authoring_schemas import (AuthoringAcceptanceRequest, AuthoringCreateRequest,
     AuthoringPromotionResponseV1, AuthoringRejectRequest, AuthoringReviewEditRequest,
-    AuthoringReviewResponseV1, RunRequest, SessionResponse)
+    AuthoringReviewResponseV1, AuthoringReviewHistoryResponseV1,
+    AuthoringReviewDiffResponseV1, RunRequest, SessionResponse)
 
 router=APIRouter(prefix="/api/content-bank/authoring",tags=["authoring"])
 
@@ -58,6 +59,16 @@ async def start_review(session_id:UUID,db=Depends(get_session),settings:Settings
 async def get_review(session_id:UUID,db=Depends(get_session),settings:Settings=Depends(get_settings)):
     return await AuthoringReviewService(db).get(session_id,settings.content_bank_dev_actor_id)
 
+@router.get("/sessions/{session_id}/review/history",response_model=AuthoringReviewHistoryResponseV1)
+async def review_history(session_id:UUID,db=Depends(get_session),settings:Settings=Depends(get_settings)):
+    return await AuthoringReviewService(db).history(session_id,settings.content_bank_dev_actor_id)
+
+@router.get("/sessions/{session_id}/review/diff",response_model=AuthoringReviewDiffResponseV1)
+async def review_diff(session_id:UUID,from_revision:int|None=Query(None,ge=0),
+        to_revision:int|None=Query(None,ge=0),db=Depends(get_session),settings:Settings=Depends(get_settings)):
+    return await AuthoringReviewService(db).diff(session_id,settings.content_bank_dev_actor_id,
+        from_revision,to_revision)
+
 @router.get("/sessions/{session_id}/quality",response_model=AuthoringQualityReportV1)
 async def get_quality(session_id:UUID,db=Depends(get_session),settings:Settings=Depends(get_settings)):
     return await AuthoringQualityService(db).get(session_id,settings.content_bank_dev_actor_id)
@@ -74,4 +85,4 @@ async def reject(session_id:UUID,payload:AuthoringRejectRequest,db=Depends(get_s
 async def accept(session_id:UUID,payload:AuthoringAcceptanceRequest,db=Depends(get_session),settings:Settings=Depends(get_settings)):
     return await PromoteAuthoringArtifactService(db).accept(session_id,settings.content_bank_dev_actor_id,
         acceptance_note=payload.acceptance_note,confirm_questionable=payload.confirm_questionable,
-        warning_override_reason=payload.warning_override_reason)
+        warning_override_reason=payload.warning_override_reason,revision_number=payload.revision_number)

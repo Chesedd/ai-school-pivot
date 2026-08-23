@@ -13,7 +13,19 @@ from app.application.authoring_pipeline import (
     ChoiceOptionV1, GeneratedTaskDraftV1, MAX_ANSWER, MAX_HINTS, MAX_SOLUTION,
     MAX_STATEMENT, MAX_TITLE,
 )
-from app.infrastructure.authoring_models import AuthoringReview, AuthoringReviewAudit, AuthoringSession
+from app.infrastructure.authoring_models import (AuthoringReview, AuthoringReviewAudit,
+    AuthoringReviewRevision, AuthoringSession)
+
+DIFF_FIELDS = (("title", "title"), ("statement", "statement"),
+    ("choices", "choice_options"), ("expected_answer", "expected_answer"),
+    ("solution", "solution"), ("hints", "hints"))
+
+
+def revision_diff(previous: object, current: object) -> list[dict]:
+    """Return changed reviewer fields in a stable, public order."""
+    before, after = dict(previous), dict(current)
+    return [{"field": public, "from": before.get(stored), "to": after.get(stored)}
+        for public, stored in DIFF_FIELDS if before.get(stored) != after.get(stored)]
 
 
 class AuthoringReviewDraftV1(BaseModel):
@@ -76,7 +88,12 @@ class AuthoringReviewService:
         review = AuthoringReview(id=uuid4(), session_id=session_id, owner_id=owner_id,
             state="reviewing", draft=draft.model_dump(mode="json"), version=1)
         self.db.add(review); await self.db.flush()
+        revision = AuthoringReviewRevision(id=uuid4(), session_id=session_id, review_id=review.id,
+            revision_number=0, snapshot=draft.model_dump(mode="json"), actor_id=owner_id,
+            change_summary={"source":"ai_draft","changed_fields":[]})
+        self.db.add(revision)
         self._audit(review, owner_id, "review_started")
+        self._audit(review, owner_id, "review_revision_created", {"revision_id":str(revision.id),"revision_number":0})
         await self.db.commit(); await self.db.refresh(review)
         return review_dto(review)
 
@@ -101,8 +118,44 @@ class AuthoringReviewService:
             if current is None: self._error("authoring_review_not_started", 409)
             if current.state != "reviewing": self._error("authoring_review_not_editable", 409)
             self._error("authoring_review_version_conflict", 409)
-        self._audit(review, owner_id, "review_changed", {"previous_version":expected_version})
+        previous = await self.db.scalar(select(AuthoringReviewRevision).where(
+            AuthoringReviewRevision.review_id == review.id).order_by(AuthoringReviewRevision.revision_number.desc()))
+        number = previous.revision_number + 1
+        changes = revision_diff(previous.snapshot, draft.model_dump(mode="json"))
+        revision = AuthoringReviewRevision(id=uuid4(), session_id=session_id, review_id=review.id,
+            revision_number=number, snapshot=draft.model_dump(mode="json"), actor_id=owner_id,
+            change_summary={"source":"human_edit","changed_fields":[x["field"] for x in changes]})
+        self.db.add(revision)
+        self._audit(review, owner_id, "review_changed", {"previous_version":expected_version,"revision_number":number})
+        self._audit(review, owner_id, "review_revision_created", {"revision_id":str(revision.id),"revision_number":number})
         await self.db.commit(); return review_dto(review)
+
+    async def history(self, session_id: UUID, owner_id: UUID) -> dict:
+        await self._session(session_id, owner_id)
+        review = await self._review(session_id, owner_id)
+        revisions = list((await self.db.scalars(select(AuthoringReviewRevision).where(
+            AuthoringReviewRevision.review_id == review.id).order_by(AuthoringReviewRevision.revision_number))).all())
+        return {"schema_version":"authoring_review_history.v1","session_id":session_id,
+            "current_revision":revisions[-1].revision_number,
+            "accepted_revision_id":review.accepted_revision_id,
+            "revisions":[{"id":x.id,"revision_number":x.revision_number,"snapshot":x.snapshot,
+                "created_at":x.created_at,"actor_id":x.actor_id,"change_summary":x.change_summary} for x in revisions]}
+
+    async def diff(self, session_id: UUID, owner_id: UUID, from_revision: int | None,
+                   to_revision: int | None) -> dict:
+        await self._session(session_id, owner_id)
+        review = await self._review(session_id, owner_id)
+        revisions = list((await self.db.scalars(select(AuthoringReviewRevision).where(
+            AuthoringReviewRevision.review_id == review.id).order_by(AuthoringReviewRevision.revision_number))).all())
+        latest = revisions[-1].revision_number
+        target, source = latest if to_revision is None else to_revision, from_revision
+        if source is None: source = max(0, target - 1)
+        by_number = {x.revision_number:x for x in revisions}
+        if source not in by_number or target not in by_number:
+            self._error("authoring_review_revision_not_found", 404)
+        return {"schema_version":"authoring_review_diff.v1","session_id":session_id,
+            "from_revision":source,"to_revision":target,
+            "changes":revision_diff(by_number[source].snapshot, by_number[target].snapshot)}
 
     async def reject(self, session_id: UUID, owner_id: UUID, *, reason: str | None) -> dict:
         session = await self._session(session_id, owner_id, lock=True)
