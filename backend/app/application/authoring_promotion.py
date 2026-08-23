@@ -4,18 +4,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+import json
 from uuid import UUID
 
 from sqlalchemy import select, update
 
 from app.application.authoring import AuthoringRequestV1, FrozenCatalogContext
 from app.application.authoring_pipeline import PipelineResumeState
+from app.application.authoring_review import AuthoringReviewDraftV1
 from app.application.content_bank import (
     AcceptedAnswerInput, ActorContext, ChoiceOptionInput, ChoiceScoringPolicyInput,
     CreateTaskCommand, CreateTaskOperation, ExpectedSolutionInput, HintInput,
     SaveMethodologyCommand, SkillLinkInput, VersionContentInput,
 )
-from app.infrastructure.authoring_models import AuthoringSession
+from app.infrastructure.authoring_models import AuthoringReview, AuthoringReviewAudit, AuthoringSession
 from app.infrastructure.models import AuditLog, Grade, Skill, Subject, Subtopic, TaskVersion, Topic
 from app.infrastructure.repository import SQLAlchemyContentBankRepository
 
@@ -55,6 +57,14 @@ class PromoteAuthoringArtifactService:
             await self.db.commit()
             return existing
 
+        review = await self.db.scalar(select(AuthoringReview).where(
+            AuthoringReview.session_id == session_id, AuthoringReview.owner_id == actor_id,
+        ).with_for_update())
+        if review is None:
+            self._reject("authoring_review_not_started")
+        if review.state != "reviewing":
+            self._reject("authoring_review_not_accepting")
+
         state = self._artifact(row)
         status = state.validation_result.status
         if row.semantic_status != status:
@@ -79,7 +89,7 @@ class PromoteAuthoringArtifactService:
             rounded = [Decimal("0.0001") * (weight / Decimal("0.0001")).quantize(Decimal("1")) for _ in links]
             rounded[-1] = Decimal("1.0000") - sum(rounded[:-1], Decimal(0))
             links = tuple(SkillLinkInput(link.skill_id, rounded[index], link.is_primary) for index, link in enumerate(links))
-        draft = state.generated_draft
+        draft = AuthoringReviewDraftV1.model_validate_json(json.dumps(review.draft))
         command = CreateTaskCommand(subject.id, grade.id, topic.id, subtopic.id if subtopic else None,
             VersionContentInput(draft.title, draft.statement, draft.task_type, draft.answer_format,
                 request.difficulty, None, links))
@@ -94,11 +104,16 @@ class PromoteAuthoringArtifactService:
             tuple(ChoiceOptionInput(value.key, value.content, index) for index, value in enumerate(draft.choice_options)),
             ChoiceScoringPolicyInput("all_or_nothing") if draft.choice_options else None)
         await self.content.replace_methodology(methodology)
-        details = {"authoring_session_id": str(session_id), "acceptance_policy": status}
+        details = {"authoring_session_id": str(session_id), "acceptance_policy": status,
+            "authoring_review_version": review.version}
         if acceptance_note is not None:
             details["acceptance_note"] = acceptance_note
         await self.db.execute(update(AuditLog).where(AuditLog.task_id == created.id,
             AuditLog.action == "task_created").values(details=details))
+        review.state = "accepted"
+        self.db.add(AuthoringReviewAudit(session_id=session_id,review_id=review.id,
+            actor_id=actor_id,action="accepted",review_version=review.version,
+            details={"task_id":str(created.id),"task_version_id":str(version_id)}))
         row.status = "confirmed"
         await self.db.commit()
         return AuthoringPromotionResponseV1(session_id, created.id, version_id,
