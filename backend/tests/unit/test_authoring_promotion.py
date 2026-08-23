@@ -41,6 +41,7 @@ def test_acceptance_request_cannot_override_content_or_catalog():
         "warning_override_reason":"Verified manually"})
     assert request.acceptance_note == "Reviewed"
     assert request.warning_override_reason == "Verified manually"
+    assert AuthoringAcceptanceRequest.model_validate({"revision_number":0}).revision_number == 0
     with pytest.raises(ValidationError):
         AuthoringAcceptanceRequest.model_validate({"task_id":str(uuid4())})
     with pytest.raises(ValidationError):

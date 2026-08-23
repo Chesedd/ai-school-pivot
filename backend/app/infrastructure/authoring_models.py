@@ -76,12 +76,32 @@ class AuthoringReview(IdMixin, Base):
     version: Mapped[int] = mapped_column(Integer, server_default="1")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=clock)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=clock)
+    accepted_revision_id: Mapped[UUID | None] = mapped_column(ForeignKey(
+        "authoring_review_revisions.id", ondelete="RESTRICT", name="fk_authoring_reviews_accepted_revision",
+        use_alter=True))
+
+
+class AuthoringReviewRevision(IdMixin, Base):
+    """Append-only snapshot of the reviewer-visible artifact (never provider data)."""
+    __tablename__ = "authoring_review_revisions"
+    __table_args__ = (
+        CheckConstraint("revision_number >= 0", name="ck_authoring_review_revisions_number"),
+        UniqueConstraint("session_id", "revision_number", name="uq_authoring_review_revisions_number"),
+        Index("ix_authoring_review_revisions_session_number", "session_id", "revision_number"),
+    )
+    session_id: Mapped[UUID] = mapped_column(ForeignKey("authoring_sessions.id", ondelete="RESTRICT", name="fk_authoring_review_revisions_session"))
+    review_id: Mapped[UUID] = mapped_column(ForeignKey("authoring_reviews.id", ondelete="RESTRICT", name="fk_authoring_review_revisions_review"))
+    revision_number: Mapped[int] = mapped_column(Integer)
+    snapshot: Mapped[object] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=clock)
+    actor_id: Mapped[UUID] = mapped_column(uuid_type)
+    change_summary: Mapped[object] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
 
 
 class AuthoringReviewAudit(IdMixin, Base):
     __tablename__ = "authoring_review_audit"
     __table_args__ = (
-        CheckConstraint("action IN ('review_started','review_changed','quality_report_created','warning_overridden','accepted','rejected')", name="ck_authoring_review_audit_action"),
+        CheckConstraint("action IN ('review_started','review_changed','review_revision_created','review_revision_accepted','quality_report_created','warning_overridden','accepted','rejected')", name="ck_authoring_review_audit_action"),
         CheckConstraint("review_version > 0", name="ck_authoring_review_audit_version"),
         Index("ix_authoring_review_audit_session_created", "session_id", "created_at"),
     )

@@ -26,6 +26,7 @@ class AuthoringAcceptanceRequest(BaseModel):
     acceptance_note: StrictStr|None=Field(default=None,min_length=1,max_length=2000)
     confirm_questionable: bool=False
     warning_override_reason: StrictStr|None=Field(default=None,min_length=1,max_length=2000)
+    revision_number: int|None=Field(default=None,ge=0)
 
 class AuthoringReviewEditRequest(BaseModel):
     model_config=ConfigDict(extra="forbid",strict=True)
@@ -44,6 +45,25 @@ class AuthoringPromotionResponseV1(BaseModel):
     session_id:UUID; task_id:UUID; task_version_id:UUID; created_at:datetime
     lifecycle_status:Literal["draft","review","approved","archived"]
     already_existing:bool
+
+class AuthoringReviewRevisionResponseV1(BaseModel):
+    id:UUID; revision_number:int; snapshot:AuthoringReviewDraftV1; created_at:datetime
+    actor_id:UUID; change_summary:dict
+
+class AuthoringReviewHistoryResponseV1(BaseModel):
+    schema_version:Literal["authoring_review_history.v1"]
+    session_id:UUID; current_revision:int; accepted_revision_id:UUID|None
+    revisions:list[AuthoringReviewRevisionResponseV1]
+
+class AuthoringReviewFieldChangeV1(BaseModel):
+    field:Literal["title","statement","choices","expected_answer","solution","hints"]
+    from_:object=Field(alias="from"); to:object
+    model_config=ConfigDict(populate_by_name=True)
+
+class AuthoringReviewDiffResponseV1(BaseModel):
+    schema_version:Literal["authoring_review_diff.v1"]
+    session_id:UUID; from_revision:int; to_revision:int
+    changes:list[AuthoringReviewFieldChangeV1]
 
 class CostTotal(BaseModel): currency:str; amount:Decimal
 class SessionResponse(BaseModel):

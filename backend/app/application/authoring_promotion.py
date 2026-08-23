@@ -18,7 +18,8 @@ from app.application.content_bank import (
     CreateTaskCommand, CreateTaskOperation, ExpectedSolutionInput, HintInput,
     SaveMethodologyCommand, SkillLinkInput, VersionContentInput,
 )
-from app.infrastructure.authoring_models import AuthoringReview, AuthoringReviewAudit, AuthoringSession
+from app.infrastructure.authoring_models import (AuthoringReview, AuthoringReviewAudit,
+    AuthoringReviewRevision, AuthoringSession)
 from app.infrastructure.models import AuditLog, Grade, Skill, Subject, Subtopic, TaskVersion, Topic
 from app.infrastructure.repository import SQLAlchemyContentBankRepository
 
@@ -45,7 +46,8 @@ class PromoteAuthoringArtifactService:
         self.content = SQLAlchemyContentBankRepository(session)
 
     async def accept(self, session_id: UUID, actor_id: UUID, *, acceptance_note: str | None,
-                     confirm_questionable: bool, warning_override_reason: str | None = None) -> AuthoringPromotionResponseV1:
+                     confirm_questionable: bool, warning_override_reason: str | None = None,
+                     revision_number: int | None = None) -> AuthoringPromotionResponseV1:
         row = await self.db.scalar(select(AuthoringSession).where(
             AuthoringSession.id == session_id, AuthoringSession.owner_id == actor_id,
         ).with_for_update())
@@ -66,7 +68,19 @@ class PromoteAuthoringArtifactService:
         if review.state != "reviewing":
             self._reject("authoring_review_not_accepting")
 
-        quality = calculate_quality_report(row, review)
+        revision_query = select(AuthoringReviewRevision).where(AuthoringReviewRevision.review_id == review.id)
+        if revision_number is None:
+            revision_query = revision_query.order_by(AuthoringReviewRevision.revision_number.desc())
+        else:
+            revision_query = revision_query.where(AuthoringReviewRevision.revision_number == revision_number)
+        revision = await self.db.scalar(revision_query)
+        if revision is None:
+            self._reject("authoring_review_revision_not_found")
+        # Quality checks and promotion are both pinned to the selected immutable snapshot.
+        quality_review = type("RevisionReview", (), {"id":review.id,
+            "version":revision.revision_number + 1,"draft":revision.snapshot})()
+
+        quality = calculate_quality_report(row, quality_review)
         self.db.add(AuthoringReviewAudit(session_id=session_id, review_id=review.id,
             actor_id=actor_id, action="quality_report_created", review_version=review.version,
             details={"quality_report_id":quality.report_id,"overall_status":quality.overall_status}))
@@ -105,7 +119,7 @@ class PromoteAuthoringArtifactService:
             rounded = [Decimal("0.0001") * (weight / Decimal("0.0001")).quantize(Decimal("1")) for _ in links]
             rounded[-1] = Decimal("1.0000") - sum(rounded[:-1], Decimal(0))
             links = tuple(SkillLinkInput(link.skill_id, rounded[index], link.is_primary) for index, link in enumerate(links))
-        draft = AuthoringReviewDraftV1.model_validate_json(json.dumps(review.draft))
+        draft = AuthoringReviewDraftV1.model_validate_json(json.dumps(revision.snapshot))
         command = CreateTaskCommand(subject.id, grade.id, topic.id, subtopic.id if subtopic else None,
             VersionContentInput(draft.title, draft.statement, draft.task_type, draft.answer_format,
                 request.difficulty, None, links))
@@ -121,15 +135,21 @@ class PromoteAuthoringArtifactService:
             ChoiceScoringPolicyInput("all_or_nothing") if draft.choice_options else None)
         await self.content.replace_methodology(methodology)
         details = {"authoring_session_id": str(session_id), "acceptance_policy": status,
-            "authoring_review_version": review.version}
+            "authoring_review_version": review.version, "accepted_revision_id":str(revision.id),
+            "accepted_revision_number":revision.revision_number}
         if acceptance_note is not None:
             details["acceptance_note"] = acceptance_note
         await self.db.execute(update(AuditLog).where(AuditLog.task_id == created.id,
             AuditLog.action == "task_created").values(details=details))
         review.state = "accepted"
+        review.accepted_revision_id = revision.id
         self.db.add(AuthoringReviewAudit(session_id=session_id,review_id=review.id,
             actor_id=actor_id,action="accepted",review_version=review.version,
             details={"task_id":str(created.id),"task_version_id":str(version_id)}))
+        self.db.add(AuthoringReviewAudit(session_id=session_id,review_id=review.id,
+            actor_id=actor_id,action="review_revision_accepted",review_version=review.version,
+            details={"revision_id":str(revision.id),"revision_number":revision.revision_number,
+                "task_id":str(created.id),"task_version_id":str(version_id)}))
         row.status = "confirmed"
         await self.db.commit()
         return AuthoringPromotionResponseV1(session_id, created.id, version_id,
