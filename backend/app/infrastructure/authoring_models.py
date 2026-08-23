@@ -27,6 +27,11 @@ class AuthoringSession(IdMixin,Base):
     frozen_request: Mapped[object]=mapped_column(JSONB); request_fingerprint: Mapped[str]=mapped_column(String(64))
     frozen_allowlist: Mapped[object]=mapped_column(JSONB); status: Mapped[str]=mapped_column(session_status,server_default=text("'draft'::authoring_session_status"))
     created_at: Mapped[datetime]=mapped_column(DateTime(timezone=True),server_default=clock); row_version: Mapped[int]=mapped_column(Integer,server_default="1")
+    pipeline_identity: Mapped[str|None]=mapped_column(String(64)); generator_route: Mapped[object|None]=mapped_column(JSONB)
+    solver_route: Mapped[object|None]=mapped_column(JSONB); generated_draft: Mapped[object|None]=mapped_column(JSONB)
+    solver_result: Mapped[object|None]=mapped_column(JSONB); validation_result: Mapped[object|None]=mapped_column(JSONB)
+    semantic_status: Mapped[str|None]=mapped_column(String(64))
+    generator_attempt_id: Mapped[UUID|None]=mapped_column(uuid_type); solver_attempt_id: Mapped[UUID|None]=mapped_column(uuid_type)
 
 
 class AuthoringProviderAttempt(IdMixin,Base):

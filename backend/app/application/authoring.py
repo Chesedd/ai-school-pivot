@@ -311,6 +311,7 @@ class PricingCatalog:
 
 class FakeAuthoringProvider:
     """Deterministic contract probe; never generates task content."""
+    capabilities=ProviderCapabilities()
     def __init__(self, result: ProviderResult | None=None, failures: tuple[FailureCode,...]=()): self.result=result; self.failures=list(failures)
     async def execute(self, request: ExecutionRequest) -> ProviderResult:
         if self.failures: raise ProviderFailure(self.failures.pop(0),"discarded raw adapter prose")
