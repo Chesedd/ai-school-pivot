@@ -159,6 +159,20 @@ class AuthoringRole(StrEnum): GENERATOR="generator"; SOLVER="solver"
 
 
 @dataclass(frozen=True)
+class ModelRoute:
+    """An explicit, provider-owned model selection (model ids are opaque to core)."""
+    provider_id: str; model_id: str
+    def __post_init__(self): _identifier(self.provider_id); _identifier(self.model_id)
+
+
+@dataclass(frozen=True)
+class ProviderCapabilities:
+    structured_output: bool = True
+    usage_reporting: bool = True
+    cache_usage_reporting: bool = False
+
+
+@dataclass(frozen=True)
 class PromptSpecification:
     stable_name: str; role: AuthoringRole; semantic_version: str; template_version: str
     template_hash: str; output_schema_version: str; policy_version: str
@@ -186,9 +200,14 @@ class FailureCode(StrEnum):
     TIMEOUT="timeout"; RATE_LIMIT="rate_limit"; TRANSIENT_TRANSPORT="transient_transport"; PROVIDER_5XX="provider_5xx"
     AUTHENTICATION="authentication"; INVALID_PROVIDER_REQUEST="invalid_provider_request"
     UNSUPPORTED_CONFIGURATION="unsupported_configuration"; CONTENT_BLOCKED="content_blocked"; CONTRACT_VIOLATION="contract_violation"
+    PERMISSION_ERROR="permission_error"; CONNECTION_ERROR="connection_error"; PROVIDER_UNAVAILABLE="provider_unavailable"
+    CONTEXT_LIMIT="context_limit"; UNSUPPORTED_CAPABILITY="unsupported_capability"; MALFORMED_RESPONSE="malformed_response"
+    SCHEMA_VIOLATION="schema_violation"; UNKNOWN_PROVIDER_ERROR="unknown_provider_error"
+    AUTHENTICATION_ERROR="authentication_error"; RATE_LIMITED="rate_limited"; INVALID_REQUEST="invalid_request"
 
 
-RETRYABLE=frozenset({FailureCode.TIMEOUT,FailureCode.RATE_LIMIT,FailureCode.TRANSIENT_TRANSPORT,FailureCode.PROVIDER_5XX})
+RETRYABLE=frozenset({FailureCode.TIMEOUT,FailureCode.RATE_LIMIT,FailureCode.TRANSIENT_TRANSPORT,FailureCode.PROVIDER_5XX,
+                     FailureCode.CONNECTION_ERROR,FailureCode.PROVIDER_UNAVAILABLE,FailureCode.RATE_LIMITED})
 
 
 class ProviderFailure(Exception):
@@ -200,9 +219,11 @@ class ProviderFailure(Exception):
 
 @dataclass(frozen=True)
 class Usage:
-    input_tokens: int; output_tokens: int; cached_tokens: int=0
+    input_tokens: int; output_tokens: int; cache_read_tokens: int=0; cache_write_tokens: int=0
     def __post_init__(self):
-        if any(type(v) is not int or not 0 <= v <= MAX_TOKENS for v in (self.input_tokens,self.output_tokens,self.cached_tokens)): raise AuthoringError("invalid_request")
+        if any(type(v) is not int or not 0 <= v <= MAX_TOKENS for v in (self.input_tokens,self.output_tokens,self.cache_read_tokens,self.cache_write_tokens)): raise AuthoringError("invalid_request")
+    @property
+    def cached_tokens(self) -> int: return self.cache_read_tokens
 
 
 @dataclass(frozen=True)
@@ -227,11 +248,17 @@ class ExecutionRequest:
     role: AuthoringRole; provider_id: str; model_id: str; settings: Mapping[str,Any]
     prompt: PromptSpecification; request_fingerprint: str; timeout_ms: int
     correlation_id: str; idempotency_key: str; retry_policy: RetryPolicy
+    messages: tuple[Mapping[str,Any], ...] = ()
+    output_schema: Mapping[str,Any] | None = None
     def __post_init__(self):
         _identifier(self.provider_id); _identifier(self.model_id); _identifier(self.correlation_id); _identifier(self.idempotency_key)
         if self.prompt.role != self.role or not HASH_PATTERN.fullmatch(self.request_fingerprint): raise AuthoringError("invalid_request")
         if type(self.timeout_ms) is not int or not 1 <= self.timeout_ms <= MAX_TIMEOUT_MS: raise AuthoringError("unsupported_value")
         object.__setattr__(self,"settings",freeze_json(self.settings))
+        object.__setattr__(self,"messages",tuple(freeze_json(v) for v in self.messages))
+        object.__setattr__(self,"output_schema",freeze_json(self.output_schema) if self.output_schema is not None else None)
+    @property
+    def route(self) -> ModelRoute: return ModelRoute(self.provider_id,self.model_id)
 
 
 @dataclass(frozen=True)
@@ -250,6 +277,38 @@ class AuthoringProvider(Protocol):
     async def execute(self, request: ExecutionRequest) -> ProviderResult: ...
 
 
+class ProviderRegistry:
+    """Thread-safe-after-construction lookup by stable provider id."""
+    def __init__(self): self._providers: dict[str,AuthoringProvider] = {}
+    def register(self, provider_id: str, provider: AuthoringProvider) -> None:
+        _identifier(provider_id)
+        if provider_id in self._providers: raise AuthoringError("duplicate_provider")
+        self._providers[provider_id]=provider
+    def get(self, provider_id: str) -> AuthoringProvider:
+        _identifier(provider_id)
+        try: return self._providers[provider_id]
+        except KeyError: raise AuthoringError("unknown_provider") from None
+
+
+@dataclass(frozen=True)
+class Price:
+    currency: str; pricing_version: str; pricing_source: str
+    input_token_rate: Decimal; output_token_rate: Decimal
+    cache_read_token_rate: Decimal = Decimal(0); cache_write_token_rate: Decimal = Decimal(0)
+    def cost(self, usage: Usage) -> Cost:
+        amount=(Decimal(usage.input_tokens)*self.input_token_rate + Decimal(usage.output_tokens)*self.output_token_rate +
+                Decimal(usage.cache_read_tokens)*self.cache_read_token_rate + Decimal(usage.cache_write_tokens)*self.cache_write_token_rate)
+        return Cost(amount.quantize(Decimal("0.00000001")),self.currency,self.pricing_version,self.pricing_source)
+
+
+class PricingCatalog:
+    def __init__(self, prices: Mapping[tuple[str,str],Price]): self._prices=MappingProxyType(dict(prices))
+    def calculate(self, route: ModelRoute, usage: Usage) -> Cost:
+        try: price=self._prices[(route.provider_id,route.model_id)]
+        except KeyError: raise AuthoringError("unsupported_value") from None
+        return price.cost(usage)
+
+
 class FakeAuthoringProvider:
     """Deterministic contract probe; never generates task content."""
     def __init__(self, result: ProviderResult | None=None, failures: tuple[FailureCode,...]=()): self.result=result; self.failures=list(failures)
@@ -266,16 +325,17 @@ async def invoke_provider(provider: AuthoringProvider, request: ExecutionRequest
 
 class AuthoringExecutionService:
     """Narrow orchestration only; it creates no task, preview, or solver semantics."""
-    def __init__(self, repository: Any, provider: AuthoringProvider): self.repository=repository; self.provider=provider
+    def __init__(self, repository: Any, provider: AuthoringProvider | ProviderRegistry): self.repository=repository; self.provider=provider
     async def execute(self, session_id: Any, request: ExecutionRequest) -> Any:
         last=None
         for number in range(1,request.retry_policy.max_attempts+1):
-            current=request if number==1 else ExecutionRequest(request.role,request.provider_id,request.model_id,request.settings,request.prompt,request.request_fingerprint,request.timeout_ms,request.correlation_id,f"{request.idempotency_key}-retry-{number}",request.retry_policy)
+            current=request if number==1 else ExecutionRequest(request.role,request.provider_id,request.model_id,request.settings,request.prompt,request.request_fingerprint,request.timeout_ms,request.correlation_id,f"{request.idempotency_key}-retry-{number}",request.retry_policy,request.messages,request.output_schema)
             attempt,created=await self.repository.create_attempt(session_id,current)
             if not created and attempt.status in {"succeeded","invalid_output","failed_terminal"}: return attempt
             if not await self.repository.claim(attempt.id): return attempt
             try:
-                result=await invoke_provider(self.provider,current)
+                selected=self.provider.get(current.provider_id) if isinstance(self.provider,ProviderRegistry) else self.provider
+                result=await invoke_provider(selected,current)
                 await self.repository.finalize_success(attempt.id,result)
                 return attempt
             except ProviderFailure as failure:

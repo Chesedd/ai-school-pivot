@@ -20,7 +20,7 @@ class AuthoringRepository:
     async def create_attempt(self, session_id: UUID, execution: ExecutionRequest) -> tuple[AuthoringProviderAttempt,bool]:
         existing=await self.db.scalar(select(AuthoringProviderAttempt).where(AuthoringProviderAttempt.session_id==session_id,AuthoringProviderAttempt.idempotency_key==execution.idempotency_key))
         if existing:
-            if existing.request_fingerprint != execution.request_fingerprint: raise AuthoringConflict()
+            if (existing.request_fingerprint != execution.request_fingerprint or existing.provider_id != execution.provider_id or existing.model_id != execution.model_id): raise AuthoringConflict()
             return existing,False
         # Lock aggregate: serializes retry numbering and creation for a session.
         session=await self.db.scalar(select(AuthoringSession).where(AuthoringSession.id==session_id).with_for_update())
@@ -28,7 +28,7 @@ class AuthoringRepository:
         if session.request_fingerprint != execution.request_fingerprint: raise AuthoringConflict()
         existing=await self.db.scalar(select(AuthoringProviderAttempt).where(AuthoringProviderAttempt.session_id==session_id,AuthoringProviderAttempt.idempotency_key==execution.idempotency_key))
         if existing:
-            if existing.request_fingerprint != execution.request_fingerprint: raise AuthoringConflict()
+            if (existing.request_fingerprint != execution.request_fingerprint or existing.provider_id != execution.provider_id or existing.model_id != execution.model_id): raise AuthoringConflict()
             return existing,False
         number=(await self.db.scalar(select(func.coalesce(func.max(AuthoringProviderAttempt.attempt_number),0)).where(AuthoringProviderAttempt.session_id==session_id,AuthoringProviderAttempt.role==execution.role.value)))+1
         prompt={"stable_name":execution.prompt.stable_name,"role":execution.prompt.role.value,"semantic_version":execution.prompt.semantic_version,"template_version":execution.prompt.template_version,"template_hash":execution.prompt.template_hash,"output_schema_version":execution.prompt.output_schema_version,"policy_version":execution.prompt.policy_version}
@@ -45,7 +45,7 @@ class AuthoringRepository:
         await self.db.flush(); return result.rowcount==1
 
     async def finalize_success(self, attempt_id: UUID, result: ProviderResult, *, invalid_output: bool=False) -> bool:
-        values={"status":"invalid_output" if invalid_output else "succeeded","finished_at":func.clock_timestamp(),"provider_request_id":result.provider_request_id,"response_hash":result.response_hash,"latency_ms":result.latency_ms,"input_tokens":result.usage.input_tokens,"output_tokens":result.usage.output_tokens,"cached_tokens":result.usage.cached_tokens,"cost_amount":result.cost.amount,"currency":result.cost.currency,"pricing_version":result.cost.pricing_version,"pricing_source":result.cost.pricing_source}
+        values={"status":"invalid_output" if invalid_output else "succeeded","finished_at":func.clock_timestamp(),"provider_request_id":result.provider_request_id,"response_hash":result.response_hash,"latency_ms":result.latency_ms,"input_tokens":result.usage.input_tokens,"output_tokens":result.usage.output_tokens,"cached_tokens":result.usage.cached_tokens,"cache_read_tokens":result.usage.cache_read_tokens,"cache_write_tokens":result.usage.cache_write_tokens,"cost_amount":result.cost.amount,"currency":result.cost.currency,"pricing_version":result.cost.pricing_version,"pricing_source":result.cost.pricing_source}
         changed=await self.db.execute(update(AuthoringProviderAttempt).where(AuthoringProviderAttempt.id==attempt_id,AuthoringProviderAttempt.status=="running").values(**values)); await self.db.flush(); return changed.rowcount==1
 
     async def finalize_failure(self, attempt_id: UUID, code: FailureCode) -> bool:
