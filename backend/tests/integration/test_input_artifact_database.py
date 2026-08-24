@@ -7,7 +7,9 @@ import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.application.input_artifacts import ArtifactError, ArtifactOwnershipService
+from app.application.input_artifacts import (ArtifactError, ArtifactOwnershipService,
+    ArtifactUploadService, MIN_ARTIFACT_SIZE_BYTES)
+from app.infrastructure.artifact_storage import FilesystemArtifactStorage
 from app.infrastructure.input_artifact_repository import SqlAlchemyArtifactRepository
 
 URL = os.environ.get("TEST_DATABASE_URL", "")
@@ -32,7 +34,7 @@ async def test_create_read_owner_isolation_and_session_relation(context):
     async with factory() as db, db.begin():
         service = ArtifactOwnershipService(SqlAlchemyArtifactRepository(db))
         artifact = await service.register_artifact(owner_id=owner, mime_type="application/pdf",
-            content_hash_sha256="c" * 64, size_bytes=4096,
+            content_hash_sha256="c" * 64, size_bytes=MIN_ARTIFACT_SIZE_BYTES,
             storage_reference=f"object://authoring/{uuid4()}")
     async with factory() as db, db.begin():
         service = ArtifactOwnershipService(SqlAlchemyArtifactRepository(db))
@@ -56,7 +58,7 @@ async def test_database_rejects_artifact_update_and_delete(context):
     async with factory() as db, db.begin():
         artifact = await ArtifactOwnershipService(SqlAlchemyArtifactRepository(db)).register_artifact(
             owner_id=uuid4(), mime_type="image/webp", content_hash_sha256="e" * 64,
-            size_bytes=12, storage_reference=f"object://authoring/{uuid4()}")
+            size_bytes=MIN_ARTIFACT_SIZE_BYTES, storage_reference=f"object://authoring/{uuid4()}")
     async with factory() as db:
         with pytest.raises(Exception, match="input artifacts are immutable"):
             await db.execute(text("UPDATE input_artifacts SET content_hash_sha256=:hash WHERE id=:id"),
@@ -64,3 +66,36 @@ async def test_database_rejects_artifact_update_and_delete(context):
     async with factory() as db:
         with pytest.raises(Exception, match="input artifacts are immutable"):
             await db.execute(text("DELETE FROM input_artifacts WHERE id=:id"), {"id": artifact.id})
+
+
+async def test_upload_creates_owned_metadata_and_stores_binary(context, tmp_path):
+    _, factory = context
+    owner, other = uuid4(), uuid4()
+    content = b"%PDF-1.7\n" + b"x" * (MIN_ARTIFACT_SIZE_BYTES - 9)
+    storage = FilesystemArtifactStorage(str(tmp_path))
+    async with factory() as db:
+        repository = SqlAlchemyArtifactRepository(db)
+        artifact = await ArtifactUploadService(repository, storage).upload(owner_id=owner,
+            content=content, claimed_mime_type="application/pdf")
+        assert await storage.read(artifact.storage_reference) == content
+    async with factory() as db:
+        ownership = ArtifactOwnershipService(SqlAlchemyArtifactRepository(db))
+        assert (await ownership.get_owned_artifact(artifact_id=artifact.id, owner_id=owner)).id == artifact.id
+        with pytest.raises(ArtifactError, match="artifact_access_denied"):
+            await ownership.get_owned_artifact(artifact_id=artifact.id, owner_id=other)
+
+
+async def test_failed_database_commit_cleans_up_binary(context, tmp_path):
+    _, factory = context
+    async with factory() as db:
+        repository = SqlAlchemyArtifactRepository(db)
+        async def fail_commit():
+            await db.rollback()
+            raise RuntimeError("forced transaction failure")
+        repository.commit = fail_commit
+        storage = FilesystemArtifactStorage(str(tmp_path))
+        content = b"\x89PNG\r\n\x1a\n" + b"x" * (MIN_ARTIFACT_SIZE_BYTES - 8)
+        with pytest.raises(RuntimeError, match="forced transaction failure"):
+            await ArtifactUploadService(repository, storage).upload(owner_id=uuid4(),
+                content=content, claimed_mime_type="image/png")
+        assert list(tmp_path.iterdir()) == []

@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
     attachment_storage_path: str = "/tmp/ai-school-pivot-attachments"
     attachment_max_bytes: int = 5 * 1024 * 1024
+    artifact_storage_path: str = "/tmp/ai-school-pivot-image-artifacts"
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
     authoring_routes: str = "openai:gpt-4.1-mini,anthropic:claude-sonnet-4-20250514"
