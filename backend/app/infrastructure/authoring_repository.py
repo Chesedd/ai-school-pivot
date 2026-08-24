@@ -75,7 +75,12 @@ class AuthoringRepository:
         # Lock aggregate: serializes retry numbering and creation for a session.
         session=await self.db.scalar(select(AuthoringSession).where(AuthoringSession.id==session_id).with_for_update())
         if session is None: raise AuthoringConflict()
-        if execution.role is AuthoringRole.GENERATOR and session.request_fingerprint != execution.request_fingerprint: raise AuthoringConflict()
+        # Legacy generator attempts remain bound to the frozen authoring request.
+        # Extractor attempts use the same deployed enum value but are bound to the
+        # immutable InputArtifactV1 fingerprint instead.
+        if (execution.role is AuthoringRole.GENERATOR
+                and execution.prompt.stable_name != "extractor.task"
+                and session.request_fingerprint != execution.request_fingerprint): raise AuthoringConflict()
         existing=await self.db.scalar(select(AuthoringProviderAttempt).where(AuthoringProviderAttempt.session_id==session_id,AuthoringProviderAttempt.idempotency_key==execution.idempotency_key))
         if existing:
             if (existing.request_fingerprint != execution.request_fingerprint or existing.provider_id != execution.provider_id or existing.model_id != execution.model_id): raise AuthoringConflict()
@@ -125,6 +130,21 @@ class AuthoringRepository:
         row.solver_route={"provider_id":solver_route.provider_id,"model_id":solver_route.model_id}
         await self.db.flush(); return PipelineResumeState()
 
+    async def configure_extraction_pipeline(self, session_id: UUID, identity: str, extractor_route, solver_route):
+        """Configure the new pipeline using legacy columns as a compatibility mapping."""
+        row=await self.db.scalar(select(AuthoringSession).where(AuthoringSession.id==session_id).with_for_update())
+        if row is None: raise AuthoringConflict()
+        if row.pipeline_identity is not None and row.pipeline_identity != identity: raise AuthoringConflict()
+        from app.application.extraction_pipeline import ExtractionResumeState
+        if row.pipeline_identity == identity:
+            return ExtractionResumeState.from_persisted(row.generated_draft,row.generator_attempt_id,
+                row.solver_result,row.solver_attempt_id)
+        row.pipeline_identity=identity
+        # generator_* is the deployed physical schema; application code exposes extractor_*.
+        row.generator_route={"provider_id":extractor_route.provider_id,"model_id":extractor_route.model_id}
+        row.solver_route={"provider_id":solver_route.provider_id,"model_id":solver_route.model_id}
+        await self.db.flush(); return ExtractionResumeState()
+
     def _result_values(self, result: ProviderResult) -> dict:
         return {"status":"succeeded","finished_at":func.clock_timestamp(),"provider_request_id":result.provider_request_id,
             "response_hash":result.response_hash,"latency_ms":result.latency_ms,"input_tokens":result.usage.input_tokens,
@@ -153,6 +173,13 @@ class AuthoringRepository:
             AuthoringProviderAttempt.id==attempt_id,AuthoringProviderAttempt.status=="running").values(**self._result_values(result)))
         if changed.rowcount != 1: raise AuthoringConflict()
         await self.db.flush()
+
+    async def checkpoint_extraction_success(self, session_id, identity, attempt_id, result, value):
+        """Persist extraction_result/extractor_attempt_id in legacy physical columns."""
+        await self.checkpoint_stage_success(session_id,identity,attempt_id,AuthoringRole.GENERATOR,result,value)
+
+    async def checkpoint_solution_success(self, session_id, identity, attempt_id, result, value):
+        await self.checkpoint_stage_success(session_id,identity,attempt_id,AuthoringRole.SOLVER,result,value)
 
     async def checkpoint_validation(self, session_id: UUID, identity: str, validation) -> None:
         changed=await self.db.execute(update(AuthoringSession).where(AuthoringSession.id==session_id,
