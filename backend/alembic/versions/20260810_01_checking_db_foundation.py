@@ -15,7 +15,7 @@ branch_labels = depends_on = None
 
 ENUMS = (
     ("checking_run_status", ("pending","running","completed","completed_with_review_required","failed_retryable","failed_terminal")),
-    ("checking_result_status", ("correct","incorrect","partially_correct","insufficient_rubric","manual_required")),
+    ("checking_result_status", ("correct","incorrect","partially_correct","unclear","insufficient_rubric","manual_required")),
     ("checking_checker_type", ("exact","multiple_choice","numeric","structured_expression","llm_rubric","manual_required")),
     ("checking_finding_type", ("rubric","typical_error","skill","general")),
     ("checking_finding_severity", ("info","minor","major","critical")),
