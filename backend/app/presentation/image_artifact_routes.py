@@ -11,6 +11,7 @@ from app.infrastructure.input_artifact_repository import SqlAlchemyArtifactRepos
 from app.presentation.image_artifact_schemas import ImageArtifactResponse
 
 router = APIRouter(prefix="/api/image-artifacts", tags=["image-artifacts"])
+_UPLOAD_FIELDS = frozenset({"file", "context"})
 
 def response(record) -> ImageArtifactResponse:
     return ImageArtifactResponse(artifact_id=record.id, mime_type=record.mime_type,
@@ -31,6 +32,12 @@ async def upload(request: Request,
         upload_service: ArtifactUploadService = Depends(service),
         settings: Settings = Depends(get_settings)):
     form = await request.form()
+    # Keep server-owned metadata out of the public contract. Rejecting unknown
+    # fields also prevents clients from assuming that a supplied value was used.
+    if any(key not in _UPLOAD_FIELDS for key in form):
+        raise HTTPException(422, "unexpected upload field")
+    if len(form.getlist("file")) != 1 or len(form.getlist("context")) > 1:
+        raise HTTPException(422, "duplicate upload field")
     file, context = form.get("file"), form.get("context")
     if not isinstance(file, UploadFile):
         raise HTTPException(422, "file is required")

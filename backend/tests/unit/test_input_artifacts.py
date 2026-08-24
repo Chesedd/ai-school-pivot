@@ -82,6 +82,7 @@ def payload(prefix: bytes) -> bytes:
 
 @pytest.mark.parametrize(("mime", "prefix"), [
     ("image/png", b"\x89PNG\r\n\x1a\n"), ("image/jpeg", b"\xff\xd8\xff"),
+    ("image/webp", b"RIFF\x00\x00\x00\x00WEBP"),
     ("application/pdf", b"%PDF-1.7\n"),
 ])
 async def test_upload_validates_signature_and_calculates_sha256(mime, prefix):
@@ -101,6 +102,7 @@ async def _done(): pass
 @pytest.mark.parametrize(("mime", "content", "code"), [
     ("image/gif", payload(b"GIF89a"), "unsupported_artifact_type"),
     ("image/png", payload(b"not-png"), "invalid_artifact_signature"),
+    ("image/png", b"\x89PNG\r\n\x1a\n", "artifact_too_small"),
     ("image/png", b"x" * (MAX_ARTIFACT_SIZE_BYTES + 1), "artifact_too_large"),
 ])
 async def test_upload_rejects_unsafe_input_before_storage(mime, content, code):
