@@ -34,7 +34,10 @@ def upgrade():
     op.execute("""INSERT INTO authoring_review_revisions
         (id, session_id, review_id, revision_number, snapshot, created_at, actor_id, change_summary)
         SELECT gen_random_uuid(), session_id, id, version - 1, draft, updated_at, owner_id,
-               '{"source":"legacy_backfill","history_available":false}'::jsonb
+               jsonb_build_object(
+                   'source', 'legacy_backfill',
+                   'history_available', false
+               )
         FROM authoring_reviews""")
     op.add_column("authoring_reviews",sa.Column("accepted_revision_id",sa.Uuid(),nullable=True))
     op.create_foreign_key("fk_authoring_reviews_accepted_revision","authoring_reviews",
