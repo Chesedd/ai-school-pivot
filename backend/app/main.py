@@ -16,6 +16,8 @@ from app.presentation.student_assessment_routes import router as student_assessm
 from app.presentation.attachment_routes import router as attachment_router
 from app.presentation.authoring_routes import router as authoring_router
 from app.application.authoring_api import AuthoringApiError
+from app.application.image_solving_api import ImageSolvingApiError
+from app.presentation.image_solving_routes import router as image_solving_router
 
 
 app = FastAPI()
@@ -26,6 +28,11 @@ app.include_router(assessment_router)
 app.include_router(student_assessment_router)
 app.include_router(attachment_router)
 app.include_router(authoring_router)
+app.include_router(image_solving_router)
+
+@app.exception_handler(ImageSolvingApiError)
+async def image_solving_error(_: Request, exc: ImageSolvingApiError) -> JSONResponse:
+    return error_response(exc.code, "Image solving request could not be completed.", [], exc.status)
 
 @app.exception_handler(AuthoringApiError)
 async def authoring_error(_: Request, exc: AuthoringApiError) -> JSONResponse:
