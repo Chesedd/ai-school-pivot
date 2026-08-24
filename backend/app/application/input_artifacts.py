@@ -14,6 +14,7 @@ SUPPORTED_ARTIFACT_MIME_TYPES = frozenset({
 })
 MIN_ARTIFACT_SIZE_BYTES = 1024 * 1024
 MAX_ARTIFACT_SIZE_BYTES = 25 * 1024 * 1024
+MAX_ARTIFACT_CONTEXT_LENGTH = 1000
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -77,7 +78,9 @@ class ArtifactUploadService:
                      context: str | None = None) -> InputArtifactRecord:
         if type(context) is not str and context is not None:
             raise ArtifactError("invalid_artifact_context")
-        if context is not None and (context != context.strip() or len(context) > 1000):
+        if context is not None and (
+            context != context.strip() or len(context) > MAX_ARTIFACT_CONTEXT_LENGTH
+        ):
             raise ArtifactError("invalid_artifact_context")
         if type(content) is not bytes or len(content) < MIN_ARTIFACT_SIZE_BYTES:
             raise ArtifactError("artifact_too_small")
