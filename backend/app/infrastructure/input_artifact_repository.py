@@ -30,3 +30,6 @@ class SqlAlchemyArtifactRepository:
     async def get(self, artifact_id: UUID) -> InputArtifactRecord | None:
         row = await self.db.get(InputArtifact, artifact_id)
         return None if row is None else _record(row)
+
+    async def commit(self) -> None:
+        await self.db.commit()
