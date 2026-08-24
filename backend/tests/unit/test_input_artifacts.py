@@ -76,20 +76,21 @@ class MemoryStorage:
     async def delete(self, reference): self.deleted.append(reference); self.values.pop(reference, None)
 
 
-def payload(prefix: bytes) -> bytes:
-    return prefix + b"x" * (MIN_ARTIFACT_SIZE_BYTES - len(prefix))
+def payload(prefix: bytes, size: int = 64 * 1024) -> bytes:
+    return prefix + b"x" * (size - len(prefix))
 
 
-@pytest.mark.parametrize(("mime", "prefix"), [
-    ("image/png", b"\x89PNG\r\n\x1a\n"), ("image/jpeg", b"\xff\xd8\xff"),
-    ("image/webp", b"RIFF\x00\x00\x00\x00WEBP"),
-    ("application/pdf", b"%PDF-1.7\n"),
+@pytest.mark.parametrize(("mime", "prefix", "size"), [
+    ("image/png", b"\x89PNG\r\n\x1a\n", 100 * 1024),
+    ("image/jpeg", b"\xff\xd8\xff", 128 * 1024),
+    ("image/webp", b"RIFF\x00\x00\x00\x00WEBP", 80 * 1024),
+    ("application/pdf", b"%PDF-1.7\n", 50 * 1024),
 ])
-async def test_upload_validates_signature_and_calculates_sha256(mime, prefix):
+async def test_upload_accepts_small_valid_artifacts_and_calculates_sha256(mime, prefix, size):
     import hashlib
     repository, storage = MemoryRepository(), MemoryStorage()
     repository.commit = lambda: _done()
-    content = payload(prefix)
+    content = payload(prefix, size)
     artifact = await ArtifactUploadService(repository, storage).upload(owner_id=uuid4(),
         content=content, claimed_mime_type=mime)
     assert artifact.content_hash_sha256 == hashlib.sha256(content).hexdigest()
@@ -101,8 +102,8 @@ async def _done(): pass
 
 @pytest.mark.parametrize(("mime", "content", "code"), [
     ("image/gif", payload(b"GIF89a"), "unsupported_artifact_type"),
-    ("image/png", payload(b"not-png"), "invalid_artifact_signature"),
-    ("image/png", b"\x89PNG\r\n\x1a\n", "artifact_too_small"),
+    ("image/png", b"not-png", "invalid_artifact_signature"),
+    ("image/png", b"", "artifact_too_small"),
     ("image/png", b"x" * (MAX_ARTIFACT_SIZE_BYTES + 1), "artifact_too_large"),
 ])
 async def test_upload_rejects_unsafe_input_before_storage(mime, content, code):

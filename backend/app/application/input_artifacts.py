@@ -12,7 +12,7 @@ from uuid import UUID
 SUPPORTED_ARTIFACT_MIME_TYPES = frozenset({
     "image/png", "image/jpeg", "image/webp", "application/pdf",
 })
-MIN_ARTIFACT_SIZE_BYTES = 1024 * 1024
+MIN_ARTIFACT_SIZE_BYTES = 1
 MAX_ARTIFACT_SIZE_BYTES = 25 * 1024 * 1024
 MAX_ARTIFACT_CONTEXT_LENGTH = 1000
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
