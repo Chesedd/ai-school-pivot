@@ -79,7 +79,7 @@ class AuthoringRepository:
         # Extractor attempts use the same deployed enum value but are bound to the
         # immutable InputArtifactV1 fingerprint instead.
         if (execution.role is AuthoringRole.GENERATOR
-                and execution.prompt.stable_name != "extractor.task"
+                and execution.prompt.stable_name not in {"extractor.task", "image.extract"}
                 and session.request_fingerprint != execution.request_fingerprint): raise AuthoringConflict()
         existing=await self.db.scalar(select(AuthoringProviderAttempt).where(AuthoringProviderAttempt.session_id==session_id,AuthoringProviderAttempt.idempotency_key==execution.idempotency_key))
         if existing:

@@ -34,8 +34,19 @@ class SqlAlchemyImageSolvingRepository:
             ImageSolvingSessionRow.id == session_id, claimable
         ).values(status=running.value, updated_at=func.clock_timestamp()))
         await self.db.commit(); return result.rowcount == 1
-    async def save_checkpoint(self, session_id: UUID, stage: str, payload, status: ImageSolvingStatus):
-        self.db.add(ImageSolvingCheckpointRow(session_id=session_id, stage=stage, payload=payload.model_dump(mode="json"), fingerprint=payload.fingerprint))
+    async def save_checkpoint(self, session_id: UUID, stage: str, payload, status: ImageSolvingStatus,
+                              *, route=None, telemetry=None):
+        """Persist only semantic output and normalized telemetry, never provider/raw data."""
+        values = {}
+        if route is not None and telemetry is not None:
+            values = {"provider_id": route.provider_id, "model_id": route.model_id,
+                "provider_request_id": telemetry.provider_request_id,
+                "input_tokens": telemetry.usage.input_tokens,
+                "output_tokens": telemetry.usage.output_tokens,
+                "cost_amount": None if telemetry.cost is None else telemetry.cost.amount,
+                "currency": None if telemetry.cost is None else telemetry.cost.currency}
+        self.db.add(ImageSolvingCheckpointRow(session_id=session_id, stage=stage,
+            payload=payload.model_dump(mode="json"), fingerprint=payload.fingerprint, **values))
         await self.db.execute(update(ImageSolvingSessionRow).where(ImageSolvingSessionRow.id == session_id).values(status=status.value, updated_at=func.clock_timestamp()))
         await self.db.commit(); return await self.get(session_id)
     async def fail(self, session_id: UUID, code: str) -> None:
