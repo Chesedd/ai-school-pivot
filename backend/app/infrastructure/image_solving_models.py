@@ -1,7 +1,7 @@
 """Persistence mappings dedicated to image solving (not authoring)."""
 from datetime import datetime
 from uuid import UUID
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, UniqueConstraint, text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, String, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from app.infrastructure.models import Base, IdMixin, uuid_type
@@ -23,4 +23,11 @@ class ImageSolvingCheckpointRow(IdMixin, Base):
     stage: Mapped[str] = mapped_column(String(16))
     payload: Mapped[object] = mapped_column(JSONB)
     fingerprint: Mapped[str] = mapped_column(String(64))
+    provider_id: Mapped[str | None] = mapped_column(String(128))
+    model_id: Mapped[str | None] = mapped_column(String(256))
+    provider_request_id: Mapped[str | None] = mapped_column(String(256))
+    input_tokens: Mapped[int | None] = mapped_column(Integer)
+    output_tokens: Mapped[int | None] = mapped_column(Integer)
+    cost_amount: Mapped[object | None] = mapped_column(Numeric(20, 8))
+    currency: Mapped[str | None] = mapped_column(String(3))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("clock_timestamp()"))
