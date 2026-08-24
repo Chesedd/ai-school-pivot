@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import hashlib
 from decimal import Decimal
-from typing import Annotated
+from datetime import datetime
+from enum import StrEnum
+from typing import Annotated, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, field_validator
 
@@ -95,7 +98,7 @@ class ExtractionResultV1(_ContractV1):
         return value
 
 
-class SolutionResultV1(_ContractV1):
+class SolverResultV1(_ContractV1):
     status: StrictStr = Field(min_length=1, max_length=MAX_STATUS)
     reasoning_summary: StrictStr = Field(min_length=1, max_length=MAX_REASONING_SUMMARY)
     final_answer: StrictStr = Field(min_length=1, max_length=MAX_FINAL_ANSWER)
@@ -107,11 +110,35 @@ class SolutionResultV1(_ContractV1):
         return _clean(value)
 
 
+# Backward-compatible public name used by the Phase 4A extraction-first slice.
+SolutionResultV1 = SolverResultV1
+
+
+class ValidationStatus(StrEnum):
+    VALIDATED = "validated"
+    NEEDS_REVIEW = "needs_review"
+    FAILED = "failed"
+
+
+class ImageSolvingStatus(StrEnum):
+    CREATED = "created"
+    EXTRACTING = "extracting"
+    EXTRACTED = "extracted"
+    SOLVING = "solving"
+    SOLVED = "solved"
+    VALIDATED = "validated"
+    FAILED = "failed"
+
+
 class ValidationResultV1(_ContractV1):
-    validation_status: StrictStr = Field(min_length=1, max_length=MAX_STATUS)
+    validation_status: Literal["validated", "needs_review", "failed"]
     confidence: Confidence
     findings: tuple[StrictStr, ...] = Field(max_length=MAX_FINDINGS)
     requires_human_review: StrictBool
+    extraction_confidence_check: StrictBool = False
+    OCR_quality_check: StrictBool = False
+    solver_status_check: StrictBool = False
+    answer_consistency_check: StrictBool = False
 
     @field_validator("validation_status")
     @classmethod
@@ -124,3 +151,18 @@ class ValidationResultV1(_ContractV1):
         if any(not item or len(item) > MAX_FINDING or item != item.strip() for item in value):
             raise ValueError("invalid_contract")
         return value
+
+
+class ImageSolvingSession(BaseModel):
+    """Application aggregate, intentionally independent of authoring sessions."""
+    model_config = ConfigDict(strict=True, frozen=True, extra="forbid")
+
+    session_id: UUID
+    owner_id: UUID
+    input_artifact_id: UUID
+    extraction_checkpoint: ExtractionResultV1 | None = None
+    solver_checkpoint: SolverResultV1 | None = None
+    validation_checkpoint: ValidationResultV1 | None = None
+    lifecycle_status: ImageSolvingStatus
+    created_at: datetime
+    updated_at: datetime
