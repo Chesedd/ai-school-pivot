@@ -4,6 +4,7 @@ from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.image_solving_contracts import ExtractionResultV1, ImageSolvingSession, ImageSolvingStatus, SolutionResultV1, ValidationResultV1
 from app.infrastructure.image_solving_models import ImageSolvingCheckpointRow, ImageSolvingSessionRow
+from app.application.image_solving_api import ImageSolvingAttempt
 CONTRACTS = {"extraction": ExtractionResultV1, "solver": SolutionResultV1, "validation": ValidationResultV1}
 
 class SqlAlchemyImageSolvingRepository:
@@ -52,3 +53,11 @@ class SqlAlchemyImageSolvingRepository:
     async def fail(self, session_id: UUID, code: str) -> None:
         await self.db.execute(update(ImageSolvingSessionRow).where(ImageSolvingSessionRow.id == session_id).values(status="failed", failure_code=code, updated_at=func.clock_timestamp()))
         await self.db.commit()
+    async def attempts(self, session_id: UUID) -> tuple[ImageSolvingAttempt, ...]:
+        rows = (await self.db.execute(select(ImageSolvingCheckpointRow).where(
+            ImageSolvingCheckpointRow.session_id == session_id).order_by(
+            ImageSolvingCheckpointRow.created_at, ImageSolvingCheckpointRow.id))).scalars().all()
+        return tuple(ImageSolvingAttempt(stage=row.stage, provider_id=row.provider_id,
+            model_id=row.model_id, input_tokens=row.input_tokens, output_tokens=row.output_tokens,
+            cost_amount=row.cost_amount, currency=row.currency,
+            provider_request_id=row.provider_request_id, created_at=row.created_at) for row in rows)
