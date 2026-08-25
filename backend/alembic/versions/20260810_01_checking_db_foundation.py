@@ -4,9 +4,10 @@ Revision ID: 20260810_01
 Revises: 20260808_02
 """
 from alembic import op
+import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-from app.infrastructure.checking_models import (CheckRun, CheckResult, CheckFinding,
+from app.infrastructure.checking_models import (CheckRun, CheckFinding,
     CheckerEvent, PromptVersion, ModelRun, CostEvent)
 
 revision = "20260810_01"
@@ -15,14 +16,73 @@ branch_labels = depends_on = None
 
 ENUMS = (
     ("checking_run_status", ("pending","running","completed","completed_with_review_required","failed_retryable","failed_terminal")),
-    ("checking_result_status", ("correct","incorrect","partially_correct","unclear","insufficient_rubric","manual_required")),
+    ("checking_result_status", ("correct","incorrect","partially_correct","insufficient_rubric","manual_required")),
     ("checking_checker_type", ("exact","multiple_choice","numeric","structured_expression","llm_rubric","manual_required")),
     ("checking_finding_type", ("rubric","typical_error","skill","general")),
     ("checking_finding_severity", ("info","minor","major","critical")),
     ("checking_event_type", ("run_created","run_transition","result_recorded","model_attempt")),
     ("checking_model_status", ("running","succeeded","failed","invalid")),
 )
-TABLES = (CheckRun.__table__, CheckResult.__table__, CheckFinding.__table__, CheckerEvent.__table__, PromptVersion.__table__, ModelRun.__table__, CostEvent.__table__)
+def _check_result_table() -> sa.Table:
+    """Return the check-results schema owned by this revision.
+
+    Do not use the ORM table here: ``20260819_01`` owns the later observability
+    columns, so importing live metadata makes this historical revision drift.
+    """
+    metadata = sa.MetaData()
+    # Local stubs let SQLAlchemy resolve the foreign keys while only this table
+    # is created by the revision (the referenced tables already exist).
+    for name in ("check_runs", "assessment_items", "task_versions"):
+        sa.Table(name, metadata, sa.Column("id", sa.Uuid(), primary_key=True))
+    result_status = postgresql.ENUM(
+        "correct", "incorrect", "partially_correct", "insufficient_rubric",
+        "manual_required", name="checking_result_status", create_type=False,
+    )
+    checker_type = postgresql.ENUM(
+        "exact", "multiple_choice", "numeric", "structured_expression",
+        "llm_rubric", "manual_required", name="checking_checker_type",
+        create_type=False,
+    )
+    table = sa.Table(
+        "check_results", metadata,
+        sa.Column("check_run_id", sa.Uuid(), nullable=False),
+        sa.Column("assessment_item_id", sa.Uuid(), nullable=False),
+        sa.Column("task_version_id", sa.Uuid(), nullable=False),
+        sa.Column("checker_type", checker_type, nullable=False),
+        sa.Column("checker_version", sa.String(64), nullable=False),
+        sa.Column("schema_version", sa.String(64), nullable=False),
+        sa.Column("result_status", result_status, nullable=False),
+        sa.Column("score_suggested", sa.Numeric(10, 2)),
+        sa.Column("max_score", sa.Numeric(10, 2), nullable=False),
+        sa.Column("confidence", sa.Numeric(5, 4), nullable=False),
+        sa.Column("summary", sa.String(1000), nullable=False),
+        sa.Column("student_feedback_draft", sa.String(4000)),
+        sa.Column("teacher_summary", sa.String(2000)),
+        sa.Column("needs_human_review", sa.Boolean(), nullable=False),
+        sa.Column("review_reason", sa.String(500)),
+        sa.Column("model_limitations", sa.String(2000)),
+        sa.Column("validated_result", postgresql.JSONB(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False,
+                  server_default=sa.text("clock_timestamp()")),
+        sa.Column("id", sa.Uuid(), primary_key=True,
+                  server_default=sa.text("gen_random_uuid()")),
+        sa.ForeignKeyConstraint(["check_run_id"], ["check_runs.id"], name="fk_check_results_run", ondelete="RESTRICT", onupdate="RESTRICT"),
+        sa.ForeignKeyConstraint(["assessment_item_id"], ["assessment_items.id"], name="fk_check_results_item", ondelete="RESTRICT", onupdate="RESTRICT"),
+        sa.ForeignKeyConstraint(["task_version_id"], ["task_versions.id"], name="fk_check_results_version", ondelete="RESTRICT", onupdate="RESTRICT"),
+        sa.UniqueConstraint("check_run_id", "assessment_item_id", name="uq_check_results_run_item"),
+        sa.CheckConstraint("max_score>0 AND (score_suggested IS NULL OR score_suggested BETWEEN 0 AND max_score)", name="ck_check_results_score_range"),
+        sa.CheckConstraint("confidence BETWEEN 0 AND 1", name="ck_check_results_confidence"),
+        sa.CheckConstraint("(result_status='correct' AND score_suggested=max_score) OR (result_status='incorrect' AND score_suggested=0) OR (result_status='partially_correct' AND score_suggested>0 AND score_suggested<max_score) OR (result_status IN ('insufficient_rubric','manual_required') AND score_suggested IS NULL)", name="ck_check_results_status_score"),
+        sa.CheckConstraint("(needs_human_review AND review_reason IS NOT NULL AND char_length(btrim(review_reason)) BETWEEN 1 AND 500) OR (NOT needs_human_review AND review_reason IS NULL)", name="ck_check_results_review"),
+        sa.CheckConstraint("char_length(summary) BETWEEN 1 AND 1000 AND char_length(checker_version) BETWEEN 1 AND 64 AND char_length(schema_version) BETWEEN 1 AND 64", name="ck_check_results_text"),
+    )
+    sa.Index("ix_check_results_item_created", table.c.assessment_item_id, sa.text("created_at DESC"))
+    sa.Index("ix_check_results_task_version", table.c.task_version_id)
+    sa.Index("ix_check_results_review", table.c.needs_human_review, table.c.created_at)
+    return table
+
+
+TABLES = (CheckRun.__table__, _check_result_table(), CheckFinding.__table__, CheckerEvent.__table__, PromptVersion.__table__, ModelRun.__table__, CostEvent.__table__)
 
 
 def upgrade() -> None:

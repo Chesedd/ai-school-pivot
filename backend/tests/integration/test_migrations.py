@@ -37,6 +37,39 @@ def alembic(*arguments: str) -> str:
     return completed.stdout
 
 
+async def test_clean_database_upgrades_to_head_with_observability_columns():
+    """The foundation revision must not leak columns from live ORM metadata."""
+    engine = create_async_engine(URL)
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(sa.text("DROP SCHEMA public CASCADE"))
+            await connection.execute(sa.text("CREATE SCHEMA public"))
+
+        alembic("upgrade", "head")
+
+        async with engine.connect() as connection:
+            columns = (await connection.execute(sa.text("""
+                SELECT column_name, is_nullable
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'check_results'
+                  AND column_name IN (
+                      'reason_code', 'confidence_policy_version',
+                      'confidence_details'
+                  )
+                ORDER BY column_name
+            """))).all()
+
+        assert columns == [
+            ("confidence_details", "NO"),
+            ("confidence_policy_version", "NO"),
+            ("reason_code", "NO"),
+        ]
+        assert "20260824_02 (head)" in alembic("current")
+    finally:
+        await engine.dispose()
+
+
 def supported_baseline_metadata() -> sa.MetaData:
     """Return the affected portion of the schema as it was at 20260823_02."""
     metadata = sa.MetaData()
