@@ -38,17 +38,17 @@ def alembic(*arguments: str) -> str:
 
 
 async def test_clean_database_upgrades_to_head_with_observability_columns():
-    """The foundation revision must not leak columns from live ORM metadata."""
+    """Observability columns are introduced by their owning revision only."""
     engine = create_async_engine(URL)
     try:
         async with engine.begin() as connection:
             await connection.execute(sa.text("DROP SCHEMA public CASCADE"))
             await connection.execute(sa.text("CREATE SCHEMA public"))
 
-        alembic("upgrade", "head")
+        alembic("upgrade", "20260810_01")
 
         async with engine.connect() as connection:
-            columns = (await connection.execute(sa.text("""
+            foundation_columns = (await connection.execute(sa.text("""
                 SELECT column_name, is_nullable
                 FROM information_schema.columns
                 WHERE table_schema = 'public'
@@ -60,11 +60,29 @@ async def test_clean_database_upgrades_to_head_with_observability_columns():
                 ORDER BY column_name
             """))).all()
 
-        assert columns == [
+        assert foundation_columns == []
+
+        alembic("upgrade", "20260819_01")
+        async with engine.connect() as connection:
+            observability_columns = (await connection.execute(sa.text("""
+                SELECT column_name, is_nullable
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'check_results'
+                  AND column_name IN (
+                      'reason_code', 'confidence_policy_version',
+                      'confidence_details'
+                  )
+                ORDER BY column_name
+            """))).all()
+
+        assert observability_columns == [
             ("confidence_details", "NO"),
             ("confidence_policy_version", "NO"),
             ("reason_code", "NO"),
         ]
+
+        alembic("upgrade", "head")
         assert "20260824_02 (head)" in alembic("current")
     finally:
         await engine.dispose()
