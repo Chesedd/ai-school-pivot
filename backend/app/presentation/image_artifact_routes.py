@@ -10,7 +10,7 @@ from app.infrastructure.artifact_storage import FilesystemArtifactStorage
 from app.infrastructure.input_artifact_repository import SqlAlchemyArtifactRepository
 from app.presentation.image_artifact_schemas import ImageArtifactResponse
 
-router = APIRouter(prefix="/api/image-artifacts", tags=["image-artifacts"])
+router = APIRouter(prefix="/api/image-solving/artifacts", tags=["image-solving"])
 _UPLOAD_FIELDS = frozenset({"file", "context"})
 
 def response(record) -> ImageArtifactResponse:
