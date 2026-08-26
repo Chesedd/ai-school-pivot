@@ -108,8 +108,8 @@ class AnthropicExtractionAdapter(_ExtractionAdapter):
                 messages=[{"role": "user", "content": [
                     {"type": kind, "source": source},
                     {"type": "text", "text": IMAGE_EXTRACT_V1_USER}]}],
-                output_config={"format": {"type": "json_schema",
-                    "schema": ExtractionResultV1.model_json_schema()}})
+                extra_body={"output_config": {"format": {"type": "json_schema",
+                    "schema": ExtractionResultV1.model_json_schema()}}})
             raw = "".join(block.text for block in response.content
                 if getattr(block, "type", None) == "text")
             payload = json.loads(raw)
@@ -143,8 +143,8 @@ class AnthropicSolverAdapter:
             response = await self._client.messages.create(model=self._route.model_id,
                 system=SOLVER_SYSTEM, max_tokens=4096,
                 messages=[{"role": "user", "content": value.model_dump_json()}],
-                output_config={"format": {"type": "json_schema",
-                    "schema": SolutionResultV1.model_json_schema()}})
+                extra_body={"output_config": {"format": {"type": "json_schema",
+                    "schema": SolutionResultV1.model_json_schema()}}})
             raw = "".join(block.text for block in response.content
                 if getattr(block, "type", None) == "text")
             return SolutionResultV1.model_validate_json(raw)

@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr | None = None
     anthropic_auth_token: SecretStr | None = None
     anthropic_base_url: str | None = None
-    image_solving_anthropic_model: str = "claude-sonnet-4-20250514"
+    image_solving_anthropic_model: str = "claude-sonnet-4-6"
     authoring_routes: str = "openai:gpt-4.1-mini,anthropic:claude-sonnet-4-20250514"
 
     @property

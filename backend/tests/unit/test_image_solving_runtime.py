@@ -25,6 +25,10 @@ def settings(**overrides):
     return Settings(**values)
 
 
+def test_image_solving_uses_confirmed_anthropic_model_by_default():
+    assert settings().image_solving_anthropic_model == "claude-sonnet-4-6"
+
+
 def test_gateway_token_builds_real_runtime_and_passes_base_url(monkeypatch):
     captured = {}
 
