@@ -1,11 +1,24 @@
 """SQLAlchemy repository for the image-solving aggregate."""
+import json
+from typing import TypeVar
 from uuid import UUID
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.image_solving_contracts import ExtractionResultV1, ImageSolvingSession, ImageSolvingStatus, SolutionResultV1, ValidationResultV1
 from app.infrastructure.image_solving_models import ImageSolvingCheckpointRow, ImageSolvingSessionRow
 from app.application.image_solving_api import ImageSolvingAttempt
 CONTRACTS = {"extraction": ExtractionResultV1, "solver": SolutionResultV1, "validation": ValidationResultV1}
+Contract = TypeVar("Contract", bound=BaseModel)
+
+
+def _deserialize_checkpoint(payload: object, contract: type[Contract]) -> Contract:
+    """Restore a strict contract through the same JSON boundary used by JSONB."""
+    try:
+        serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        return contract.model_validate_json(serialized)
+    except (TypeError, ValueError, ValidationError) as exc:
+        raise ValueError("invalid_checkpoint") from exc
 
 class SqlAlchemyImageSolvingRepository:
     """The only adapter aware of persisted checkpoint representation."""
@@ -21,7 +34,7 @@ class SqlAlchemyImageSolvingRepository:
         for item in values:
             contract = CONTRACTS.get(item.stage)
             if contract is None: continue
-            value = contract.model_validate(item.payload)
+            value = _deserialize_checkpoint(item.payload, contract)
             if value.fingerprint != item.fingerprint: raise ValueError("invalid_checkpoint")
             checkpoints[item.stage] = value
         return ImageSolvingSession(session_id=row.id, owner_id=row.owner_id, input_artifact_id=row.input_artifact_id, extraction_checkpoint=checkpoints.get("extraction"), solver_checkpoint=checkpoints.get("solver"), validation_checkpoint=checkpoints.get("validation"), lifecycle_status=ImageSolvingStatus(row.status), created_at=row.created_at, updated_at=row.updated_at)

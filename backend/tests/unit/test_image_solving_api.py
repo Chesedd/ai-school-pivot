@@ -79,3 +79,16 @@ async def test_result_is_not_ready_before_all_checkpoints():
     with pytest.raises(ImageSolvingApiError) as error:
         await service.result(value.session_id, value.owner_id)
     assert (error.value.code, error.value.status) == ("image_solving_not_ready", 409)
+
+
+async def test_corrupt_checkpoint_maps_to_existing_422_response():
+    value = state()
+
+    class CorruptCheckpointFlow(Flow):
+        async def get_state(self, **kwargs):
+            raise ImageSolvingError("invalid_checkpoint")
+
+    service = ImageSolvingApplicationService(CorruptCheckpointFlow(value), Attempts())
+    with pytest.raises(ImageSolvingApiError) as error:
+        await service.state(value.session_id, value.owner_id)
+    assert (error.value.code, error.value.status) == ("invalid_artifact_or_checkpoint", 422)
