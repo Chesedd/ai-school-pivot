@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from dataclasses import dataclass
 from time import monotonic
 from typing import Any
@@ -18,6 +19,22 @@ from app.application.image_solving_contracts import (ExtractionResultV1, InputAr
     SolutionResultV1)
 from app.application.extraction_pipeline import SOLVER_SYSTEM, SolverInputV1
 from app.infrastructure.authoring_providers import _failure
+
+
+_STRUCTURED_JSON_FENCE = re.compile(
+    r"```(?:json)?[ \t]*\r?\n"
+    r"(?P<payload>(?:(?!^```[ \t]*(?:\r?$)).)*)\r?\n```",
+    re.DOTALL | re.MULTILINE,
+)
+
+
+def _normalize_structured_json_text(raw: str) -> str:
+    """Unwrap one complete JSON code fence, without searching or repairing."""
+    stripped = raw.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    match = _STRUCTURED_JSON_FENCE.fullmatch(stripped)
+    return match.group("payload") if match is not None else stripped
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,7 +129,7 @@ class AnthropicExtractionAdapter(_ExtractionAdapter):
                     "schema": ExtractionResultV1.model_json_schema()}}})
             raw = "".join(block.text for block in response.content
                 if getattr(block, "type", None) == "text")
-            payload = json.loads(raw)
+            payload = json.loads(_normalize_structured_json_text(raw))
             usage = Usage(response.usage.input_tokens, response.usage.output_tokens,
                 getattr(response.usage, "cache_read_input_tokens", 0) or 0,
                 getattr(response.usage, "cache_creation_input_tokens", 0) or 0)
@@ -147,7 +164,8 @@ class AnthropicSolverAdapter:
                     "schema": SolutionResultV1.model_json_schema()}}})
             raw = "".join(block.text for block in response.content
                 if getattr(block, "type", None) == "text")
-            return SolutionResultV1.model_validate_json(raw)
+            return SolutionResultV1.model_validate_json(
+                _normalize_structured_json_text(raw))
         except ProviderFailure: raise
         except (ValidationError, ValueError, TypeError):
             raise ProviderFailure(FailureCode.MALFORMED_RESPONSE) from None
