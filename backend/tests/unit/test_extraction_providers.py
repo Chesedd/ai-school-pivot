@@ -4,9 +4,11 @@ from types import SimpleNamespace as NS
 import pytest
 
 from app.application.authoring import FailureCode, ModelRoute, ProviderFailure, Usage
-from app.application.image_solving_contracts import InputArtifactV1
+from app.application.extraction_pipeline import SolverInputV1
+from app.application.image_solving_contracts import (ExtractionResultV1, InputArtifactV1,
+    SolutionResultV1)
 from app.infrastructure.extraction_providers import (AnthropicExtractionAdapter,
-    OpenAIExtractionAdapter)
+    AnthropicSolverAdapter, OpenAIExtractionAdapter)
 
 PAYLOAD = {"extracted_text":"2 + 2?", "structured_statement":"2 + 2?",
     "detected_task_type":"calculation", "detected_answer_format":"number",
@@ -37,14 +39,35 @@ async def test_openai_multimodal_request_is_strict_and_binary_stays_in_adapter()
     assert encoded.startswith("data:image/png;base64,") and b"raw-image" not in repr(call.kwargs).encode()
     assert adapter.last_telemetry.usage == Usage(7,2,3,0)
 
-async def test_anthropic_keeps_system_and_user_blocks_separate():
+async def test_anthropic_extraction_uses_extra_body_for_structured_output():
     call=Call(NS(id="msg_1",content=[NS(type="text",text=__import__('json').dumps(PAYLOAD))],
         usage=NS(input_tokens=4,output_tokens=2)))
     adapter=AnthropicExtractionAdapter(NS(messages=call),Storage())
-    await adapter.extract(artifact(),ModelRoute("anthropic","opaque-model"))
+    result=await adapter.extract(artifact(),ModelRoute("anthropic","opaque-model"))
+    assert isinstance(result, ExtractionResultV1)
     assert call.kwargs["system"] and call.kwargs["messages"][0]["role"] == "user"
     assert call.kwargs["messages"][0]["content"][0]["type"] == "image"
-    assert call.kwargs["output_config"]["format"]["type"] == "json_schema"
+    assert "output_config" not in call.kwargs
+    output=call.kwargs["extra_body"]["output_config"]["format"]
+    assert output["type"] == "json_schema"
+    assert output["schema"] == ExtractionResultV1.model_json_schema()
+
+async def test_anthropic_solver_uses_extra_body_and_parses_strict_contract():
+    payload={"status":"solved", "reasoning_summary":"Add the values.",
+        "final_answer":"4", "confidence":"0.99"}
+    call=Call(NS(id="msg_2",content=[NS(type="text",text=__import__('json').dumps(payload))],
+        usage=NS(input_tokens=5,output_tokens=3)))
+    adapter=AnthropicSolverAdapter(NS(messages=call),ModelRoute("anthropic","opaque-model"))
+
+    solver_input=SolverInputV1.from_extraction(
+        ExtractionResultV1.model_validate_json(__import__('json').dumps(PAYLOAD)))
+    result=await adapter.solve(solver_input)
+
+    assert isinstance(result, SolutionResultV1) and result.final_answer == "4"
+    assert "output_config" not in call.kwargs
+    output=call.kwargs["extra_body"]["output_config"]["format"]
+    assert output["type"] == "json_schema"
+    assert output["schema"] == SolutionResultV1.model_json_schema()
 
 @pytest.mark.parametrize("adapter_kind",["openai","anthropic"])
 async def test_malformed_structured_response_is_provider_neutral(adapter_kind):
