@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, StrictBool, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 
 
 class ImageSolvingDto(BaseModel):
@@ -12,7 +12,9 @@ class ImageSolvingDto(BaseModel):
 
 
 class CreateImageSolvingSessionRequest(ImageSolvingDto):
-    artifact_id: UUID
+    # JSON has no UUID scalar, so permit Pydantic to parse this HTTP-boundary
+    # field while retaining strict validation for every other DTO field.
+    artifact_id: UUID = Field(strict=False)
 
 
 class ImageSolvingSessionResponse(ImageSolvingDto):

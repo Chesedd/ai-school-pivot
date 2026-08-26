@@ -45,7 +45,9 @@ class Attempts:
 def test_create_dto_is_strict_immutable_and_forbids_server_owned_fields():
     artifact_id = uuid4()
     value = CreateImageSolvingSessionRequest(artifact_id=artifact_id)
-    with pytest.raises(ValidationError): CreateImageSolvingSessionRequest(artifact_id=str(artifact_id))
+    parsed = CreateImageSolvingSessionRequest(artifact_id=str(artifact_id))
+    assert parsed.artifact_id == artifact_id
+    with pytest.raises(ValidationError): CreateImageSolvingSessionRequest(artifact_id="not-a-uuid")
     with pytest.raises(ValidationError): CreateImageSolvingSessionRequest(
         artifact_id=artifact_id, owner_id=uuid4())
     with pytest.raises(ValidationError): value.artifact_id = uuid4()
