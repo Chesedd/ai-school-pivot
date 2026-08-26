@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Response
 from app.application.authoring import FailureCode, ModelRoute, ProviderFailure
 from app.application.image_solving import ImageSolvingService
 from app.application.image_solving_api import ImageSolvingApplicationService
+from app.application.image_solving_promotion import PromoteImageSolvingService
 from app.config import Settings, get_settings
 from app.db.session import get_session
 from app.infrastructure.image_solving_repository import SqlAlchemyImageSolvingRepository
@@ -18,6 +19,7 @@ from app.application.input_artifacts import ArtifactOwnershipService
 from app.presentation.image_solving_schemas import (
     CreateImageSolvingSessionRequest, ImageSolvingAttemptsResponse,
     ImageSolvingResultResponse, ImageSolvingSessionResponse, ImageSolvingStateResponse,
+    PromoteImageSolvingRequest, PromoteImageSolvingResponse,
 )
 
 router = APIRouter(prefix="/api/image-solving", tags=["image-solving"])
@@ -95,3 +97,10 @@ async def get_attempts(session_id: UUID,
         service: ImageSolvingApplicationService = Depends(image_solving_service),
         settings: Settings = Depends(get_settings)):
     return await service.attempts(session_id, settings.content_bank_dev_actor_id)
+
+
+@router.post("/sessions/{session_id}/promote", response_model=PromoteImageSolvingResponse)
+async def promote_session(session_id: UUID, payload: PromoteImageSolvingRequest,
+        db=Depends(get_session), settings: Settings = Depends(get_settings)):
+    return await PromoteImageSolvingService(db).promote(
+        session_id, settings.content_bank_dev_actor_id, payload)

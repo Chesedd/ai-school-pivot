@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, field_validator
 
 
 class ImageSolvingDto(BaseModel):
@@ -45,6 +45,7 @@ class ExtractionResponse(ImageSolvingDto):
     structured_statement: StrictStr
     task_classification: TaskClassificationResponse
     confidence: Decimal
+    choices: tuple[StrictStr, ...] | None = None
 
 
 class SolutionResponse(ImageSolvingDto):
@@ -65,6 +66,46 @@ class ImageSolvingResultResponse(ImageSolvingDto):
     extraction: ExtractionResponse
     solution: SolutionResponse
     validation: ValidationResponse
+
+
+class PromoteImageSolvingRequest(ImageSolvingDto):
+    title: StrictStr | None = Field(default=None, max_length=500)
+    statement: StrictStr = Field(min_length=1, max_length=30_000)
+    task_type: Literal["test", "calculation", "problem", "open_question", "essay"]
+    answer_format: Literal["single_choice", "multiple_choice", "short_text", "number", "expression", "long_text"]
+    difficulty: StrictInt = Field(ge=1, le=100)
+    subject_id: UUID = Field(strict=False)
+    grade_id: UUID = Field(strict=False)
+    topic_id: UUID = Field(strict=False)
+    subtopic_id: UUID | None = Field(default=None, strict=False)
+    skill_ids: tuple[UUID, ...] = Field(min_length=1, max_length=20)
+    solution: StrictStr = Field(min_length=1, max_length=30_000)
+    final_answer: StrictStr | None = Field(default=None, max_length=4_000)
+    review_confirmed: StrictBool
+    review_note: StrictStr | None = Field(default=None, max_length=4_000)
+    confirm_questionable: StrictBool = False
+
+    @field_validator("title", "statement", "solution", "final_answer", "review_note")
+    @classmethod
+    def clean(cls, value: str | None) -> str | None:
+        if value is not None and value != value.strip():
+            raise ValueError("whitespace_not_normalized")
+        return value
+
+    @field_validator("skill_ids")
+    @classmethod
+    def unique_skills(cls, value: tuple[UUID, ...]) -> tuple[UUID, ...]:
+        if len(value) != len(set(value)):
+            raise ValueError("duplicate_skills")
+        return value
+
+
+class PromoteImageSolvingResponse(ImageSolvingDto):
+    session_id: UUID
+    task_id: UUID
+    task_version_id: UUID
+    status: Literal["draft"]
+    already_existing: StrictBool
 
 
 class AttemptUsageResponse(ImageSolvingDto):
