@@ -3,13 +3,17 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response
 
-from app.application.authoring import FailureCode, ProviderFailure
+from app.application.authoring import FailureCode, ModelRoute, ProviderFailure
 from app.application.image_solving import ImageSolvingService
 from app.application.image_solving_api import ImageSolvingApplicationService
 from app.config import Settings, get_settings
 from app.db.session import get_session
 from app.infrastructure.image_solving_repository import SqlAlchemyImageSolvingRepository
 from app.infrastructure.input_artifact_repository import SqlAlchemyArtifactRepository
+from app.infrastructure.artifact_storage import (DatabaseArtifactStorageReader,
+    FilesystemArtifactStorage)
+from app.infrastructure.extraction_providers import (AnthropicExtractionAdapter,
+    AnthropicSolverAdapter, RoutedAnthropicExtractor)
 from app.application.input_artifacts import ArtifactOwnershipService
 from app.presentation.image_solving_schemas import (
     CreateImageSolvingSessionRequest, ImageSolvingAttemptsResponse,
@@ -31,11 +35,28 @@ class _UnavailablePipelinePort:
         raise ProviderFailure(FailureCode.PROVIDER_UNAVAILABLE)
 
 
-def image_solving_service(db=Depends(get_session)) -> ImageSolvingApplicationService:
+def image_solving_service(db=Depends(get_session),
+        settings: Settings = Depends(get_settings)) -> ImageSolvingApplicationService:
     repository = SqlAlchemyImageSolvingRepository(db)
-    artifacts = ArtifactOwnershipService(SqlAlchemyArtifactRepository(db))
-    unavailable = _UnavailablePipelinePort()
-    flow = ImageSolvingService(repository, artifacts, unavailable, unavailable, unavailable)
+    artifact_repository = SqlAlchemyArtifactRepository(db)
+    artifacts = ArtifactOwnershipService(artifact_repository)
+    if settings.anthropic_credential:
+        from anthropic import AsyncAnthropic
+        client_options = {"base_url": settings.anthropic_base_url}
+        if settings.anthropic_auth_token:
+            client_options["auth_token"] = settings.anthropic_credential
+        else:
+            client_options["api_key"] = settings.anthropic_credential
+        client = AsyncAnthropic(**client_options)
+        storage = DatabaseArtifactStorageReader(artifact_repository,
+            FilesystemArtifactStorage(settings.artifact_storage_path))
+        route = ModelRoute("anthropic", settings.image_solving_anthropic_model)
+        extractor = RoutedAnthropicExtractor(AnthropicExtractionAdapter(client, storage), route)
+        flow = ImageSolvingService(repository, artifacts, storage, extractor,
+            AnthropicSolverAdapter(client, route))
+    else:
+        unavailable = _UnavailablePipelinePort()
+        flow = ImageSolvingService(repository, artifacts, unavailable, unavailable, unavailable)
     return ImageSolvingApplicationService(flow, repository)
 
 
