@@ -1,60 +1,66 @@
+"""HTTP regressions for the image artifact multipart boundary."""
+from datetime import UTC, datetime
 import os
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
 from uuid import uuid4
 
+import httpx
 import pytest
-from fastapi import HTTPException
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://unit:unit@localhost/unit")
 os.environ.setdefault("CONTENT_BANK_DEV_ACTOR_ID", "00000000-0000-4000-8000-000000000001")
 os.environ.setdefault("ASSESSMENT_DEV_STUDENT_ID", "00000000-0000-4000-8000-000000000002")
 
-from app.presentation.image_artifact_routes import upload
+from app.application.input_artifacts import ArtifactUploadService, InputArtifactRecord
+from app.main import app
+from app.presentation.image_artifact_routes import service as artifact_service
+
+PNG = b"\x89PNG\r\n\x1a\nvalid-small-png"
 
 
-class Form:
-    def __init__(self, entries):
-        self.entries = entries
+class Repository:
+    async def create(self, **metadata):
+        return InputArtifactRecord(id=uuid4(), created_at=datetime.now(UTC), **metadata)
 
-    def __iter__(self):
-        return iter(dict(self.entries))
-
-    def get(self, key):
-        values = self.getlist(key)
-        return values[-1] if values else None
-
-    def getlist(self, key):
-        return [value for field, value in self.entries if field == key]
+    async def commit(self):
+        return None
 
 
-class Request:
-    def __init__(self, entries):
-        self.entries = entries
+class Storage:
+    async def store(self, content, mime_type):
+        assert content == PNG and mime_type == "image/png"
+        return "test/artifact.png"
 
-    async def form(self):
-        return Form(self.entries)
-
-
-@pytest.mark.asyncio
-async def test_upload_rejects_server_owned_metadata_fields():
-    upload_service = AsyncMock()
-    request = Request([("file", object()), ("owner_id", str(uuid4()))])
-
-    with pytest.raises(HTTPException, match="unexpected upload field") as error:
-        await upload(request, upload_service, SimpleNamespace())
-
-    assert error.value.status_code == 422
-    upload_service.upload.assert_not_awaited()
+    async def delete(self, storage_reference):
+        raise AssertionError(f"unexpected storage rollback: {storage_reference}")
 
 
 @pytest.mark.asyncio
-async def test_upload_rejects_duplicate_file_fields():
-    upload_service = AsyncMock()
-    request = Request([("file", object()), ("file", object())])
+async def test_real_multipart_upload_and_field_cardinality_contract():
+    """Use Request.form() and a real service so UploadFile types cannot be mocked away."""
+    async def upload_dependency():
+        return ArtifactUploadService(Repository(), Storage())
 
-    with pytest.raises(HTTPException, match="duplicate upload field") as error:
-        await upload(request, upload_service, SimpleNamespace())
+    app.dependency_overrides[artifact_service] = upload_dependency
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                base_url="http://test") as client:
+            uploaded = await client.post("/api/image-solving/artifacts",
+                files={"file": ("task.png", PNG, "image/png")})
+            missing = await client.post("/api/image-solving/artifacts",
+                files={"context": (None, "worksheet")})
+            duplicate = await client.post("/api/image-solving/artifacts", files=[
+                ("file", ("first.png", PNG, "image/png")),
+                ("file", ("second.png", PNG, "image/png")),
+            ])
+            unexpected = await client.post("/api/image-solving/artifacts", files=[
+                ("file", ("task.png", PNG, "image/png")),
+                ("owner_id", (None, str(uuid4()))),
+            ])
+    finally:
+        app.dependency_overrides.pop(artifact_service, None)
 
-    assert error.value.status_code == 422
-    upload_service.upload.assert_not_awaited()
+    assert uploaded.status_code == 201
+    assert uploaded.json()["artifact_id"]
+    assert missing.status_code == 422
+    assert duplicate.status_code == 422
+    assert unexpected.status_code == 422

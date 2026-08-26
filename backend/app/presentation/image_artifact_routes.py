@@ -1,6 +1,7 @@
 """Upload-only public boundary for image-solving input artifacts."""
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Request
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from app.application.input_artifacts import (ArtifactError, ArtifactOwnershipService,
     ArtifactUploadService, MAX_ARTIFACT_SIZE_BYTES)
@@ -27,7 +28,7 @@ def translate(exc: ArtifactError) -> HTTPException:
         "unsupported_artifact_type", "invalid_artifact_signature"} else 422
     return HTTPException(status, exc.code)
 
-@router.post("/", response_model=ImageArtifactResponse, status_code=201)
+@router.post("", response_model=ImageArtifactResponse, status_code=201)
 async def upload(request: Request,
         upload_service: ArtifactUploadService = Depends(service),
         settings: Settings = Depends(get_settings)):
@@ -39,7 +40,7 @@ async def upload(request: Request,
     if len(form.getlist("file")) != 1 or len(form.getlist("context")) > 1:
         raise HTTPException(422, "duplicate upload field")
     file, context = form.get("file"), form.get("context")
-    if not isinstance(file, UploadFile):
+    if not isinstance(file, StarletteUploadFile):
         raise HTTPException(422, "file is required")
     if context is not None and not isinstance(context, str):
         raise HTTPException(422, "invalid_artifact_context")
