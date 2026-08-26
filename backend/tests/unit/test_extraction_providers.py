@@ -56,6 +56,41 @@ async def test_anthropic_extraction_forces_tool_and_uses_its_input():
     assert tool["input_schema"] == ExtractionResultV1.model_json_schema()
 
 
+async def test_anthropic_extraction_normalizes_only_supported_text_edges():
+    payload = dict(PAYLOAD, extracted_text="  first line\nsecond line\n",
+        structured_statement="\n2 + 2?  ", detected_task_type=" calculation ",
+        detected_answer_format="\nnumber\n", choices=[" A ", "\nB\n"],
+        ocr_issues=[" glare ", "\nblur\n"])
+    call=Call(NS(id="normalized",content=[NS(type="tool_use",
+        name="record_extraction",input=payload)],usage=NS(input_tokens=4,output_tokens=2)))
+    result=await AnthropicExtractionAdapter(NS(messages=call),Storage()).extract(
+        artifact(),ModelRoute("anthropic","opaque-model"))
+    assert result.extracted_text == "first line\nsecond line"
+    assert result.structured_statement == "2 + 2?"
+    assert result.detected_task_type == "calculation"
+    assert result.detected_answer_format == "number"
+    assert result.choices == ("A", "B")
+    assert result.ocr_issues == ("glare", "blur")
+    assert payload["extracted_text"] == "  first line\nsecond line\n"
+
+
+@pytest.mark.parametrize("overrides", [
+    {"choices":[" A ", "A"]},
+    {"choices":["   "]},
+    {"choices":["A", 2]},
+    {"ocr_issues":["ok", 2]},
+    {"extracted_text":123},
+])
+async def test_anthropic_extraction_normalization_still_fails_closed(overrides):
+    payload = dict(PAYLOAD, **overrides)
+    call=Call(NS(id="bad",content=[NS(type="tool_use",name="record_extraction",
+        input=payload)],usage=NS(input_tokens=1,output_tokens=1)))
+    with pytest.raises(ProviderFailure) as error:
+        await AnthropicExtractionAdapter(NS(messages=call),Storage()).extract(
+            artifact(),ModelRoute("anthropic","opaque-model"))
+    assert error.value.code is FailureCode.MALFORMED_RESPONSE
+
+
 @pytest.mark.parametrize("prefix", [[], [NS(type="thinking",thinking="...")],
     [NS(type="text",text="ordinary prose")]])
 async def test_anthropic_extraction_ignores_non_tool_blocks(prefix):
@@ -101,6 +136,64 @@ async def test_anthropic_solver_forces_tool_and_parses_strict_contract():
     tool=call.kwargs["tools"][0]
     assert tool["name"] == "record_solution"
     assert tool["input_schema"] == SolutionResultV1.model_json_schema()
+
+
+async def test_anthropic_solver_normalizes_real_runtime_payload():
+    payload = {
+        "status": "solved",
+        "reasoning_summary": (
+            "\nSolve: 7 · (X – 3) = 21\n"
+            "...\n"
+            "Verification: ... ✓\n"
+        ),
+        "final_answer": "X = 6",
+        "confidence": "1.0",
+    }
+    call=Call(NS(id="runtime",content=[NS(type="tool_use",name="record_solution",
+        input=payload)],usage=NS(input_tokens=5,output_tokens=3)))
+    result=await AnthropicSolverAdapter(NS(messages=call),
+        ModelRoute("anthropic","opaque-model")).solve(solver_input())
+    assert isinstance(result, SolutionResultV1)
+    assert result.reasoning_summary == (
+        "Solve: 7 · (X – 3) = 21\n...\nVerification: ... ✓")
+    assert result.reasoning_summary == result.reasoning_summary.strip()
+    assert result.final_answer == "X = 6"
+    assert result.status == "solved"
+    assert payload["reasoning_summary"].startswith("\n")
+
+
+@pytest.mark.parametrize(("reasoning", "expected"), [
+    ("  Add the values.  ", "Add the values."),
+    ("\nParagraph one.\n\nParagraph two.\n", "Paragraph one.\n\nParagraph two."),
+])
+async def test_anthropic_solver_trims_edges_and_preserves_internal_newlines(
+    reasoning, expected,
+):
+    payload = dict(SOLUTION, status=" solved ", reasoning_summary=reasoning,
+        final_answer=" 4 ")
+    call=Call(NS(id="normalized",content=[NS(type="tool_use",name="record_solution",
+        input=payload)],usage=NS(input_tokens=5,output_tokens=3)))
+    result=await AnthropicSolverAdapter(NS(messages=call),
+        ModelRoute("anthropic","opaque-model")).solve(solver_input())
+    assert result.reasoning_summary == expected
+    assert result.status == "solved" and result.final_answer == "4"
+
+
+@pytest.mark.parametrize("overrides", [
+    {"reasoning_summary":"   "},
+    {"reasoning_summary":123},
+    {"status":123},
+    {"confidence":"abc"},
+    {"extra_field":"x"},
+])
+async def test_anthropic_solver_normalization_still_fails_closed(overrides):
+    payload = dict(SOLUTION, **overrides)
+    call=Call(NS(id="bad",content=[NS(type="tool_use",name="record_solution",
+        input=payload)],usage=NS(input_tokens=1,output_tokens=1)))
+    with pytest.raises(ProviderFailure) as error:
+        await AnthropicSolverAdapter(NS(messages=call),
+            ModelRoute("anthropic","opaque-model")).solve(solver_input())
+    assert error.value.code is FailureCode.MALFORMED_RESPONSE
 
 
 @pytest.mark.parametrize("prefix", [[NS(type="text",text="prose")],
