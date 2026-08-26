@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import base64
 import json
-import re
 from dataclasses import dataclass
 from time import monotonic
 from typing import Any
@@ -21,20 +20,16 @@ from app.application.extraction_pipeline import SOLVER_SYSTEM, SolverInputV1
 from app.infrastructure.authoring_providers import _failure
 
 
-_STRUCTURED_JSON_FENCE = re.compile(
-    r"```(?:json)?[ \t]*\r?\n"
-    r"(?P<payload>(?:(?!^```[ \t]*(?:\r?$)).)*)\r?\n```",
-    re.DOTALL | re.MULTILINE,
-)
-
-
-def _normalize_structured_json_text(raw: str) -> str:
-    """Unwrap one complete JSON code fence, without searching or repairing."""
-    stripped = raw.strip()
-    if not stripped.startswith("```"):
-        return stripped
-    match = _STRUCTURED_JSON_FENCE.fullmatch(stripped)
-    return match.group("payload") if match is not None else stripped
+def _tool_input(response: Any, name: str) -> dict[str, Any]:
+    """Return the sole forced-tool payload, ignoring non-tool content blocks."""
+    blocks = [block for block in response.content
+        if getattr(block, "type", None) == "tool_use"]
+    if len(blocks) != 1 or getattr(blocks[0], "name", None) != name:
+        raise ValueError
+    payload = getattr(blocks[0], "input")
+    if type(payload) is not dict:
+        raise TypeError
+    return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,11 +120,12 @@ class AnthropicExtractionAdapter(_ExtractionAdapter):
                 messages=[{"role": "user", "content": [
                     {"type": kind, "source": source},
                     {"type": "text", "text": IMAGE_EXTRACT_V1_USER}]}],
-                extra_body={"output_config": {"format": {"type": "json_schema",
-                    "schema": ExtractionResultV1.model_json_schema()}}})
-            raw = "".join(block.text for block in response.content
-                if getattr(block, "type", None) == "text")
-            payload = json.loads(_normalize_structured_json_text(raw))
+                tools=[{"name": "record_extraction", "description": (
+                    "Record only the faithful extraction of the task visible in the "
+                    "artifact. Do not solve the task."),
+                    "input_schema": ExtractionResultV1.model_json_schema()}],
+                tool_choice={"type": "tool", "name": "record_extraction"})
+            payload = _tool_input(response, "record_extraction")
             usage = Usage(response.usage.input_tokens, response.usage.output_tokens,
                 getattr(response.usage, "cache_read_input_tokens", 0) or 0,
                 getattr(response.usage, "cache_creation_input_tokens", 0) or 0)
@@ -160,14 +156,15 @@ class AnthropicSolverAdapter:
             response = await self._client.messages.create(model=self._route.model_id,
                 system=SOLVER_SYSTEM, max_tokens=4096,
                 messages=[{"role": "user", "content": value.model_dump_json()}],
-                extra_body={"output_config": {"format": {"type": "json_schema",
-                    "schema": SolutionResultV1.model_json_schema()}}})
-            raw = "".join(block.text for block in response.content
-                if getattr(block, "type", None) == "text")
-            return SolutionResultV1.model_validate_json(
-                _normalize_structured_json_text(raw))
+                tools=[{"name": "record_solution", "description": (
+                    "Record the final solution for the extracted task according to "
+                    "the required solver contract."),
+                    "input_schema": SolutionResultV1.model_json_schema()}],
+                tool_choice={"type": "tool", "name": "record_solution"})
+            return SolutionResultV1.model_validate_json(json.dumps(
+                _tool_input(response, "record_solution")))
         except ProviderFailure: raise
-        except (ValidationError, ValueError, TypeError):
+        except (ValidationError, AttributeError, ValueError, TypeError):
             raise ProviderFailure(FailureCode.MALFORMED_RESPONSE) from None
         except Exception as exc:
             raise _failure(exc) from None
