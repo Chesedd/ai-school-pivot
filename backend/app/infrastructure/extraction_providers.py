@@ -32,6 +32,25 @@ def _tool_input(response: Any, name: str) -> dict[str, Any]:
     return payload
 
 
+def _normalize_tool_strings(
+    payload: dict[str, Any], fields: tuple[str, ...],
+) -> dict[str, Any]:
+    """Copy a tool payload and trim only named string values at its boundary."""
+    normalized = dict(payload)
+    for field in fields:
+        value = normalized.get(field)
+        if type(value) is str:
+            normalized[field] = value.strip()
+    return normalized
+
+
+def _normalize_string_list(payload: dict[str, Any], field: str) -> None:
+    """Trim a list only when its complete shape is known to be strings."""
+    value = payload.get(field)
+    if type(value) is list and all(type(item) is str for item in value):
+        payload[field] = [item.strip() for item in value]
+
+
 @dataclass(frozen=True, slots=True)
 class ExtractionTelemetry:
     provider_request_id: str
@@ -126,6 +145,10 @@ class AnthropicExtractionAdapter(_ExtractionAdapter):
                     "input_schema": ExtractionResultV1.model_json_schema()}],
                 tool_choice={"type": "tool", "name": "record_extraction"})
             payload = _tool_input(response, "record_extraction")
+            payload = _normalize_tool_strings(payload, ("extracted_text",
+                "structured_statement", "detected_task_type", "detected_answer_format"))
+            _normalize_string_list(payload, "choices")
+            _normalize_string_list(payload, "ocr_issues")
             usage = Usage(response.usage.input_tokens, response.usage.output_tokens,
                 getattr(response.usage, "cache_read_input_tokens", 0) or 0,
                 getattr(response.usage, "cache_creation_input_tokens", 0) or 0)
@@ -161,8 +184,11 @@ class AnthropicSolverAdapter:
                     "the required solver contract."),
                     "input_schema": SolutionResultV1.model_json_schema()}],
                 tool_choice={"type": "tool", "name": "record_solution"})
+            payload = _tool_input(response, "record_solution")
+            normalized_payload = _normalize_tool_strings(payload,
+                ("status", "reasoning_summary", "final_answer"))
             return SolutionResultV1.model_validate_json(json.dumps(
-                _tool_input(response, "record_solution")))
+                normalized_payload, ensure_ascii=False))
         except ProviderFailure: raise
         except (ValidationError, AttributeError, ValueError, TypeError):
             raise ProviderFailure(FailureCode.MALFORMED_RESPONSE) from None
