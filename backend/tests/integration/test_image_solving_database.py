@@ -6,7 +6,10 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from app.application.image_solving_contracts import ImageSolvingStatus
+from decimal import Decimal
+from app.application.image_solving_contracts import (
+    ExtractionResultV1, ImageSolvingStatus, SolutionResultV1, ValidationResultV1,
+)
 from app.infrastructure.image_solving_repository import SqlAlchemyImageSolvingRepository
 
 URL = os.environ.get("TEST_DATABASE_URL", "")
@@ -43,3 +46,34 @@ async def test_abandoned_running_lease_is_recovered(context):
         repo=SqlAlchemyImageSolvingRepository(db); state=await repo.create(owner,artifact)
         await db.execute(text("UPDATE image_solving_sessions SET status='extracting',updated_at=:old WHERE id=:id"), {"old":datetime.now(UTC)-timedelta(minutes=6),"id":state.session_id}); await db.commit()
         assert await repo.claim(state.session_id,ImageSolvingStatus.CREATED,ImageSolvingStatus.EXTRACTING)
+
+
+async def test_checkpoint_jsonb_roundtrip_for_every_stage(context):
+    _, factory = context; owner = uuid4(); artifact = await create_artifact(factory, owner)
+    extraction = ExtractionResultV1(extracted_text="7 · (X - 3) = 21",
+        structured_statement="Решить уравнение: 7 · (X - 3) = 21. Найти X.",
+        detected_task_type="solve_linear_equation", detected_answer_format="integer",
+        choices=("X = 6", "X = 0", "X = 3", "X = 24"),
+        extraction_confidence=Decimal("0.95"), ocr_issues=())
+    solution = SolutionResultV1(status="solved",
+        reasoning_summary="Divide by 7, then add 3.", final_answer="X = 6",
+        confidence=Decimal("0.97"))
+    validation = ValidationResultV1(validation_status="validated",
+        confidence=Decimal("0.95"), findings=(), requires_human_review=False,
+        extraction_confidence_check=True, OCR_quality_check=True,
+        solver_status_check=True, answer_consistency_check=True)
+    async with factory() as db:
+        repo = SqlAlchemyImageSolvingRepository(db)
+        session = await repo.create(owner, artifact)
+        state = await repo.save_checkpoint(session.session_id, "extraction", extraction,
+            ImageSolvingStatus.EXTRACTED)
+        assert state.lifecycle_status is ImageSolvingStatus.EXTRACTED
+        assert state.extraction_checkpoint == extraction
+        state = await repo.save_checkpoint(session.session_id, "solver", solution,
+            ImageSolvingStatus.SOLVED)
+        assert state.lifecycle_status is ImageSolvingStatus.SOLVED
+        assert state.solver_checkpoint == solution
+        state = await repo.save_checkpoint(session.session_id, "validation", validation,
+            ImageSolvingStatus.VALIDATED)
+        assert state.lifecycle_status is ImageSolvingStatus.VALIDATED
+        assert state.validation_checkpoint == validation
