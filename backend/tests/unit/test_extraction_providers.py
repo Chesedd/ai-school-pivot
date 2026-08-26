@@ -8,7 +8,7 @@ from app.application.extraction_pipeline import SolverInputV1
 from app.application.image_solving_contracts import (ExtractionResultV1, InputArtifactV1,
     SolutionResultV1)
 from app.infrastructure.extraction_providers import (AnthropicExtractionAdapter,
-    AnthropicSolverAdapter, OpenAIExtractionAdapter)
+    AnthropicSolverAdapter, OpenAIExtractionAdapter, _normalize_structured_json_text)
 
 PAYLOAD = {"extracted_text":"2 + 2?", "structured_statement":"2 + 2?",
     "detected_task_type":"calculation", "detected_answer_format":"number",
@@ -25,6 +25,25 @@ class Call:
 def artifact(mime="image/png"):
     return InputArtifactV1(artifact_id="artifact-1",mime_type=mime,
         content_hash=hashlib.sha256(b"raw-image").hexdigest(),user_context="extract")
+
+
+@pytest.mark.parametrize(("raw", "expected"), [
+    (' {"foo":"bar"} ', '{"foo":"bar"}'),
+    ('```json\n{"foo":"bar"}\n```', '{"foo":"bar"}'),
+    ('```\n{"foo":"bar"}\n```', '{"foo":"bar"}'),
+])
+def test_structured_json_normalization_accepts_only_plain_or_one_fence(raw, expected):
+    assert _normalize_structured_json_text(raw) == expected
+
+
+@pytest.mark.parametrize("raw", [
+    'Here is the result:\n```json\n{"foo":"bar"}\n```',
+    '```json\n{"foo":"bar"}\n```\nextra text',
+    '```json\n{"foo":"bar"}\n```\n```json\n{"other":"value"}\n```',
+    '```json\n{"foo":"bar"}',
+])
+def test_structured_json_normalization_does_not_extract_ambiguous_payloads(raw):
+    assert _normalize_structured_json_text(raw) == raw
 
 async def test_openai_multimodal_request_is_strict_and_binary_stays_in_adapter():
     call=Call(NS(id="resp_1",output_text=__import__('json').dumps(PAYLOAD),
@@ -52,6 +71,37 @@ async def test_anthropic_extraction_uses_extra_body_for_structured_output():
     assert output["type"] == "json_schema"
     assert output["schema"] == ExtractionResultV1.model_json_schema()
 
+
+@pytest.mark.parametrize("fence", ["```json", "```"])
+async def test_anthropic_extraction_accepts_aiprime_fenced_text_block(fence):
+    raw=f"{fence}\n{__import__('json').dumps(PAYLOAD)}\n```"
+    # Matches AIPRIME's observed Anthropic TextBlock(type="text", text=...).
+    call=Call(NS(id="msg_fenced",content=[NS(text=raw,type="text")],
+        usage=NS(input_tokens=4,output_tokens=2)))
+    adapter=AnthropicExtractionAdapter(NS(messages=call),Storage())
+
+    result=await adapter.extract(artifact(),ModelRoute("anthropic","claude-sonnet-4-6"))
+
+    assert isinstance(result, ExtractionResultV1)
+    assert result.extracted_text == PAYLOAD["extracted_text"]
+
+
+@pytest.mark.parametrize("raw", [
+    'Here is the result:\n```json\n{}\n```',
+    f'```json\n{__import__("json").dumps(PAYLOAD)}\n```\nextra text',
+    '```json\n{"broken":\n```',
+    f'```json\n{__import__("json").dumps(PAYLOAD)}\n```\n'
+      f'```json\n{__import__("json").dumps(PAYLOAD)}\n```',
+    '```json\n{"foo":"bar"}\n```',
+])
+async def test_anthropic_extraction_rejects_non_document_or_invalid_contract(raw):
+    call=Call(NS(id="bad",content=[NS(type="text",text=raw)],
+        usage=NS(input_tokens=1,output_tokens=1)))
+    adapter=AnthropicExtractionAdapter(NS(messages=call),Storage())
+    with pytest.raises(ProviderFailure) as error:
+        await adapter.extract(artifact(),ModelRoute("anthropic","claude-sonnet-4-6"))
+    assert error.value.code is FailureCode.MALFORMED_RESPONSE
+
 async def test_anthropic_solver_uses_extra_body_and_parses_strict_contract():
     payload={"status":"solved", "reasoning_summary":"Add the values.",
         "final_answer":"4", "confidence":"0.99"}
@@ -68,6 +118,35 @@ async def test_anthropic_solver_uses_extra_body_and_parses_strict_contract():
     output=call.kwargs["extra_body"]["output_config"]["format"]
     assert output["type"] == "json_schema"
     assert output["schema"] == SolutionResultV1.model_json_schema()
+
+
+@pytest.mark.parametrize("fenced", [False, True])
+async def test_anthropic_solver_accepts_plain_and_fenced_contract(fenced):
+    payload={"status":"solved", "reasoning_summary":"Add the values.",
+        "final_answer":"4", "confidence":"0.99"}
+    raw=__import__('json').dumps(payload)
+    if fenced: raw=f"```json\n{raw}\n```"
+    call=Call(NS(id="solver",content=[NS(type="text",text=raw)],
+        usage=NS(input_tokens=5,output_tokens=3)))
+    adapter=AnthropicSolverAdapter(NS(messages=call),ModelRoute("anthropic","opaque-model"))
+    solver_input=SolverInputV1.from_extraction(
+        ExtractionResultV1.model_validate_json(__import__('json').dumps(PAYLOAD)))
+    assert (await adapter.solve(solver_input)).final_answer == "4"
+
+
+@pytest.mark.parametrize("raw", [
+    '```json\n{"status":"solved","final_answer":"4"}\n```',
+    'Here is the result: {"status":"solved"}',
+])
+async def test_anthropic_solver_rejects_invalid_fenced_contract_and_prose(raw):
+    call=Call(NS(id="bad",content=[NS(type="text",text=raw)],
+        usage=NS(input_tokens=1,output_tokens=1)))
+    adapter=AnthropicSolverAdapter(NS(messages=call),ModelRoute("anthropic","opaque-model"))
+    solver_input=SolverInputV1.from_extraction(
+        ExtractionResultV1.model_validate_json(__import__('json').dumps(PAYLOAD)))
+    with pytest.raises(ProviderFailure) as error:
+        await adapter.solve(solver_input)
+    assert error.value.code is FailureCode.MALFORMED_RESPONSE
 
 @pytest.mark.parametrize("adapter_kind",["openai","anthropic"])
 async def test_malformed_structured_response_is_provider_neutral(adapter_kind):
