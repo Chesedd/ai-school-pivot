@@ -14,7 +14,9 @@ from app.application.authoring import (Cost, FailureCode, ModelRoute, PricingCat
 from app.application.extraction import StorageReadPort
 from app.application.extraction_prompts import (IMAGE_EXTRACT_V1_NAME,
     IMAGE_EXTRACT_V1_SYSTEM, IMAGE_EXTRACT_V1_USER)
-from app.application.image_solving_contracts import ExtractionResultV1, InputArtifactV1
+from app.application.image_solving_contracts import (ExtractionResultV1, InputArtifactV1,
+    SolutionResultV1)
+from app.application.extraction_pipeline import SOLVER_SYSTEM, SolverInputV1
 from app.infrastructure.authoring_providers import _failure
 
 
@@ -117,6 +119,37 @@ class AnthropicExtractionAdapter(_ExtractionAdapter):
             return self._finish(route, response, payload, usage, started)
         except ProviderFailure: raise
         except (json.JSONDecodeError, ValidationError, AttributeError, TypeError, ValueError):
+            raise ProviderFailure(FailureCode.MALFORMED_RESPONSE) from None
+        except Exception as exc:
+            raise _failure(exc) from None
+
+
+class RoutedAnthropicExtractor:
+    """Bind the configured model route to the provider-neutral extraction port."""
+    def __init__(self, adapter: AnthropicExtractionAdapter, route: ModelRoute):
+        self.adapter, self.route = adapter, route
+
+    async def extract(self, artifact: InputArtifactV1) -> ExtractionResultV1:
+        return await self.adapter.extract(artifact, self.route)
+
+
+class AnthropicSolverAdapter:
+    """Solve extracted task data through the same official Messages client."""
+    def __init__(self, client: Any, route: ModelRoute):
+        self._client, self._route = client, route
+
+    async def solve(self, value: SolverInputV1) -> SolutionResultV1:
+        try:
+            response = await self._client.messages.create(model=self._route.model_id,
+                system=SOLVER_SYSTEM, max_tokens=4096,
+                messages=[{"role": "user", "content": value.model_dump_json()}],
+                output_config={"format": {"type": "json_schema",
+                    "schema": SolutionResultV1.model_json_schema()}})
+            raw = "".join(block.text for block in response.content
+                if getattr(block, "type", None) == "text")
+            return SolutionResultV1.model_validate_json(raw)
+        except ProviderFailure: raise
+        except (ValidationError, ValueError, TypeError):
             raise ProviderFailure(FailureCode.MALFORMED_RESPONSE) from None
         except Exception as exc:
             raise _failure(exc) from None

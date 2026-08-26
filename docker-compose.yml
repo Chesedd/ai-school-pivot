@@ -27,8 +27,13 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
       ATTACHMENT_STORAGE_PATH: /data/attachments
       ATTACHMENT_MAX_BYTES: ${ATTACHMENT_MAX_BYTES:-5242880}
+      ARTIFACT_STORAGE_PATH: /data/image-artifacts
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     volumes:
       - attachment_data:/data/attachments
+      - image_artifact_data:/data/image-artifacts
     depends_on:
       postgres:
         condition: service_healthy
@@ -52,3 +57,4 @@ services:
 volumes:
   postgres_data:
   attachment_data:
+  image_artifact_data:

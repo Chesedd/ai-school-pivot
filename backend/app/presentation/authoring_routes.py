@@ -30,7 +30,10 @@ def route_catalog():
 def provider_registry(settings:Settings=Depends(get_settings),catalog:AuthoringRouteCatalog=Depends(route_catalog)):
     # Rates are deliberately configuration-versioned placeholders; only allowlisted routes are executable.
     prices={(r.provider_id,r.model_id):Price("USD","api-v1","server-config",Decimal("0"),Decimal("0"),Decimal("0"),Decimal("0")) for r in catalog.routes}
-    return production_registry(PricingCatalog(prices),openai_api_key=settings.openai_api_key,anthropic_api_key=settings.anthropic_api_key)
+    anthropic_key = (None if settings.anthropic_api_key is None else
+        settings.anthropic_api_key.get_secret_value())
+    return production_registry(PricingCatalog(prices), openai_api_key=settings.openai_api_key,
+        anthropic_api_key=anthropic_key)
 
 def service(db=Depends(get_session),providers=Depends(provider_registry),catalog=Depends(route_catalog)):
     return AuthoringApplicationService(db,providers,catalog)

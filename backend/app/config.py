@@ -3,7 +3,7 @@
 from functools import lru_cache
 from uuid import UUID
 
-from pydantic import PostgresDsn
+from pydantic import PostgresDsn, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,8 +21,17 @@ class Settings(BaseSettings):
     attachment_max_bytes: int = 5 * 1024 * 1024
     artifact_storage_path: str = "/tmp/ai-school-pivot-image-artifacts"
     openai_api_key: str | None = None
-    anthropic_api_key: str | None = None
+    anthropic_api_key: SecretStr | None = None
+    anthropic_auth_token: SecretStr | None = None
+    anthropic_base_url: str | None = None
+    image_solving_anthropic_model: str = "claude-sonnet-4-20250514"
     authoring_routes: str = "openai:gpt-4.1-mini,anthropic:claude-sonnet-4-20250514"
+
+    @property
+    def anthropic_credential(self) -> str | None:
+        """Resolve gateway bearer auth first while retaining API-key compatibility."""
+        value = self.anthropic_auth_token or self.anthropic_api_key
+        return None if value is None else value.get_secret_value()
 
 
 @lru_cache
