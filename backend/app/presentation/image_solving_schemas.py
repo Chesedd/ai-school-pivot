@@ -79,6 +79,7 @@ class PromoteImageSolvingRequest(ImageSolvingDto):
     topic_id: UUID = Field(strict=False)
     subtopic_id: UUID | None = Field(default=None, strict=False)
     skill_ids: tuple[UUID, ...] = Field(min_length=1, max_length=20)
+    tag_ids: tuple[UUID, ...] = Field(default=(), max_length=8)
     solution: StrictStr = Field(min_length=1, max_length=30_000)
     final_answer: StrictStr | None = Field(default=None, max_length=4_000)
     review_confirmed: StrictBool
@@ -97,6 +98,12 @@ class PromoteImageSolvingRequest(ImageSolvingDto):
     def unique_skills(cls, value: tuple[UUID, ...]) -> tuple[UUID, ...]:
         if len(value) != len(set(value)):
             raise ValueError("duplicate_skills")
+        return value
+
+    @field_validator("tag_ids")
+    @classmethod
+    def unique_tags(cls,value:tuple[UUID,...])->tuple[UUID,...]:
+        if len(value)!=len(set(value)):raise ValueError("duplicate_tags")
         return value
 
 
