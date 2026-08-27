@@ -64,7 +64,7 @@ class PromoteImageSolvingService:
             reviewed.topic_id, reviewed.subtopic_id,
             VersionContentInput(reviewed.title, reviewed.statement,
                 reviewed.task_type, reviewed.answer_format, reviewed.difficulty,
-                "image_solving", links))
+                "image_solving", links),tag_ids=reviewed.tag_ids)
         try:
             created = await CreateTaskOperation(self.content).create(command,
                 ActorContext(actor_id))

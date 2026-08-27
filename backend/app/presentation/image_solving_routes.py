@@ -5,8 +5,11 @@ from fastapi import APIRouter, Depends, Response
 
 from app.application.authoring import FailureCode, ModelRoute, ProviderFailure
 from app.application.image_solving import ImageSolvingService
-from app.application.image_solving_api import ImageSolvingApplicationService
+from app.application.image_solving_api import ImageSolvingApiError, ImageSolvingApplicationService
 from app.application.image_solving_promotion import PromoteImageSolvingService
+from app.application.image_solving_metadata import MetadataRecommendationService, ImageTaskMetadataRecommendationV1
+from app.infrastructure.image_solving_metadata import (AnthropicMetadataRecommendationProvider,
+    SqlAlchemyMetadataCatalogLoader)
 from app.config import Settings, get_settings
 from app.db.session import get_session
 from app.infrastructure.image_solving_repository import SqlAlchemyImageSolvingRepository
@@ -97,6 +100,34 @@ async def get_attempts(session_id: UUID,
         service: ImageSolvingApplicationService = Depends(image_solving_service),
         settings: Settings = Depends(get_settings)):
     return await service.attempts(session_id, settings.content_bank_dev_actor_id)
+
+def metadata_service(db, settings):
+    repository=SqlAlchemyImageSolvingRepository(db)
+    facade=image_solving_service(db,settings)
+    if not settings.anthropic_credential:
+        provider=_UnavailablePipelinePort()
+    else:
+        from anthropic import AsyncAnthropic
+        options={"base_url":settings.anthropic_base_url}
+        options["auth_token" if settings.anthropic_auth_token else "api_key"]=settings.anthropic_credential
+        provider=AnthropicMetadataRecommendationProvider(AsyncAnthropic(**options),
+            ModelRoute("anthropic",settings.image_solving_anthropic_model))
+    return MetadataRecommendationService(facade.flow,repository,
+        SqlAlchemyMetadataCatalogLoader(db),provider)
+
+@router.get("/sessions/{session_id}/recommendations",response_model=ImageTaskMetadataRecommendationV1)
+async def get_recommendations(session_id:UUID,db=Depends(get_session),settings:Settings=Depends(get_settings)):
+    try:
+        result=await metadata_service(db,settings).get(session_id,settings.content_bank_dev_actor_id)
+        if result is None: raise ImageSolvingApiError("image_solving_recommendations_not_found",404)
+        return result
+    except ImageSolvingApiError: raise
+    except Exception as exc: ImageSolvingApplicationService._raise(exc)
+
+@router.post("/sessions/{session_id}/recommendations",response_model=ImageTaskMetadataRecommendationV1)
+async def create_recommendations(session_id:UUID,db=Depends(get_session),settings:Settings=Depends(get_settings)):
+    try:return await metadata_service(db,settings).generate(session_id,settings.content_bank_dev_actor_id)
+    except Exception as exc: ImageSolvingApplicationService._raise(exc)
 
 
 @router.post("/sessions/{session_id}/promote", response_model=PromoteImageSolvingResponse)

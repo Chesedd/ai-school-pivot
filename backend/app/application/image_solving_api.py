@@ -49,6 +49,7 @@ _ERRORS = {
     "session_in_progress": ("image_solving_in_progress", 409),
     "invalid_checkpoint": ("invalid_artifact_or_checkpoint", 422),
     "artifact_integrity_failed": ("invalid_artifact_or_checkpoint", 422),
+    "recommendation_session_incomplete": ("image_solving_not_ready", 409),
 }
 
 
