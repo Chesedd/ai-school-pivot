@@ -22,13 +22,14 @@ from app.application.image_solving_contracts import (
     ExtractionResultV1, ImageSolvingStatus, SolutionResultV1,
 )
 from app.application.input_artifacts import ArtifactOwnershipService, ArtifactUploadService
-from app.config import get_settings
+from app.application.principal import Principal
 from app.infrastructure.artifact_storage import FilesystemArtifactStorage
 from app.infrastructure.image_solving_repository import SqlAlchemyImageSolvingRepository
 from app.infrastructure.input_artifact_repository import SqlAlchemyArtifactRepository
 from app.main import app
 from app.presentation.image_artifact_routes import service as artifact_service
 from app.presentation.image_solving_routes import image_solving_service
+from app.presentation.auth_dependencies import require_principal
 
 if URL and not URL.rsplit("/", 1)[-1].split("?", 1)[0].endswith("_test"):
     raise RuntimeError("image solving tests require *_test database")
@@ -170,7 +171,7 @@ async def test_stale_solver_recovery_is_bounded_and_creates_one_checkpoint(conte
 
 async def test_complete_http_api_flow_uses_mocked_providers(context):
     _, factory, storage = context
-    owner = get_settings().content_bank_dev_actor_id
+    owner = uuid4()
     extractor, solver = Extractor(), Solver()
 
     async def upload_dependency():
@@ -186,17 +187,24 @@ async def test_complete_http_api_flow_uses_mocked_providers(context):
 
     app.dependency_overrides[artifact_service] = upload_dependency
     app.dependency_overrides[image_solving_service] = solving_dependency
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-        uploaded = await client.post("/api/image-solving/artifacts",
-            files={"file": (FILES[0][0], FILES[0][2], FILES[0][1])})
-        assert uploaded.status_code == 201
-        created = await client.post("/api/image-solving/sessions",
-            json={"artifact_id": uploaded.json()["artifact_id"]})
-        assert created.status_code == 201 and created.json()["status"] == "created"
-        session_id = created.json()["session_id"]
-        ran = await client.post(f"/api/image-solving/sessions/{session_id}/run")
-        state = await client.get(f"/api/image-solving/sessions/{session_id}")
-        result = await client.get(f"/api/image-solving/sessions/{session_id}/result")
+    app.dependency_overrides[require_principal] = lambda: Principal(
+        owner, "user-a", "User A", frozenset(), frozenset(), None)
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            uploaded = await client.post("/api/image-solving/artifacts",
+                files={"file": (FILES[0][0], FILES[0][2], FILES[0][1])})
+            assert uploaded.status_code == 201
+            created = await client.post("/api/image-solving/sessions",
+                json={"artifact_id": uploaded.json()["artifact_id"]})
+            assert created.status_code == 201 and created.json()["status"] == "created"
+            session_id = created.json()["session_id"]
+            ran = await client.post(f"/api/image-solving/sessions/{session_id}/run")
+            state = await client.get(f"/api/image-solving/sessions/{session_id}")
+            result = await client.get(f"/api/image-solving/sessions/{session_id}/result")
+    finally:
+        app.dependency_overrides.pop(artifact_service, None)
+        app.dependency_overrides.pop(image_solving_service, None)
+        app.dependency_overrides.pop(require_principal, None)
     assert ran.status_code == state.status_code == result.status_code == 200
     assert state.json()["status"] == "validated" and result.json()["solution"]["answer"] == "4"
     assert len(extractor.calls) == len(solver.calls) == 1

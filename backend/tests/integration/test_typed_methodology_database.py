@@ -28,12 +28,20 @@ async def api_client(engine,monkeypatch):
     os.environ.setdefault("CONTENT_BANK_DEV_ACTOR_ID","00000000-0000-4000-8000-000000000001")
     os.environ.setdefault("ASSESSMENT_DEV_STUDENT_ID","00000000-0000-4000-8000-000000000002")
     from httpx import ASGITransport,AsyncClient
+    from app.application.principal import Principal
     from app.main import app
+    from app.presentation.auth_dependencies import require_principal
     import app.presentation.routes as routes
     test_factory=async_sessionmaker(engine,class_=AsyncSession,expire_on_commit=False)
     monkeypatch.setattr(routes,"async_session_factory",test_factory)
-    async with AsyncClient(transport=ASGITransport(app=app),base_url="http://test") as client:
-        yield client
+    user_id=uuid4()
+    app.dependency_overrides[require_principal] = lambda: Principal(
+        user_id,"user-a","User A",frozenset(),frozenset(),None)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app),base_url="http://test") as client:
+            yield client
+    finally:
+        app.dependency_overrides.pop(require_principal,None)
 
 @pytest_asyncio.fixture
 async def seeded(engine):

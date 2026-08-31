@@ -8,13 +8,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from app.application.folders import CreateFolderCommand, RenameFolderCommand, MoveFolderCommand, DeleteFolderCommand, MoveTaskCommand, FolderService, GetFolderTreeService
 from app.application.content_bank import AcceptedAnswerInput, ChoiceOptionInput, ChoiceOptionRuleInput, ChoiceScoringPolicyInput, ActorContext, ApplicationError, ArchiveTaskService, CreateTaskCommand, CreateTaskService, DuplicateCheckService, DuplicateQuery, ExpectedSolutionInput, GetAuditService, GetTaskCardService, HintInput, ListTasksService, RubricInput, RubricItemInput, SaveMethodologyCommand, SaveMethodologyService, SkillLinkInput, StatusCycleService, TaskListQuery, TypicalErrorInput, ValidationDetail, VersionContentInput
-from app.config import Settings, get_settings
+from app.application.principal import Principal
 from app.db.session import async_session_factory
 from app.infrastructure.repository import SQLAlchemyContentBankRepository, SQLAlchemyUnitOfWork
 from app.presentation.schemas import FolderCreateRequest, FolderRenameRequest, FolderMoveRequest, TaskLocationRequest, FolderSummaryResponse, FolderTreeResponse, TaskLocationResponse
 from app.presentation.schemas import AuditPageResponse, ArchiveRequest, ArchiveResponse, CatalogResponse, DuplicateCheckRequest, DuplicateCheckResponse, EmptyRequest, MethodologyPutRequest, MethodologyResponse, ReturnToDraftRequest, StatusCommandResponse, TaskCardResponse, TaskCreateRequest, TaskListPageResponse, TaskResponse
 from app.presentation.schemas import TagCreateRequest, TagPatchRequest, TagDeprecateRequest, TagResponse, VersionTagsPutRequest, VersionTagsResponse
 from app.application.managed_tags import ManagedTagService
+from app.presentation.auth_dependencies import require_principal
 
 router = APIRouter(prefix="/api/content-bank")
 
@@ -35,18 +36,18 @@ async def get_tag(tag_id:UUID):
     async with async_session_factory() as session:return __import__('app.application.managed_tags',fromlist=['serialize']).serialize(await ManagedTagService(session).get(tag_id))
 
 @router.post("/admin/tags",response_model=TagResponse,status_code=201,summary="Trusted pilot only: production authentication/RBAC is required")
-async def create_tag(payload:TagCreateRequest,response:Response,settings:Settings=Depends(get_settings)):
-    async with async_session_factory() as session: result=await ManagedTagService(session).create(payload.category_code,payload.subject_id,payload.name,settings.content_bank_dev_actor_id)
+async def create_tag(payload:TagCreateRequest,response:Response,principal:Principal=Depends(require_principal)):
+    async with async_session_factory() as session: result=await ManagedTagService(session).create(payload.category_code,payload.subject_id,payload.name,principal.user_id)
     response.headers["Location"]=f"/api/content-bank/tags/{result['id']}";return result
 
 @router.patch("/admin/tags/{tag_id}",response_model=TagResponse,summary="Trusted pilot only: production authentication/RBAC is required")
-async def patch_tag(tag_id:UUID,payload:TagPatchRequest,settings:Settings=Depends(get_settings)):
+async def patch_tag(tag_id:UUID,payload:TagPatchRequest,principal:Principal=Depends(require_principal)):
     fields=payload.model_fields_set-{"expected_updated_at"}; values=payload.model_dump()
-    async with async_session_factory() as session:return await ManagedTagService(session).patch(tag_id,payload.expected_updated_at,settings.content_bank_dev_actor_id,values,fields)
+    async with async_session_factory() as session:return await ManagedTagService(session).patch(tag_id,payload.expected_updated_at,principal.user_id,values,fields)
 
 @router.post("/admin/tags/{tag_id}/deprecate",response_model=TagResponse,summary="Trusted pilot only: production authentication/RBAC is required")
-async def deprecate_tag(tag_id:UUID,payload:TagDeprecateRequest,settings:Settings=Depends(get_settings)):
-    async with async_session_factory() as session:return await ManagedTagService(session).deprecate(tag_id,payload.replacement_tag_id,payload.expected_updated_at,settings.content_bank_dev_actor_id)
+async def deprecate_tag(tag_id:UUID,payload:TagDeprecateRequest,principal:Principal=Depends(require_principal)):
+    async with async_session_factory() as session:return await ManagedTagService(session).deprecate(tag_id,payload.replacement_tag_id,payload.expected_updated_at,principal.user_id)
 
 @router.get("/admin/tags/{tag_id}/usage",summary="Trusted pilot only: production authentication/RBAC is required")
 async def tag_usage(tag_id:UUID):
@@ -63,12 +64,12 @@ def _create_command(payload) -> CreateTaskCommand:
     return CreateTaskCommand(payload.subject_id,payload.grade_id,payload.topic_id,payload.subtopic_id,VersionContentInput(c.title,c.statement,c.task_type,c.answer_format,c.difficulty,c.source,tuple(SkillLinkInput(x.skill_id,x.weight,x.is_primary) for x in c.skills)), payload.folder_id, tuple(getattr(payload,"tag_ids",())))
 
 @router.put("/task-versions/{version_id}/tags",response_model=VersionTagsResponse)
-async def replace_version_tags(version_id:UUID,payload:VersionTagsPutRequest,settings:Settings=Depends(get_settings)):
+async def replace_version_tags(version_id:UUID,payload:VersionTagsPutRequest,principal:Principal=Depends(require_principal)):
     async with async_session_factory() as session:
-        return await ManagedTagService(session).replace_version_tags(version_id,payload.tag_ids,payload.expected_updated_at,settings.content_bank_dev_actor_id)
+        return await ManagedTagService(session).replace_version_tags(version_id,payload.tag_ids,payload.expected_updated_at,principal.user_id)
 
 @router.put("/task-versions/{task_version_id}/methodology", response_model=MethodologyResponse)
-async def put_methodology(task_version_id: UUID, payload: MethodologyPutRequest, settings: Settings = Depends(get_settings)) -> object:
+async def put_methodology(task_version_id: UUID, payload: MethodologyPutRequest, principal: Principal = Depends(require_principal)) -> object:
     expected = payload.expected_solution
     rubric = payload.rubric
     command = SaveMethodologyCommand(
@@ -81,7 +82,7 @@ async def put_methodology(task_version_id: UUID, payload: MethodologyPutRequest,
         tuple(ChoiceOptionInput(x.option_key, x.content, x.order_index) for x in payload.choice_options),
         ChoiceScoringPolicyInput(payload.choice_scoring_policy.mode, payload.choice_scoring_policy.policy_version, tuple(ChoiceOptionRuleInput(x.option_key, x.role, x.weight) for x in payload.choice_scoring_policy.option_rules)) if payload.choice_scoring_policy else None,
     )
-    return await SaveMethodologyService(SQLAlchemyUnitOfWork(async_session_factory)).save(command, ActorContext(settings.content_bank_dev_actor_id))
+    return await SaveMethodologyService(SQLAlchemyUnitOfWork(async_session_factory)).save(command, ActorContext(principal.user_id))
 
 
 @router.get("/tasks", response_model=TaskListPageResponse)
@@ -125,36 +126,35 @@ async def get_task_audit(
 
 
 @router.post("/tasks", response_model=TaskResponse, status_code=201)
-async def create_task(payload: TaskCreateRequest, response: Response, settings: Settings = Depends(get_settings)) -> object:
+async def create_task(payload: TaskCreateRequest, response: Response, principal: Principal = Depends(require_principal)) -> object:
     content = payload.initial_version
     command = CreateTaskCommand(payload.subject_id, payload.grade_id, payload.topic_id, payload.subtopic_id, VersionContentInput(content.title, content.statement, content.task_type, content.answer_format, content.difficulty, content.source, tuple(SkillLinkInput(x.skill_id, x.weight, x.is_primary) for x in content.skills)), payload.folder_id, tuple(payload.tag_ids))
-    # Temporary server-side development identity until authentication is introduced.
-    result = await CreateTaskService(SQLAlchemyUnitOfWork(async_session_factory)).create_task(command, ActorContext(settings.content_bank_dev_actor_id))
+    result = await CreateTaskService(SQLAlchemyUnitOfWork(async_session_factory)).create_task(command, ActorContext(principal.user_id))
     response.headers["Location"] = f"/api/content-bank/tasks/{result.id}"
     return result
 
 
 @router.post("/tasks/{task_id}/versions/{version_no}/submit-review", response_model=StatusCommandResponse)
-async def submit_review(task_id: UUID, version_no: int, payload: EmptyRequest, settings: Settings = Depends(get_settings)) -> object:
-    return await StatusCycleService(SQLAlchemyUnitOfWork(async_session_factory)).submit_review(task_id, version_no, ActorContext(settings.content_bank_dev_actor_id))
+async def submit_review(task_id: UUID, version_no: int, payload: EmptyRequest, principal: Principal = Depends(require_principal)) -> object:
+    return await StatusCycleService(SQLAlchemyUnitOfWork(async_session_factory)).submit_review(task_id, version_no, ActorContext(principal.user_id))
 
 
 @router.post("/tasks/{task_id}/versions/{version_no}/return-to-draft", response_model=StatusCommandResponse)
-async def return_to_draft(task_id: UUID, version_no: int, payload: ReturnToDraftRequest, settings: Settings = Depends(get_settings)) -> object:
+async def return_to_draft(task_id: UUID, version_no: int, payload: ReturnToDraftRequest, principal: Principal = Depends(require_principal)) -> object:
     if not payload.reason.strip():
         raise ApplicationError([ValidationDetail("reason", "blank", "Причина не может быть пустой.")])
-    return await StatusCycleService(SQLAlchemyUnitOfWork(async_session_factory)).return_draft(task_id, version_no, payload.reason.strip(), ActorContext(settings.content_bank_dev_actor_id))
+    return await StatusCycleService(SQLAlchemyUnitOfWork(async_session_factory)).return_draft(task_id, version_no, payload.reason.strip(), ActorContext(principal.user_id))
 
 
 @router.post("/tasks/{task_id}/versions/{version_no}/approve", response_model=StatusCommandResponse)
-async def approve(task_id: UUID, version_no: int, payload: EmptyRequest, settings: Settings = Depends(get_settings)) -> object:
-    return await StatusCycleService(SQLAlchemyUnitOfWork(async_session_factory)).approve(task_id, version_no, ActorContext(settings.content_bank_dev_actor_id))
+async def approve(task_id: UUID, version_no: int, payload: EmptyRequest, principal: Principal = Depends(require_principal)) -> object:
+    return await StatusCycleService(SQLAlchemyUnitOfWork(async_session_factory)).approve(task_id, version_no, ActorContext(principal.user_id))
 
 
 @router.post("/tasks/{task_id}/archive", response_model=ArchiveResponse)
-async def archive_task(task_id: UUID, payload: ArchiveRequest | None = None, settings: Settings = Depends(get_settings)) -> object:
+async def archive_task(task_id: UUID, payload: ArchiveRequest | None = None, principal: Principal = Depends(require_principal)) -> object:
     reason = payload.reason.strip() if payload and payload.reason else None
-    return await ArchiveTaskService(SQLAlchemyUnitOfWork(async_session_factory)).archive(task_id, ActorContext(settings.content_bank_dev_actor_id), reason)
+    return await ArchiveTaskService(SQLAlchemyUnitOfWork(async_session_factory)).archive(task_id, ActorContext(principal.user_id), reason)
 
 
 @router.get("/catalog/{catalog_name}", response_model=CatalogResponse)
@@ -170,20 +170,20 @@ async def get_catalog(catalog_name: str) -> object:
 async def folder_tree(subject_id: UUID):
     async with async_session_factory() as session: return await GetFolderTreeService(SQLAlchemyContentBankRepository(session)).get(subject_id)
 @router.post("/subjects/{subject_id}/folders", response_model=FolderSummaryResponse, status_code=201)
-async def create_folder(subject_id: UUID,payload:FolderCreateRequest,settings:Settings=Depends(get_settings)):
-    return await FolderService(SQLAlchemyUnitOfWork(async_session_factory)).create(CreateFolderCommand(subject_id,payload.parent_id,payload.name,settings.content_bank_dev_actor_id))
+async def create_folder(subject_id: UUID,payload:FolderCreateRequest,principal:Principal=Depends(require_principal)):
+    return await FolderService(SQLAlchemyUnitOfWork(async_session_factory)).create(CreateFolderCommand(subject_id,payload.parent_id,payload.name,principal.user_id))
 @router.patch("/folders/{folder_id}",response_model=FolderSummaryResponse)
-async def rename_folder(folder_id:UUID,payload:FolderRenameRequest,settings:Settings=Depends(get_settings)):
-    return await FolderService(SQLAlchemyUnitOfWork(async_session_factory)).rename(RenameFolderCommand(folder_id,payload.name,payload.expected_updated_at,settings.content_bank_dev_actor_id))
+async def rename_folder(folder_id:UUID,payload:FolderRenameRequest,principal:Principal=Depends(require_principal)):
+    return await FolderService(SQLAlchemyUnitOfWork(async_session_factory)).rename(RenameFolderCommand(folder_id,payload.name,payload.expected_updated_at,principal.user_id))
 @router.post("/folders/{folder_id}/move",response_model=FolderSummaryResponse)
-async def move_folder(folder_id:UUID,payload:FolderMoveRequest,settings:Settings=Depends(get_settings)):
-    return await FolderService(SQLAlchemyUnitOfWork(async_session_factory)).move(MoveFolderCommand(folder_id,payload.parent_id,payload.expected_updated_at,settings.content_bank_dev_actor_id))
+async def move_folder(folder_id:UUID,payload:FolderMoveRequest,principal:Principal=Depends(require_principal)):
+    return await FolderService(SQLAlchemyUnitOfWork(async_session_factory)).move(MoveFolderCommand(folder_id,payload.parent_id,payload.expected_updated_at,principal.user_id))
 @router.delete("/folders/{folder_id}",status_code=204)
-async def delete_folder(folder_id:UUID,expected_updated_at:datetime,settings:Settings=Depends(get_settings)):
-    await FolderService(SQLAlchemyUnitOfWork(async_session_factory)).delete(DeleteFolderCommand(folder_id,expected_updated_at,settings.content_bank_dev_actor_id))
+async def delete_folder(folder_id:UUID,expected_updated_at:datetime,principal:Principal=Depends(require_principal)):
+    await FolderService(SQLAlchemyUnitOfWork(async_session_factory)).delete(DeleteFolderCommand(folder_id,expected_updated_at,principal.user_id))
 @router.put("/tasks/{task_id}/location",response_model=TaskLocationResponse)
-async def move_task(task_id:UUID,payload:TaskLocationRequest,settings:Settings=Depends(get_settings)):
-    return await FolderService(SQLAlchemyUnitOfWork(async_session_factory)).move_task(MoveTaskCommand(task_id,payload.folder_id,payload.expected_folder_id,settings.content_bank_dev_actor_id))
+async def move_task(task_id:UUID,payload:TaskLocationRequest,principal:Principal=Depends(require_principal)):
+    return await FolderService(SQLAlchemyUnitOfWork(async_session_factory)).move_task(MoveTaskCommand(task_id,payload.folder_id,payload.expected_folder_id,principal.user_id))
 
 async def _contents(subject_id:UUID,folder_id:UUID|None,query:TaskListQuery):
     # The path owns subject and location; query parameters can only filter tasks.
