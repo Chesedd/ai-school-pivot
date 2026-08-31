@@ -197,6 +197,10 @@ class RoutedAnthropicExtractor:
     def model_id(self) -> str:
         return self.route.model_id
 
+    @property
+    def last_telemetry(self) -> ExtractionTelemetry | None:
+        return self.adapter.last_telemetry
+
     async def extract(self, artifact: InputArtifactV1) -> ExtractionResultV1:
         return await self.adapter.extract(artifact, self.route)
 
@@ -205,8 +209,22 @@ class AnthropicSolverAdapter:
     """Solve extracted task data through the same official Messages client."""
     def __init__(self, client: Any, route: ModelRoute):
         self._client, self._route = client, route
+        self.last_telemetry: ExtractionTelemetry | None = None
+
+    @property
+    def provider_id(self) -> str:
+        return self._route.provider_id
+
+    @property
+    def model_id(self) -> str:
+        return self._route.model_id
+
+    @property
+    def route(self) -> ModelRoute:
+        return self._route
 
     async def solve(self, value: SolverInputV1) -> SolutionResultV1:
+        started = monotonic()
         try:
             response = await self._client.messages.create(model=self._route.model_id,
                 system=SOLVER_SYSTEM, max_tokens=4096,
@@ -219,10 +237,30 @@ class AnthropicSolverAdapter:
             payload = _tool_input(response, "record_solution")
             normalized_payload = _normalize_tool_strings(payload,
                 ("status", "reasoning_summary", "final_answer"))
-            return SolutionResultV1.model_validate_json(json.dumps(
+            # Confirmed AIPRIME compatibility alias.  No other status is widened.
+            if normalized_payload.get("status") == "success":
+                normalized_payload["status"] = "solved"
+            result = SolutionResultV1.model_validate_json(json.dumps(
                 normalized_payload, ensure_ascii=False))
+            usage = Usage(response.usage.input_tokens, response.usage.output_tokens,
+                getattr(response.usage, "cache_read_input_tokens", 0) or 0,
+                getattr(response.usage, "cache_creation_input_tokens", 0) or 0)
+            request_id = response.id
+            if type(request_id) is not str or not request_id:
+                raise ValueError
+            self.last_telemetry = ExtractionTelemetry(request_id, usage, None,
+                max(0, int((monotonic() - started) * 1000)))
+            return result
         except ProviderFailure: raise
-        except (ValidationError, AttributeError, ValueError, TypeError):
-            raise ProviderFailure(FailureCode.MALFORMED_RESPONSE) from None
+        except ValidationError as exc:
+            details = "; ".join(
+                f"{'.'.join(map(str, error['loc']))}: {error['type']}"
+                for error in exc.errors(include_url=False, include_input=False)
+            )
+            raise ProviderFailure(FailureCode.MALFORMED_RESPONSE,
+                f"ValidationError: {details}") from None
+        except (AttributeError, ValueError, TypeError) as exc:
+            raise ProviderFailure(FailureCode.MALFORMED_RESPONSE,
+                type(exc).__name__) from None
         except Exception as exc:
             raise _failure(exc) from None

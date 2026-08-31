@@ -1,6 +1,7 @@
 """Image-solving application flow with durable, resumable checkpoints."""
 from __future__ import annotations
 
+import asyncio
 from decimal import Decimal
 import logging
 from typing import Protocol
@@ -12,7 +13,7 @@ from app.application.image_solving_contracts import (
     SolutionResultV1, ValidationResultV1, ValidationStatus,
 )
 from app.application.input_artifacts import ArtifactOwnershipService, InputArtifactRecord
-from app.application.authoring import ProviderFailure
+from app.application.authoring import FailureCode, ProviderFailure
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ class ImageSolvingRepository(Protocol):
     async def claim(self, session_id: UUID, expected: ImageSolvingStatus,
                     running: ImageSolvingStatus) -> bool: ...
     async def save_checkpoint(self, session_id: UUID, stage: str, payload: object,
-                              status: ImageSolvingStatus) -> ImageSolvingSession: ...
+                              status: ImageSolvingStatus, **kwargs) -> ImageSolvingSession: ...
     async def fail(self, session_id: UUID, code: str) -> None: ...
 
 
@@ -51,7 +52,7 @@ class DeterministicImageValidator:
     def validate(self, extraction: ExtractionResultV1, solution: SolutionResultV1) -> ValidationResultV1:
         extraction_ok = extraction.extraction_confidence >= Decimal("0.80")
         ocr_ok = not extraction.ocr_issues
-        solver_ok = solution.status in {"solved", "solvable"}
+        solver_ok = solution.status == "solved"
         answer_ok = bool(solution.final_answer.strip()) and solution.confidence >= Decimal("0.50")
         checks = (extraction_ok, ocr_ok, solver_ok, answer_ok)
         findings = tuple(name for name, ok in zip(
@@ -102,6 +103,7 @@ class ImageSolvingService:
             await self.repository.fail(session_id, "artifact_integrity_failed")
             raise ImageSolvingError("artifact_integrity_failed")
         try:
+            stage = "extraction"
             extraction = state.extraction_checkpoint
             if extraction is None:
                 if not await self.repository.claim(session_id, ImageSolvingStatus.CREATED, ImageSolvingStatus.EXTRACTING):
@@ -110,32 +112,48 @@ class ImageSolvingService:
                     content_hash=artifact.content_hash_sha256, user_context=user_context)
                 extraction = await self.extractor.extract(payload)
                 state = await self.repository.save_checkpoint(session_id, "extraction", extraction,
-                    ImageSolvingStatus.EXTRACTED)
+                    ImageSolvingStatus.EXTRACTED, **self._checkpoint_telemetry(self.extractor))
+            stage = "solver"
             solution = state.solver_checkpoint
             if solution is None:
                 if not await self.repository.claim(session_id, ImageSolvingStatus.EXTRACTED, ImageSolvingStatus.SOLVING):
                     raise ImageSolvingError("session_in_progress")
-                solution = await self.solver.solve(SolverInputV1.from_extraction(extraction))
-                state = await self.repository.save_checkpoint(session_id, "solver", solution, ImageSolvingStatus.SOLVED)
+                solver_input = SolverInputV1.from_extraction(extraction)
+                try:
+                    solution = await self.solver.solve(solver_input)
+                except ProviderFailure as exc:
+                    if exc.code not in {FailureCode.TIMEOUT, FailureCode.CONNECTION_ERROR,
+                                        FailureCode.PROVIDER_UNAVAILABLE}:
+                        raise
+                    await asyncio.sleep(0.1)
+                    solution = await self.solver.solve(solver_input)
+                state = await self.repository.save_checkpoint(session_id, "solver", solution,
+                    ImageSolvingStatus.SOLVED, **self._checkpoint_telemetry(self.solver))
+            stage = "validation"
             validation = self.validator.validate(extraction, solution)
             return await self.repository.save_checkpoint(session_id, "validation", validation,
                 ImageSolvingStatus.VALIDATED)
         except ImageSolvingError:
             raise
         except Exception as exc:
-            if extraction is None:
-                failure_code = exc.code.value if isinstance(exc, ProviderFailure) else None
-                logger.error("image solving extraction failed", extra={
-                    "session_id": str(session_id),
-                    "stage": "extraction",
-                    "provider": getattr(self.extractor, "provider_id", "unknown"),
-                    "model": getattr(self.extractor, "model_id", "unknown"),
-                    "failure_code": failure_code,
-                    "exception_category": type(exc).__name__,
-                    "validation_reason": getattr(exc, "adapter_detail", "") or None,
-                })
+            port = self.extractor if stage == "extraction" else self.solver if stage == "solver" else None
+            failure_code = exc.code.value if isinstance(exc, ProviderFailure) else None
+            logger.error(f"image solving {stage} failed", extra={
+                "session_id": str(session_id), "stage": stage,
+                "provider": getattr(port, "provider_id", "unknown"),
+                "model": getattr(port, "model_id", "unknown"),
+                "failure_code": failure_code,
+                "exception_category": type(exc).__name__,
+                "validation_reason": getattr(exc, "adapter_detail", "") or None,
+            })
             await self.repository.fail(session_id, "pipeline_failed")
             raise
+
+    @staticmethod
+    def _checkpoint_telemetry(port: object) -> dict[str, object]:
+        telemetry = getattr(port, "last_telemetry", None)
+        route = getattr(port, "route", None)
+        return {"route": route, "telemetry": telemetry} if route is not None and telemetry is not None else {}
 
     @staticmethod
     def _validate_checkpoint(state: ImageSolvingSession) -> None:
