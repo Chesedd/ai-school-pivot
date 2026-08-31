@@ -37,6 +37,8 @@ class SQLAlchemyContentBankRepository:
             .outerjoin(ExpectedSolution,ExpectedSolution.task_version_id==TaskVersion.id)
             .where(Task.archived_at.is_(None),TaskVersion.status.in_(("draft","review","approved")),
                 TaskVersion.statement.op("%")(query.statement)))
+        if query.access is not None and not query.access.unrestricted:
+            stmt=stmt.where((Task.created_by==query.access.actor_id)|(TaskVersion.status=="approved"))
         if query.exclude_task_id is not None: stmt=stmt.where(Task.id!=query.exclude_task_id)
         rows=(await self.session.execute(stmt)).all()
         return tuple(DuplicateCandidateRecord(*row) for row in rows)
@@ -125,6 +127,11 @@ class SQLAlchemyContentBankRepository:
             .join(latest, and_(latest.c.task_id == Task.id, latest.c.version_no == latest_numbers.c.version_no))
             .outerjoin(primary_link, and_(primary_link.c.task_version_id == latest.c.id, primary_link.c.is_primary.is_(True)))
             .outerjoin(primary_skill, primary_skill.c.id == primary_link.c.skill_id))
+        if query.access is not None and not query.access.unrestricted:
+            # Archived is an administrative/private state.  Approved content is
+            # shared only while its aggregate is active.
+            base = base.where((Task.created_by == query.access.actor_id) |
+                              ((latest.c.status == "approved") & Task.archived_at.is_(None)))
         if query.root_only:
             base=base.where(Task.folder_id.is_(None))
         if query.folder_id is not None:
@@ -176,7 +183,7 @@ class SQLAlchemyContentBankRepository:
         for version_id,tag in rows:result.setdefault(version_id,[]).append(self._tag_ref(tag))
         return {k:tuple(sorted(v,key=lambda x:(0 if x.subject_id is not None else 1,next(t.category.sort_order for version_id,t in rows if t.id==x.id),x.name.casefold(),str(x.id)))) for k,v in result.items()}
 
-    async def get_task_card(self, task_id: UUID) -> TaskCard | None:
+    async def get_task_card(self, task_id: UUID, access=None) -> TaskCard | None:
         """Load a card in a bounded number of queries, including archived tasks."""
         rows = (await self.session.execute(
             select(Task, Subject, Grade, Topic, Subtopic, TaskVersion)
@@ -186,6 +193,11 @@ class SQLAlchemyContentBankRepository:
             .outerjoin(Subtopic, and_(Subtopic.id == Task.subtopic_id, Subtopic.topic_id == Task.topic_id))
             .join(TaskVersion, TaskVersion.task_id == Task.id)
             .where(Task.id == task_id)
+            .where(True if access is None or access.unrestricted else (
+                (Task.created_by == access.actor_id) |
+                ((TaskVersion.status == "approved") & Task.archived_at.is_(None) &
+                 (TaskVersion.version_no == select(func.max(TaskVersion.version_no)).where(
+                     TaskVersion.task_id == Task.id).correlate(Task).scalar_subquery()))))
             .order_by(TaskVersion.version_no.desc(), TaskVersion.id.asc())
         )).all()
         if not rows:
@@ -218,6 +230,19 @@ class SQLAlchemyContentBankRepository:
                 latest.created_by, latest.created_at, latest.approved_by, latest.approved_at, methodology, latest.updated_at,tag_map.get(latest.id,())),
             approved, summaries, task.updated_at,
         )
+
+    async def owns_task(self, task_id: UUID, access) -> bool:
+        statement = select(Task.id).where(Task.id == task_id)
+        if not access.unrestricted:
+            statement = statement.where(Task.created_by == access.actor_id)
+        return await self.session.scalar(statement) is not None
+
+    async def owns_version(self, version_id: UUID, access) -> bool:
+        statement = (select(TaskVersion.id).join(Task, Task.id == TaskVersion.task_id)
+                     .where(TaskVersion.id == version_id))
+        if not access.unrestricted:
+            statement = statement.where(Task.created_by == access.actor_id)
+        return await self.session.scalar(statement) is not None
 
     async def lock_version(self, task_version_id: UUID) -> LockedVersion | None:
         version = await self.session.scalar(select(TaskVersion).where(TaskVersion.id == task_version_id).with_for_update())

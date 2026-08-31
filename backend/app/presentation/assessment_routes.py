@@ -10,6 +10,7 @@ from app.application.assessments import (AddAssessmentItemCommand, AssessmentSer
 from app.application.content_bank import ActorContext
 from app.application.capabilities import ASSESSMENT_CREATE, ASSESSMENT_MANAGE
 from app.application.principal import Principal
+from app.application.object_access import object_access_scope
 from app.db.session import async_session_factory
 from app.infrastructure.assessment_repository import SQLAlchemyAssessmentUnitOfWork
 from app.presentation.assessment_schemas import (AssessmentCreateRequest, AssessmentItemCreateRequest,
@@ -29,7 +30,7 @@ def service() -> AssessmentService:
 
 def actor_for(capability: str):
     def actor(principal: Principal = Depends(require_capability(capability))) -> ActorContext:
-        return ActorContext(principal.user_id)
+        return ActorContext(principal.user_id, access=object_access_scope(principal))
     return actor
 
 manage_actor = actor_for(ASSESSMENT_MANAGE)

@@ -10,6 +10,8 @@ from types import TracebackType
 from typing import Literal, Protocol, Self
 from uuid import UUID, uuid4
 
+from app.application.object_access import ObjectAccessScope
+
 class TaskType(StrEnum):
     TEST = "test"
     CALCULATION = "calculation"
@@ -50,6 +52,14 @@ DuplicateReason = Literal["exact_statement", "high_statement_similarity", "same_
 class ActorContext:
     actor_id: UUID
     actor_type: str = "development"
+    access: ObjectAccessScope | None = None
+
+    @property
+    def object_scope(self) -> ObjectAccessScope:
+        # Non-HTTP callers historically construct ActorContext directly.  Such
+        # actors remain owner-scoped; only the centralized Principal policy can
+        # grant the explicit unrestricted scope.
+        return self.access or ObjectAccessScope(self.actor_id)
 
 
 @dataclass(frozen=True)
@@ -149,6 +159,7 @@ class DuplicateQuery:
     final_answer: str | None = None
     exclude_task_id: UUID | None = None
     limit: int = 5
+    access: ObjectAccessScope | None = None
 
 
 @dataclass(frozen=True)
@@ -192,6 +203,7 @@ class TaskListQuery:
     folder_scope: Literal["direct", "subtree"] | None = None
     root_only: bool = False
     tag_ids: tuple[UUID, ...] = ()
+    access: ObjectAccessScope | None = None
 
 
 @dataclass(frozen=True)
@@ -899,8 +911,8 @@ class GetTaskCardService:
     def __init__(self, repository: ContentBankRepository) -> None:
         self.repository = repository
 
-    async def get_task_card(self, task_id: UUID) -> TaskCard:
-        card = await self.repository.get_task_card(task_id)
+    async def get_task_card(self, task_id: UUID, access: ObjectAccessScope | None = None) -> TaskCard:
+        card = await self.repository.get_task_card(task_id, access) if access else await self.repository.get_task_card(task_id)
         if card is None:
             raise NotFoundError("Задание не найдено.")
         return card
@@ -915,6 +927,9 @@ class SaveMethodologyService:
         if details:
             raise ApplicationError(details)
         async with self.uow:
+            owns = getattr(self.uow.repository, "owns_version", None)
+            if owns is not None and not await owns(command.task_version_id, actor.object_scope):
+                raise NotFoundError("Версия задания не найдена.")
             version = await self.uow.repository.lock_version(command.task_version_id)
             if version is None:
                 raise NotFoundError("Версия задания не найдена.")
@@ -1064,6 +1079,7 @@ class StatusCycleService:
 
     async def submit_review(self, task_id: UUID, version_no: int, actor: ActorContext) -> StatusCommandResult:
         async with self.uow:
+            await self._require_owner(task_id, actor)
             version = await self._lock_active_latest(task_id, version_no, "draft")
             structural = _structural_issues(version)
             if structural:
@@ -1076,6 +1092,7 @@ class StatusCycleService:
 
     async def return_draft(self, task_id: UUID, version_no: int, reason: str, actor: ActorContext) -> StatusCommandResult:
         async with self.uow:
+            await self._require_owner(task_id, actor)
             version = await self._lock_active_latest(task_id, version_no, "review")
             await self.uow.repository.set_version_status(version.task_version_id, "draft")
             await AuditWriter(self.uow.repository).write(AuditEventRecord(task_id, version.task_version_id, version.version_no, "returned_to_draft", actor.actor_id, reason=reason, details={"from_status": "review", "to_status": "draft"}))
@@ -1084,6 +1101,7 @@ class StatusCycleService:
 
     async def approve(self, task_id: UUID, version_no: int, actor: ActorContext) -> StatusCommandResult:
         async with self.uow:
+            await self._require_owner(task_id, actor)
             version = await self._lock_active_latest(task_id, version_no, "review")
             issues = _structural_issues(version) + _methodology_issues(version)
             rubric = version.methodology.rubric
@@ -1104,6 +1122,11 @@ class StatusCycleService:
             await self.uow.commit()
             result = self._result(version, "approved", ValidationReport(True, ()))
             return StatusCommandResult(**{**result.__dict__, "approved_at": now, "approved_by": actor.actor_id})
+
+    async def _require_owner(self, task_id: UUID, actor: ActorContext) -> None:
+        owns = getattr(self.uow.repository, "owns_task", None)
+        if owns is not None and not await owns(task_id, actor.object_scope):
+            raise NotFoundError("Версия задания не найдена.")
 
     async def _lock_active_latest(self, task_id: UUID, version_no: int, required: str) -> VersionState:
         version = await self.uow.repository.lock_task_version(task_id, version_no)
@@ -1127,6 +1150,9 @@ class CreateVersionService:
 
     async def create(self, command: CreateVersionCommand, actor: ActorContext) -> VersionState:
         async with self.uow:
+            owns = getattr(self.uow.repository, "owns_task", None)
+            if owns is not None and not await owns(command.task_id, actor.object_scope):
+                raise NotFoundError("Исходная версия задания не найдена.")
             source = await self.uow.repository.lock_task_version(command.task_id, command.source_version_no)
             if source is None:
                 raise NotFoundError("Исходная версия задания не найдена.")
@@ -1146,6 +1172,9 @@ class ArchiveTaskService:
 
     async def archive(self, task_id: UUID, actor: ActorContext, reason: str | None = None) -> ArchiveResult:
         async with self.uow:
+            owns = getattr(self.uow.repository, "owns_task", None)
+            if owns is not None and not await owns(task_id, actor.object_scope):
+                raise NotFoundError("Задание не найдено.")
             result = await self.uow.repository.archive_task_versions(task_id, datetime.now(timezone.utc))
             if result is None:
                 raise NotFoundError("Задание не найдено.")
@@ -1159,7 +1188,10 @@ class GetAuditService:
     def __init__(self, repository: ContentBankRepository) -> None:
         self.repository = repository
 
-    async def get(self, task_id: UUID, offset: int, limit: int, action: str | None) -> AuditPage:
+    async def get(self, task_id: UUID, offset: int, limit: int, action: str | None,
+                  access: ObjectAccessScope | None = None) -> AuditPage:
+        if access is not None:
+            card = await GetTaskCardService(self.repository).get_task_card(task_id, access)
         page = await self.repository.list_audit(task_id, offset, limit, action)
         if page is None:
             raise NotFoundError("Задание не найдено.", "task_not_found")

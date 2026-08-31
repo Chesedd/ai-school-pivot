@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from app.application.folders import CreateFolderCommand, RenameFolderCommand, MoveFolderCommand, DeleteFolderCommand, MoveTaskCommand, FolderService, GetFolderTreeService
 from app.application.content_bank import AcceptedAnswerInput, ChoiceOptionInput, ChoiceOptionRuleInput, ChoiceScoringPolicyInput, ActorContext, ApplicationError, ArchiveTaskService, CreateTaskCommand, CreateTaskService, DuplicateCheckService, DuplicateQuery, ExpectedSolutionInput, GetAuditService, GetTaskCardService, HintInput, ListTasksService, RubricInput, RubricItemInput, SaveMethodologyCommand, SaveMethodologyService, SkillLinkInput, StatusCycleService, TaskListQuery, TypicalErrorInput, ValidationDetail, VersionContentInput
 from app.application.principal import Principal
+from app.application.object_access import object_access_scope
 from app.application.capabilities import (CATALOG_MANAGE, CONTENT_APPROVE, CONTENT_ARCHIVE,
     CONTENT_CREATE, CONTENT_EDIT, CONTENT_READ, CONTENT_REVIEW_RETURN, CONTENT_REVIEW_SUBMIT)
 from app.db.session import async_session_factory
@@ -55,11 +56,11 @@ async def deprecate_tag(tag_id:UUID,payload:TagDeprecateRequest,principal:Princi
 async def tag_usage(tag_id:UUID):
     async with async_session_factory() as session:return await ManagedTagService(session).usage(tag_id)
 
-@router.post("/task-versions/check-duplicates",response_model=DuplicateCheckResponse, dependencies=[Depends(require_capability(CONTENT_READ))])
-async def check_duplicates(payload: DuplicateCheckRequest) -> object:
+@router.post("/task-versions/check-duplicates",response_model=DuplicateCheckResponse)
+async def check_duplicates(payload: DuplicateCheckRequest,principal:Principal=Depends(require_capability(CONTENT_READ))) -> object:
     async with async_session_factory() as session:
         return await DuplicateCheckService(SQLAlchemyContentBankRepository(session)).check(
-            DuplicateQuery(payload.statement,payload.primary_skill_id,payload.final_answer,payload.exclude_task_id,payload.limit))
+            DuplicateQuery(payload.statement,payload.primary_skill_id,payload.final_answer,payload.exclude_task_id,payload.limit,object_access_scope(principal)))
 
 def _create_command(payload) -> CreateTaskCommand:
     c=payload.initial_version
@@ -68,7 +69,7 @@ def _create_command(payload) -> CreateTaskCommand:
 @router.put("/task-versions/{version_id}/tags",response_model=VersionTagsResponse)
 async def replace_version_tags(version_id:UUID,payload:VersionTagsPutRequest,principal:Principal=Depends(require_capability(CONTENT_EDIT))):
     async with async_session_factory() as session:
-        return await ManagedTagService(session).replace_version_tags(version_id,payload.tag_ids,payload.expected_updated_at,principal.user_id)
+        return await ManagedTagService(session).replace_version_tags(version_id,payload.tag_ids,payload.expected_updated_at,principal.user_id,object_access_scope(principal))
 
 @router.put("/task-versions/{task_version_id}/methodology", response_model=MethodologyResponse)
 async def put_methodology(task_version_id: UUID, payload: MethodologyPutRequest, principal: Principal = Depends(require_capability(CONTENT_EDIT))) -> object:
@@ -84,10 +85,10 @@ async def put_methodology(task_version_id: UUID, payload: MethodologyPutRequest,
         tuple(ChoiceOptionInput(x.option_key, x.content, x.order_index) for x in payload.choice_options),
         ChoiceScoringPolicyInput(payload.choice_scoring_policy.mode, payload.choice_scoring_policy.policy_version, tuple(ChoiceOptionRuleInput(x.option_key, x.role, x.weight) for x in payload.choice_scoring_policy.option_rules)) if payload.choice_scoring_policy else None,
     )
-    return await SaveMethodologyService(SQLAlchemyUnitOfWork(async_session_factory)).save(command, ActorContext(principal.user_id))
+    return await SaveMethodologyService(SQLAlchemyUnitOfWork(async_session_factory)).save(command, ActorContext(principal.user_id, access=object_access_scope(principal)))
 
 
-@router.get("/tasks", response_model=TaskListPageResponse, dependencies=[Depends(require_capability(CONTENT_READ))])
+@router.get("/tasks", response_model=TaskListPageResponse)
 async def list_tasks(
     subject_id: UUID | None = None, grade_id: UUID | None = None,
     topic_id: UUID | None = None, subtopic_id: UUID | None = None,
@@ -103,60 +104,62 @@ async def list_tasks(
     q: str | None = None,
     folder_id: UUID | None = None, folder_scope: Literal["direct", "subtree"] | None = None,
     tag_id: Annotated[list[UUID] | None, Query()] = None,
+    principal: Principal = Depends(require_capability(CONTENT_READ)),
 ) -> object:
-    query = TaskListQuery(subject_id, grade_id, topic_id, subtopic_id, skill_id, task_type, difficulty_min, difficulty_max, status, offset, limit, sort_by, sort_order, q, folder_id, folder_scope, False, tuple(tag_id or ()))
+    query = TaskListQuery(subject_id, grade_id, topic_id, subtopic_id, skill_id, task_type, difficulty_min, difficulty_max, status, offset, limit, sort_by, sort_order, q, folder_id, folder_scope, False, tuple(tag_id or ()), object_access_scope(principal))
     async with async_session_factory() as session:
         await ManagedTagService(session).validate_filter(query.tag_ids)
         return await ListTasksService(SQLAlchemyContentBankRepository(session)).list_tasks(query)
 
 
-@router.get("/tasks/{task_id}", response_model=TaskCardResponse, dependencies=[Depends(require_capability(CONTENT_READ))])
-async def get_task_card(task_id: UUID) -> object:
+@router.get("/tasks/{task_id}", response_model=TaskCardResponse)
+async def get_task_card(task_id: UUID, principal: Principal = Depends(require_capability(CONTENT_READ))) -> object:
     async with async_session_factory() as session:
-        return await GetTaskCardService(SQLAlchemyContentBankRepository(session)).get_task_card(task_id)
+        return await GetTaskCardService(SQLAlchemyContentBankRepository(session)).get_task_card(task_id, object_access_scope(principal))
 
 
-@router.get("/tasks/{task_id}/audit", response_model=AuditPageResponse, dependencies=[Depends(require_capability(CONTENT_READ))])
+@router.get("/tasks/{task_id}/audit", response_model=AuditPageResponse)
 async def get_task_audit(
     task_id: UUID,
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     action: Literal["task_created", "methodology_updated", "submitted_for_review", "returned_to_draft", "version_approved", "version_created", "task_archived"] | None = None,
+    principal: Principal = Depends(require_capability(CONTENT_READ)),
 ) -> object:
     async with async_session_factory() as session:
-        return await GetAuditService(SQLAlchemyContentBankRepository(session)).get(task_id, offset, limit, action)
+        return await GetAuditService(SQLAlchemyContentBankRepository(session)).get(task_id, offset, limit, action, object_access_scope(principal))
 
 
 @router.post("/tasks", response_model=TaskResponse, status_code=201)
 async def create_task(payload: TaskCreateRequest, response: Response, principal: Principal = Depends(require_capability(CONTENT_CREATE))) -> object:
     content = payload.initial_version
     command = CreateTaskCommand(payload.subject_id, payload.grade_id, payload.topic_id, payload.subtopic_id, VersionContentInput(content.title, content.statement, content.task_type, content.answer_format, content.difficulty, content.source, tuple(SkillLinkInput(x.skill_id, x.weight, x.is_primary) for x in content.skills)), payload.folder_id, tuple(payload.tag_ids))
-    result = await CreateTaskService(SQLAlchemyUnitOfWork(async_session_factory)).create_task(command, ActorContext(principal.user_id))
+    result = await CreateTaskService(SQLAlchemyUnitOfWork(async_session_factory)).create_task(command, ActorContext(principal.user_id, access=object_access_scope(principal)))
     response.headers["Location"] = f"/api/content-bank/tasks/{result.id}"
     return result
 
 
 @router.post("/tasks/{task_id}/versions/{version_no}/submit-review", response_model=StatusCommandResponse)
 async def submit_review(task_id: UUID, version_no: int, payload: EmptyRequest, principal: Principal = Depends(require_capability(CONTENT_REVIEW_SUBMIT))) -> object:
-    return await StatusCycleService(SQLAlchemyUnitOfWork(async_session_factory)).submit_review(task_id, version_no, ActorContext(principal.user_id))
+    return await StatusCycleService(SQLAlchemyUnitOfWork(async_session_factory)).submit_review(task_id, version_no, ActorContext(principal.user_id, access=object_access_scope(principal)))
 
 
 @router.post("/tasks/{task_id}/versions/{version_no}/return-to-draft", response_model=StatusCommandResponse)
 async def return_to_draft(task_id: UUID, version_no: int, payload: ReturnToDraftRequest, principal: Principal = Depends(require_capability(CONTENT_REVIEW_RETURN))) -> object:
     if not payload.reason.strip():
         raise ApplicationError([ValidationDetail("reason", "blank", "Причина не может быть пустой.")])
-    return await StatusCycleService(SQLAlchemyUnitOfWork(async_session_factory)).return_draft(task_id, version_no, payload.reason.strip(), ActorContext(principal.user_id))
+    return await StatusCycleService(SQLAlchemyUnitOfWork(async_session_factory)).return_draft(task_id, version_no, payload.reason.strip(), ActorContext(principal.user_id, access=object_access_scope(principal)))
 
 
 @router.post("/tasks/{task_id}/versions/{version_no}/approve", response_model=StatusCommandResponse)
 async def approve(task_id: UUID, version_no: int, payload: EmptyRequest, principal: Principal = Depends(require_capability(CONTENT_APPROVE))) -> object:
-    return await StatusCycleService(SQLAlchemyUnitOfWork(async_session_factory)).approve(task_id, version_no, ActorContext(principal.user_id))
+    return await StatusCycleService(SQLAlchemyUnitOfWork(async_session_factory)).approve(task_id, version_no, ActorContext(principal.user_id, access=object_access_scope(principal)))
 
 
 @router.post("/tasks/{task_id}/archive", response_model=ArchiveResponse)
 async def archive_task(task_id: UUID, payload: ArchiveRequest | None = None, principal: Principal = Depends(require_capability(CONTENT_ARCHIVE))) -> object:
     reason = payload.reason.strip() if payload and payload.reason else None
-    return await ArchiveTaskService(SQLAlchemyUnitOfWork(async_session_factory)).archive(task_id, ActorContext(principal.user_id), reason)
+    return await ArchiveTaskService(SQLAlchemyUnitOfWork(async_session_factory)).archive(task_id, ActorContext(principal.user_id, access=object_access_scope(principal)), reason)
 
 
 @router.get("/catalog/{catalog_name}", response_model=CatalogResponse, dependencies=[Depends(require_capability(CONTENT_READ))])
@@ -219,14 +222,14 @@ def _contents_task_query(
                          status=status, offset=offset, limit=limit, sort_by=sort_by,
                          sort_order=sort_order, q=q, tag_ids=tuple(tag_id or ()))
 
-@router.get("/subjects/{subject_id}/contents", dependencies=[Depends(require_capability(CONTENT_READ))])
-async def subject_contents(subject_id:UUID,query:Annotated[TaskListQuery,Depends(_contents_task_query)]):
-    return await _contents(subject_id,None,query)
-@router.get("/folders/{folder_id}/contents", dependencies=[Depends(require_capability(CONTENT_READ))])
-async def folder_contents(folder_id:UUID,query:Annotated[TaskListQuery,Depends(_contents_task_query)]):
+@router.get("/subjects/{subject_id}/contents")
+async def subject_contents(subject_id:UUID,query:Annotated[TaskListQuery,Depends(_contents_task_query)],principal:Principal=Depends(require_capability(CONTENT_READ))):
+    return await _contents(subject_id,None,__import__('dataclasses').replace(query,access=object_access_scope(principal)))
+@router.get("/folders/{folder_id}/contents")
+async def folder_contents(folder_id:UUID,query:Annotated[TaskListQuery,Depends(_contents_task_query)],principal:Principal=Depends(require_capability(CONTENT_READ))):
     async with async_session_factory() as session:
         folder=await SQLAlchemyContentBankRepository(session).get_folder(folder_id)
     if not folder:
         from app.application.folders import FolderDomainError
         raise FolderDomainError("folder_not_found","Папка не найдена.",{"folder_id":str(folder_id)},404)
-    return await _contents(folder.subject_id,folder_id,query)
+    return await _contents(folder.subject_id,folder_id,__import__('dataclasses').replace(query,access=object_access_scope(principal)))

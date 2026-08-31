@@ -158,7 +158,7 @@ class ManagedTagService:
         historical=await self.session.scalar(select(func.count()).select_from(base));distinct=await self.session.scalar(select(func.count(func.distinct(base.c.task_id))).select_from(base))
         return {"tag_id":tag_id,"historical_version_count":historical,"distinct_task_count":distinct,"latest_version_count":sum(lcounts.values()),"status_counts":counts,"latest_status_counts":lcounts}
 
-    async def replace_version_tags(self, version_id: UUID, tag_ids: list[UUID], expected: datetime, actor: UUID):
+    async def replace_version_tags(self, version_id: UUID, tag_ids: list[UUID], expected: datetime, actor: UUID, access=None):
         if len(tag_ids) != len(set(tag_ids)):
             raise TagError("duplicate_tag_assignment","Теги не должны повторяться.",400,"tag_ids")
         if len(tag_ids) > 8:
@@ -166,6 +166,8 @@ class ManagedTagService:
         row=(await self.session.execute(select(TaskVersion,Task).join(Task).where(TaskVersion.id==version_id).with_for_update())).one_or_none()
         if row is None: raise TagError("task_version_not_found","Версия задания не найдена.",404,"version_id")
         version,task=row
+        if access is not None and not access.owns(task.created_by):
+            raise TagError("task_version_not_found","Версия задания не найдена.",404,"version_id")
         latest=await self.session.scalar(select(func.max(TaskVersion.version_no)).where(TaskVersion.task_id==task.id))
         if version.status!="draft" or version.version_no!=latest or task.archived_at is not None:
             raise TagError("task_version_not_editable","Изменять теги можно только у последней draft-версии.",409,"version_id")
