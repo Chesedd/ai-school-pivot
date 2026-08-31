@@ -11,12 +11,19 @@ os.environ.setdefault("CONTENT_BANK_DEV_ACTOR_ID", "00000000-0000-4000-8000-0000
 os.environ.setdefault("ASSESSMENT_DEV_STUDENT_ID", "00000000-0000-4000-8000-000000000002")
 
 from app.application.input_artifacts import ArtifactUploadService, InputArtifactRecord
+from app.application.principal import Principal
 from app.main import app
+from app.presentation.auth_dependencies import require_principal
 from app.presentation.image_artifact_routes import service as artifact_service
 from app.presentation.image_solving_routes import image_solving_service
 from app.presentation.image_solving_schemas import ImageSolvingSessionResponse
 
 PNG = b"\x89PNG\r\n\x1a\nvalid-small-png"
+USER_A = uuid4()
+
+
+def user_a():
+    return Principal(USER_A, "user-a", "User A", frozenset(), frozenset(), None)
 
 
 class Repository:
@@ -49,6 +56,7 @@ async def test_real_multipart_upload_and_field_cardinality_contract():
         return ArtifactUploadService(Repository(), Storage())
 
     app.dependency_overrides[artifact_service] = upload_dependency
+    app.dependency_overrides[require_principal] = user_a
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
                 base_url="http://test") as client:
@@ -66,6 +74,7 @@ async def test_real_multipart_upload_and_field_cardinality_contract():
             ])
     finally:
         app.dependency_overrides.pop(artifact_service, None)
+        app.dependency_overrides.pop(require_principal, None)
 
     assert uploaded.status_code == 201
     assert uploaded.json()["artifact_id"]
@@ -84,6 +93,7 @@ async def test_uploaded_artifact_uuid_creates_session_through_json_boundary():
 
     app.dependency_overrides[artifact_service] = upload_dependency
     app.dependency_overrides[image_solving_service] = image_solving_dependency
+    app.dependency_overrides[require_principal] = user_a
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
                 base_url="http://test") as client:
@@ -102,6 +112,7 @@ async def test_uploaded_artifact_uuid_creates_session_through_json_boundary():
     finally:
         app.dependency_overrides.pop(artifact_service, None)
         app.dependency_overrides.pop(image_solving_service, None)
+        app.dependency_overrides.pop(require_principal, None)
 
     assert created.status_code == 201
     assert created.json()["session_id"]
@@ -110,3 +121,59 @@ async def test_uploaded_artifact_uuid_creates_session_through_json_boundary():
     assert malformed.status_code == 422
     assert missing.status_code == 422
     assert unexpected.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_image_solving_routes_require_authentication():
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+            base_url="http://test") as client:
+        upload_response = await client.post("/api/image-solving/artifacts",
+            files={"file": ("task.png", PNG, "image/png")})
+        session_response = await client.post("/api/image-solving/sessions",
+            json={"artifact_id": str(uuid4())})
+
+    assert upload_response.status_code == 401
+    assert upload_response.json()["detail"] == "authentication_required"
+    assert session_response.status_code == 401
+    assert session_response.json()["detail"] == "authentication_required"
+
+
+@pytest.mark.asyncio
+async def test_authenticated_user_is_authoritative_owner_for_upload_and_session():
+    captured = []
+
+    class CapturingRepository(Repository):
+        async def create(self, **metadata):
+            captured.append(("artifact", metadata["owner_id"]))
+            return await super().create(**metadata)
+
+    class CapturingImageSolvingService(ImageSolvingService):
+        async def create(self, payload, owner_id):
+            captured.append(("session", owner_id))
+            return await super().create(payload, owner_id)
+
+    app.dependency_overrides[artifact_service] = lambda: ArtifactUploadService(
+        CapturingRepository(), Storage())
+    app.dependency_overrides[image_solving_service] = CapturingImageSolvingService
+    app.dependency_overrides[require_principal] = user_a
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                base_url="http://test") as client:
+            uploaded = await client.post("/api/image-solving/artifacts",
+                files={"file": ("task.png", PNG, "image/png")})
+            created = await client.post("/api/image-solving/sessions", json={
+                "artifact_id": uploaded.json()["artifact_id"],
+            })
+            spoofed = await client.post("/api/image-solving/sessions", json={
+                "artifact_id": uploaded.json()["artifact_id"],
+                "owner_id": str(uuid4()),
+            })
+    finally:
+        app.dependency_overrides.pop(artifact_service, None)
+        app.dependency_overrides.pop(image_solving_service, None)
+        app.dependency_overrides.pop(require_principal, None)
+
+    assert uploaded.status_code == 201
+    assert created.status_code == 201
+    assert spoofed.status_code == 422  # the spoofable field is schema-forbidden
+    assert captured == [("artifact", USER_A), ("session", USER_A)]

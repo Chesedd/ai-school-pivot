@@ -27,8 +27,21 @@ from app.main import app  # noqa: E402
 from app.infrastructure.repository import SQLAlchemyContentBankRepository  # noqa: E402
 from app.infrastructure.repository import SQLAlchemyUnitOfWork  # noqa: E402
 from app.application.content_bank import ActorContext, CreateVersionCommand, CreateVersionService  # noqa: E402
+from app.application.principal import Principal  # noqa: E402
+from app.presentation.auth_dependencies import require_principal  # noqa: E402
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
+USER_A_ID = uuid4()
+
+
+@pytest.fixture(autouse=True)
+def authenticated_user_a():
+    app.dependency_overrides[require_principal] = lambda: Principal(
+        USER_A_ID, "user-a", "User A", frozenset(), frozenset(), None)
+    try:
+        yield
+    finally:
+        app.dependency_overrides.pop(require_principal, None)
 
 
 @pytest_asyncio.fixture(scope="session", autouse=True, loop_scope="session")
@@ -138,9 +151,25 @@ async def test_create_is_atomic_and_server_owned(catalog):
     async with async_session_factory() as session:
         assert await session.scalar(text("SELECT count(*) FROM tasks")) == 1
         assert await session.scalar(text("SELECT count(*) FROM task_versions WHERE version_no=1 AND status='draft'")) == 1
+        assert await session.scalar(text("SELECT created_by FROM tasks")) == USER_A_ID
+        assert await session.scalar(text("SELECT created_by FROM task_versions")) == USER_A_ID
+        assert await session.scalar(text("SELECT actor_id FROM audit_log WHERE action='task_created'")) == USER_A_ID
         assert await session.scalar(text("SELECT count(*) FROM task_skill_links")) == 1
 
 
+async def test_separate_authenticated_users_receive_separate_attribution(catalog):
+    user_b_id = uuid4()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        first = await client.post("/api/content-bank/tasks", json=payload(catalog))
+        app.dependency_overrides[require_principal] = lambda: Principal(
+            user_b_id, "user-b", "User B", frozenset(), frozenset(), None)
+        second = await client.post("/api/content-bank/tasks", json=payload(catalog))
+    assert first.status_code == second.status_code == 201
+    async with async_session_factory() as session:
+        actors = set((await session.scalars(text("SELECT created_by FROM tasks"))).all())
+        audit_actors = set((await session.scalars(text(
+            "SELECT actor_id FROM audit_log WHERE action='task_created'"))).all())
+    assert actors == audit_actors == {USER_A_ID, user_b_id}
 async def test_client_cannot_set_actor(catalog):
     data = payload(catalog); data["created_by"] = str(uuid4())
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client: response = await client.post("/api/content-bank/tasks", json=data)

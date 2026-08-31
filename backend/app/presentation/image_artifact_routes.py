@@ -3,12 +3,14 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
+from app.application.principal import Principal
 from app.application.input_artifacts import (ArtifactError, ArtifactOwnershipService,
     ArtifactUploadService, MAX_ARTIFACT_SIZE_BYTES)
 from app.config import Settings, get_settings
 from app.db.session import get_session
 from app.infrastructure.artifact_storage import FilesystemArtifactStorage
 from app.infrastructure.input_artifact_repository import SqlAlchemyArtifactRepository
+from app.presentation.auth_dependencies import require_principal
 from app.presentation.image_artifact_schemas import ImageArtifactResponse
 
 router = APIRouter(prefix="/api/image-solving/artifacts", tags=["image-solving"])
@@ -31,7 +33,7 @@ def translate(exc: ArtifactError) -> HTTPException:
 @router.post("", response_model=ImageArtifactResponse, status_code=201)
 async def upload(request: Request,
         upload_service: ArtifactUploadService = Depends(service),
-        settings: Settings = Depends(get_settings)):
+        principal: Principal = Depends(require_principal)):
     form = await request.form()
     # Keep server-owned metadata out of the public contract. Rejecting unknown
     # fields also prevents clients from assuming that a supplied value was used.
@@ -46,7 +48,7 @@ async def upload(request: Request,
         raise HTTPException(422, "invalid_artifact_context")
     content = await file.read(MAX_ARTIFACT_SIZE_BYTES + 1)
     try:
-        return response(await upload_service.upload(owner_id=settings.content_bank_dev_actor_id,
+        return response(await upload_service.upload(owner_id=principal.user_id,
             content=content, claimed_mime_type=file.content_type or "", context=context))
     except ArtifactError as exc:
         raise translate(exc) from None
@@ -55,10 +57,10 @@ async def upload(request: Request,
 
 @router.get("/{artifact_id}", response_model=ImageArtifactResponse)
 async def metadata(artifact_id: UUID, db=Depends(get_session),
-        settings: Settings = Depends(get_settings)):
+        principal: Principal = Depends(require_principal)):
     try:
         record = await ArtifactOwnershipService(SqlAlchemyArtifactRepository(db)).get_owned_artifact(
-            artifact_id=artifact_id, owner_id=settings.content_bank_dev_actor_id)
+            artifact_id=artifact_id, owner_id=principal.user_id)
     except ArtifactError:
         raise HTTPException(404, "artifact_not_found") from None
     return response(record)

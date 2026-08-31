@@ -4,6 +4,7 @@ from uuid import uuid4
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://unit:unit@localhost/unit")
 os.environ.setdefault("CONTENT_BANK_DEV_ACTOR_ID", "00000000-0000-4000-8000-000000000001")
+os.environ.setdefault("ASSESSMENT_DEV_STUDENT_ID", "00000000-0000-4000-8000-000000000002")
 
 import httpx
 import pytest
@@ -16,6 +17,25 @@ class SessionFactory:
     def __call__(self): return self
     async def __aenter__(self): return object()
     async def __aexit__(self, *args): return None
+
+
+@pytest.mark.asyncio
+async def test_content_bank_mutation_requires_authentication():
+    payload = {
+        "subject_id": str(uuid4()), "grade_id": str(uuid4()),
+        "topic_id": str(uuid4()), "subtopic_id": str(uuid4()),
+        "initial_version": {
+            "statement": "Test", "task_type": "calculation",
+            "answer_format": "number", "difficulty": 25,
+            "skills": [{"skill_id": str(uuid4()), "weight": "1.0000",
+                        "is_primary": True}],
+        },
+    }
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+            base_url="http://test") as client:
+        response = await client.post("/api/content-bank/tasks", json=payload)
+    assert response.status_code == 401
+    assert response.json()["detail"] == "authentication_required"
 
 
 @pytest.mark.asyncio
