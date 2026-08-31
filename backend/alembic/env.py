@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from app.config import get_settings
 from app.infrastructure.models import Base
+from app.infrastructure import auth_models  # noqa: F401  (register tables)
 from app.infrastructure import assessment_models  # noqa: F401  (register tables)
 from app.infrastructure import checking_models  # noqa: F401  (register tables)
 from app.infrastructure import authoring_models  # noqa: F401  (register tables)
