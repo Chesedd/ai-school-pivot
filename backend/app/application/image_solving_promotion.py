@@ -49,11 +49,6 @@ class PromoteImageSolvingService:
             validation = ValidationResultV1.model_validate(checkpoints["validation"].payload)
         except Exception:
             self._reject("image_solving_source_incomplete")
-        if validation.validation_status == "failed":
-            self._reject("image_solving_validation_failed")
-        if validation.validation_status == "needs_review" and not (
-                reviewed.confirm_questionable and reviewed.review_note):
-            self._reject("image_solving_questionable_confirmation_required")
         if reviewed.answer_format != "long_text" and not reviewed.final_answer:
             self._reject("image_solving_final_answer_required", 422)
 
@@ -80,6 +75,7 @@ class PromoteImageSolvingService:
         details = {"image_solving_session_id": str(session_id),
             "input_artifact_id": str(session.input_artifact_id),
             "validation_status": validation.validation_status,
+            "validation_findings": list(validation.findings),
             "human_review_confirmed": True}
         if reviewed.review_note:
             details["review_note"] = reviewed.review_note

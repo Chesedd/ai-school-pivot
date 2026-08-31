@@ -217,13 +217,13 @@ class MetadataRecommendationService:
 
     async def get(self, session_id: UUID, owner_id: UUID):
         session=await self.sessions.get_state(session_id=session_id,owner_id=owner_id)
-        if session.lifecycle_status is not ImageSolvingStatus.VALIDATED or not session.validation_checkpoint or session.validation_checkpoint.validation_status=="failed":
+        if session.lifecycle_status is not ImageSolvingStatus.VALIDATED or not session.validation_checkpoint:
             raise ImageSolvingError("recommendation_session_incomplete")
         return await self.repository.get_recommendation(session_id)
 
     async def generate(self, session_id: UUID, owner_id: UUID):
         session=await self.sessions.get_state(session_id=session_id,owner_id=owner_id)
-        if session.lifecycle_status is not ImageSolvingStatus.VALIDATED or not session.validation_checkpoint or session.validation_checkpoint.validation_status=="failed":
+        if session.lifecycle_status is not ImageSolvingStatus.VALIDATED or not session.validation_checkpoint:
             raise ImageSolvingError("recommendation_session_incomplete")
         cached=await self.repository.get_recommendation(session_id)
         if cached is not None: return cached
