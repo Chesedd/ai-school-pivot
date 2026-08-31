@@ -262,3 +262,79 @@ async def test_upgrade_from_supported_20260823_02_baseline_to_head():
         assert result["history_available"] is False
     finally:
         await engine.dispose()
+
+
+async def test_account_revision_upgrades_downgrades_and_preserves_schema():
+    engine = create_async_engine(URL)
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(sa.text("DROP SCHEMA public CASCADE"))
+            await connection.execute(sa.text("CREATE SCHEMA public"))
+        alembic("upgrade", "20260831_01")
+        async with engine.connect() as connection:
+            assert (
+                await connection.scalar(
+                    sa.text("SELECT to_regclass('public.students')")
+                )
+                == "students"
+            )
+            assert (
+                await connection.scalar(sa.text("SELECT to_regclass('public.users')"))
+                is None
+            )
+        alembic("upgrade", "20260831_02")
+        async with engine.begin() as connection:
+            tables = set(
+                (
+                    await connection.execute(
+                        sa.text(
+                            "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_name IN ('users','user_roles','auth_sessions','student_user_links')"
+                        )
+                    )
+                ).scalars()
+            )
+            assert tables == {
+                "users",
+                "user_roles",
+                "auth_sessions",
+                "student_user_links",
+            }
+            user_id = await connection.scalar(
+                sa.text(
+                    "INSERT INTO users(login,normalized_login,display_name,password_hash) VALUES ('Admin','admin','Admin','opaque') RETURNING id"
+                )
+            )
+            await connection.execute(
+                sa.text("INSERT INTO user_roles(user_id,role) VALUES (:id,'admin')"),
+                {"id": user_id},
+            )
+            indexes = set(
+                (
+                    await connection.execute(
+                        sa.text(
+                            "SELECT indexname FROM pg_indexes WHERE tablename='auth_sessions'"
+                        )
+                    )
+                ).scalars()
+            )
+            assert {
+                "uq_auth_sessions_token_hash",
+                "ix_auth_sessions_user_expires",
+                "ix_auth_sessions_active_expires",
+            } <= indexes
+        alembic("downgrade", "20260831_01")
+        async with engine.connect() as connection:
+            assert (
+                await connection.scalar(sa.text("SELECT to_regclass('public.users')"))
+                is None
+            )
+            assert (
+                await connection.scalar(
+                    sa.text("SELECT to_regclass('public.students')")
+                )
+                == "students"
+            )
+        alembic("upgrade", "head")
+        await assert_database_at_repository_head(engine)
+    finally:
+        await engine.dispose()
