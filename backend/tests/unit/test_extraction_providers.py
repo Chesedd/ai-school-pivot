@@ -27,6 +27,12 @@ class Call:
     def __init__(self, response): self.response=response; self.kwargs=None
     async def create(self, **kwargs): self.kwargs=kwargs; return self.response
 
+class Calls:
+    def __init__(self, *responses): self.responses=list(responses); self.kwargs=[]
+    async def create(self, **kwargs):
+        self.kwargs.append(kwargs)
+        return self.responses.pop(0)
+
 def artifact(mime="image/png"):
     return InputArtifactV1(artifact_id="artifact-1",mime_type=mime,
         content_hash=hashlib.sha256(b"raw-image").hexdigest(),user_context="extract")
@@ -204,6 +210,37 @@ async def test_anthropic_solver_classifies_exhausted_output_budget():
             ModelRoute("anthropic", "opaque-model")).solve(solver_input())
     assert error.value.code is FailureCode.OUTPUT_BUDGET
     assert error.value.adapter_detail == "stop_reason=max_tokens"
+
+
+async def test_anthropic_solver_repairs_end_turn_prose_once_without_image_data():
+    calls = Calls(
+        NS(id="prose", stop_reason="end_turn", content=[NS(type="text",
+            text="A worked physics solution")], usage=NS(input_tokens=7, output_tokens=9)),
+        NS(id="repaired", stop_reason="tool_use", content=[NS(type="tool_use",
+            name="record_solution", input=SOLUTION)], usage=NS(input_tokens=5, output_tokens=3)),
+    )
+    adapter = AnthropicSolverAdapter(NS(messages=calls),
+        ModelRoute("anthropic", "opaque-model"))
+    result = await adapter.solve(solver_input())
+    assert result.final_answer == "4" and len(calls.kwargs) == 2
+    assert calls.kwargs[1]["messages"] == [{"role": "user",
+        "content": "A worked physics solution"}]
+    assert "image" not in repr(calls.kwargs[1]).lower()
+    assert adapter.last_telemetry.provider_calls == 2
+    assert adapter.last_telemetry.repair_used is True
+    assert adapter.last_telemetry.first_stop_reason == "end_turn"
+    assert adapter.last_telemetry.provider_request_id == "repaired"
+    assert adapter.last_telemetry.usage == Usage(12, 12)
+
+
+async def test_anthropic_solver_does_not_repair_empty_end_turn():
+    calls = Calls(NS(id="empty", stop_reason="end_turn", content=[],
+        usage=NS(input_tokens=1, output_tokens=1)))
+    with pytest.raises(ProviderFailure) as error:
+        await AnthropicSolverAdapter(NS(messages=calls),
+            ModelRoute("anthropic", "opaque-model")).solve(solver_input())
+    assert len(calls.kwargs) == 1
+    assert "tool_not_used" in error.value.adapter_detail
 
 
 async def test_anthropic_solver_normalizes_real_runtime_payload():

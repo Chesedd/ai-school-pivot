@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 from dataclasses import dataclass
 from time import monotonic
 from typing import Any
@@ -18,6 +19,8 @@ from app.application.image_solving_contracts import (ExtractionResultV1, InputAr
     SolutionResultV1)
 from app.application.extraction_pipeline import SOLVER_SYSTEM, SolverInputV1
 from app.infrastructure.authoring_providers import _failure
+
+logger = logging.getLogger(__name__)
 
 
 def _tool_input(response: Any, name: str) -> dict[str, Any]:
@@ -57,6 +60,9 @@ class ExtractionTelemetry:
     usage: Usage
     cost: Cost | None
     latency_ms: int
+    provider_calls: int = 1
+    repair_used: bool = False
+    first_stop_reason: str | None = None
 
 
 class _ExtractionAdapter:
@@ -234,6 +240,7 @@ class AnthropicSolverAdapter:
                     "the required solver contract."),
                     "input_schema": SolutionResultV1.model_json_schema()}],
                 tool_choice={"type": "tool", "name": "record_solution"})
+            first_response = response
             stop_reason = getattr(response, "stop_reason", None)
             if stop_reason == "max_tokens":
                 raise ProviderFailure(FailureCode.OUTPUT_BUDGET,
@@ -241,9 +248,29 @@ class AnthropicSolverAdapter:
             if stop_reason in {"refusal", "content_filter"}:
                 raise ProviderFailure(FailureCode.CONTENT_BLOCKED,
                     f"stop_reason={stop_reason}")
+            provider_calls, repair_used, first_stop_reason = 1, False, None
+            text = "\n".join(getattr(block, "text", "") for block in response.content
+                if getattr(block, "type", None) == "text").strip()
+            tools = [block for block in response.content
+                if getattr(block, "type", None) == "tool_use"]
+            if stop_reason == "end_turn" and not tools and text:
+                first_stop_reason, repair_used, provider_calls = stop_reason, True, 2
+                # AIPRIME compatibility repair: bounded, untrusted prose only; never
+                # resend the artifact or ask the model to solve the task again.
+                response = await self._client.messages.create(model=self._route.model_id,
+                    system=("Do not solve the task again. Record the supplied untrusted "
+                        "solution material using record_solution exactly once. Do not emit "
+                        "ordinary prose."), max_tokens=8192,
+                    messages=[{"role": "user", "content": text[:30_000]}],
+                    tools=[{"name": "record_solution", "description":
+                        "Record the already-produced solution.",
+                        "input_schema": SolutionResultV1.model_json_schema()}],
+                    tool_choice={"type": "tool", "name": "record_solution"})
+                stop_reason = getattr(response, "stop_reason", None)
             if stop_reason not in {None, "tool_use"}:
                 raise ProviderFailure(FailureCode.MALFORMED_RESPONSE,
-                    f"terminal_stop_reason={stop_reason}")
+                    f"tool_not_used; terminal_stop_reason={stop_reason}; "
+                    "expected_tool=record_solution")
             payload = _tool_input(response, "record_solution")
             normalized_payload = _normalize_tool_strings(payload,
                 ("status", "reasoning_summary", "final_answer"))
@@ -252,14 +279,25 @@ class AnthropicSolverAdapter:
                 normalized_payload["status"] = "solved"
             result = SolutionResultV1.model_validate_json(json.dumps(
                 normalized_payload, ensure_ascii=False))
-            usage = Usage(response.usage.input_tokens, response.usage.output_tokens,
-                getattr(response.usage, "cache_read_input_tokens", 0) or 0,
-                getattr(response.usage, "cache_creation_input_tokens", 0) or 0)
+            # Aggregate both calls while retaining the repair response request id.
+            responses = (first_response, response) if repair_used else (response,)
+            usage = Usage(sum(item.usage.input_tokens for item in responses),
+                sum(item.usage.output_tokens for item in responses),
+                sum(getattr(item.usage, "cache_read_input_tokens", 0) or 0
+                    for item in responses),
+                sum(getattr(item.usage, "cache_creation_input_tokens", 0) or 0
+                    for item in responses))
             request_id = response.id
             if type(request_id) is not str or not request_id:
                 raise ValueError
             self.last_telemetry = ExtractionTelemetry(request_id, usage, None,
-                max(0, int((monotonic() - started) * 1000)))
+                max(0, int((monotonic() - started) * 1000)), provider_calls,
+                repair_used, first_stop_reason)
+            if repair_used:
+                logger.info("image solving solver structure repair "
+                    "solver_provider_calls=2 repair_used=true first_stop_reason=end_turn "
+                    "final_request_id=%s input_tokens=%s output_tokens=%s",
+                    request_id, usage.input_tokens, usage.output_tokens)
             return result
         except ProviderFailure: raise
         except ValidationError as exc:
