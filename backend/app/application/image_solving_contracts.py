@@ -134,12 +134,14 @@ class ExtractionResultV1(_ContractV1):
 
 
 class SolverResultV1(_ContractV1):
-    status: StrictStr = Field(min_length=1, max_length=MAX_STATUS)
+    # There is currently one end-to-end solver outcome.  Keeping it literal makes
+    # the forced-tool schema tell providers which machine value to emit.
+    status: Literal["solved"]
     reasoning_summary: StrictStr = Field(min_length=1, max_length=MAX_REASONING_SUMMARY)
     final_answer: StrictStr = Field(min_length=1, max_length=MAX_FINAL_ANSWER)
     confidence: Confidence
 
-    @field_validator("status", "reasoning_summary", "final_answer")
+    @field_validator("reasoning_summary", "final_answer")
     @classmethod
     def clean_text(cls, value: str) -> str:
         return _clean(value)

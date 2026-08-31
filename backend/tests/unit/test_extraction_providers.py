@@ -219,6 +219,59 @@ async def test_anthropic_solver_normalizes_real_runtime_payload():
     assert payload["reasoning_summary"].startswith("\n")
 
 
+async def test_anthropic_solver_canonicalizes_observed_aiprime_success_payload():
+    payload = {"confidence": "1", "final_answer": "6",
+        "reasoning_summary": "Решение уравнения...", "status": "success"}
+    call = Call(NS(id="runtime-success", content=[NS(type="tool_use",
+        name="record_solution", input=payload)], usage=NS(input_tokens=5, output_tokens=3)))
+    result = await AnthropicSolverAdapter(NS(messages=call),
+        ModelRoute("anthropic", "opaque-model")).solve(solver_input())
+
+    assert result.status == "solved"
+    from app.application.image_solving import DeterministicImageValidator
+    assert DeterministicImageValidator().validate(
+        ExtractionResultV1.model_validate_json(json.dumps(PAYLOAD)), result
+    ).solver_status_check is True
+
+
+@pytest.mark.parametrize(("overrides", "detail"), [
+    ({"confidence": "not-a-decimal"}, "confidence: decimal_parsing"),
+    ({"final_answer": None}, "final_answer: string_type"),
+])
+async def test_anthropic_solver_preserves_safe_contract_validation_detail(overrides, detail):
+    payload = dict(SOLUTION, **overrides)
+    call = Call(NS(id="invalid", content=[NS(type="tool_use",
+        name="record_solution", input=payload)], usage=NS(input_tokens=1, output_tokens=1)))
+    with pytest.raises(ProviderFailure) as error:
+        await AnthropicSolverAdapter(NS(messages=call),
+            ModelRoute("anthropic", "opaque-model")).solve(solver_input())
+    assert error.value.code is FailureCode.MALFORMED_RESPONSE
+    assert detail in error.value.adapter_detail
+
+
+async def test_anthropic_solver_rejects_unknown_status():
+    payload = dict(SOLUTION, status="unknown")
+    call = Call(NS(id="unknown", content=[NS(type="tool_use",
+        name="record_solution", input=payload)], usage=NS(input_tokens=1, output_tokens=1)))
+    with pytest.raises(ProviderFailure) as error:
+        await AnthropicSolverAdapter(NS(messages=call),
+            ModelRoute("anthropic", "opaque-model")).solve(solver_input())
+    assert error.value.code is FailureCode.MALFORMED_RESPONSE
+    assert "status: literal_error" in error.value.adapter_detail
+
+
+async def test_anthropic_solver_reports_missing_final_answer_safely():
+    payload = dict(SOLUTION)
+    payload.pop("final_answer")
+    call = Call(NS(id="missing", content=[NS(type="tool_use",
+        name="record_solution", input=payload)], usage=NS(input_tokens=1, output_tokens=1)))
+    with pytest.raises(ProviderFailure) as error:
+        await AnthropicSolverAdapter(NS(messages=call),
+            ModelRoute("anthropic", "opaque-model")).solve(solver_input())
+    assert error.value.code is FailureCode.MALFORMED_RESPONSE
+    assert "final_answer: missing" in error.value.adapter_detail
+
+
 @pytest.mark.parametrize(("reasoning", "expected"), [
     ("  Add the values.  ", "Add the values."),
     ("\nParagraph one.\n\nParagraph two.\n", "Paragraph one.\n\nParagraph two."),

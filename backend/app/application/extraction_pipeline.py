@@ -72,7 +72,9 @@ SOLVER_SYSTEM = (
     "Return the required structured result. Write reasoning, explanations and "
     "verification in Russian by default. Preserve formulas, variable names, the "
     "mathematically correct final-answer form, and required foreign-language answers; "
-    "do not translate them incorrectly."
+    "do not translate them incorrectly. The status field is a machine field: use "
+    "the exact schema value `solved` and never translate it into Russian. Russian-first "
+    "applies to reasoning text, not machine enums."
 )
 
 

@@ -19,7 +19,7 @@ EXTRACTION = {"extracted_text":"2 + 2 = ?", "structured_statement":"2 + 2 = ?",
         "topic":"Сложение","subtopic":"Натуральные числа",
         "skills":["Складывать числа"],"task_type":"calculation",
         "answer_format":"number","difficulty":1,"tags":[]}}
-SOLUTION = {"status":"solvable", "reasoning_summary":"Adding gives four.",
+SOLUTION = {"status":"solved", "reasoning_summary":"Adding gives four.",
     "final_answer":"4", "confidence":"0.99"}
 
 

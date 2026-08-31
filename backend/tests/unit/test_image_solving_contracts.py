@@ -62,6 +62,10 @@ def test_solution_and_validation_contracts_are_strict_bounded_and_closed():
         ValidationResultV1.model_validate({**validation.model_dump(), "unknown": True})
 
 
+def test_solution_schema_exposes_canonical_machine_status():
+    assert SolutionResultV1.model_json_schema()["properties"]["status"]["const"] == "solved"
+
+
 def test_fingerprints_use_deterministic_canonical_json_and_change_with_semantics():
     value = artifact()
     expected = (b'{"artifact_id":"upload-01","content_hash":"' + b"a" * 64

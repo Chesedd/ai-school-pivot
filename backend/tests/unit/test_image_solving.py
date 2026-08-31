@@ -104,3 +104,32 @@ async def test_extraction_failure_logs_safe_structured_diagnostics(caplog):
     assert entry.exception_category == "ProviderFailure"
     assert entry.validation_reason == "ValidationError: metadata: dict_type"
     assert repo.state.lifecycle_status == ImageSolvingStatus.FAILED
+
+
+@pytest.mark.parametrize(("code", "detail"), [
+    ("timeout", ""),
+    ("malformed_response", "ValidationError: confidence: decimal_parsing"),
+])
+async def test_solver_provider_failure_logs_stage_and_safe_diagnostics(caplog, code, detail):
+    from app.application.authoring import FailureCode, ProviderFailure
+    class FailedSolver:
+        provider_id = "anthropic"
+        model_id = "opaque-model"
+        def __init__(self): self.calls = 0
+        async def solve(self, value):
+            self.calls += 1
+            raise ProviderFailure(FailureCode(code), detail)
+
+    record, repo, _, _, service = setup()
+    service.solver = FailedSolver()
+    session = await service.create_session(owner_id=record.owner_id,
+        input_artifact_id=record.id)
+    with caplog.at_level(logging.ERROR), pytest.raises(ProviderFailure):
+        await service.run(session_id=session.session_id, owner_id=record.owner_id)
+    entry = next(item for item in caplog.records
+        if item.message == "image solving solver failed")
+    assert (entry.stage, entry.provider, entry.model) == (
+        "solver", "anthropic", "opaque-model")
+    assert entry.failure_code == code
+    assert entry.validation_reason == (detail or None)
+    assert service.solver.calls == (2 if code == "timeout" else 1)
