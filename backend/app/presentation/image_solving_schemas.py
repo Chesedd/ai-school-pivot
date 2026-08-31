@@ -21,6 +21,8 @@ class ImageSolvingSessionResponse(ImageSolvingDto):
     session_id: UUID
     artifact_id: UUID
     status: StrictStr
+    failure_code: StrictStr | None = None
+    failure_stage: StrictStr | None = None
 
 
 class StageStatusResponse(ImageSolvingDto):

@@ -34,6 +34,10 @@ class Repo:
         names={"extraction":"extraction_checkpoint","solver":"solver_checkpoint","validation":"validation_checkpoint"}; self.stages.append(stage)
         self.state=self.state.model_copy(update={names[stage]:payload,"lifecycle_status":status}); return self.state
     async def fail(self, sid, code): self.state=self.state.model_copy(update={"lifecycle_status":ImageSolvingStatus.FAILED})
+    async def retry_solver(self, sid):
+        if self.state.lifecycle_status is not ImageSolvingStatus.FAILED: return False
+        self.state=self.state.model_copy(update={"lifecycle_status":ImageSolvingStatus.EXTRACTED})
+        return True
 
 def item(owner=None):
     return InputArtifactRecord(id=uuid4(), owner_id=owner or uuid4(), mime_type="image/png", content_hash_sha256="a"*64, size_bytes=4, storage_reference="private/object", created_at=datetime.now(UTC))
@@ -96,7 +100,8 @@ async def test_extraction_failure_logs_safe_structured_diagnostics(caplog):
     with caplog.at_level(logging.ERROR), pytest.raises(Exception):
         await service.run(session_id=session.session_id, owner_id=record.owner_id)
     entry = next(item for item in caplog.records
-        if item.message == "image solving extraction failed")
+        if item.message.startswith("image solving stage failed"))
+    assert "stage=extraction" in entry.message and "failure_code=malformed_response" in entry.message
     assert entry.session_id == str(session.session_id)
     assert (entry.stage, entry.provider, entry.model) == (
         "extraction", "anthropic", "opaque-model")
@@ -127,9 +132,29 @@ async def test_solver_provider_failure_logs_stage_and_safe_diagnostics(caplog, c
     with caplog.at_level(logging.ERROR), pytest.raises(ProviderFailure):
         await service.run(session_id=session.session_id, owner_id=record.owner_id)
     entry = next(item for item in caplog.records
-        if item.message == "image solving solver failed")
+        if item.message.startswith("image solving stage failed"))
+    assert f"failure_code={code}" in entry.message and "provider=anthropic" in entry.message
     assert (entry.stage, entry.provider, entry.model) == (
         "solver", "anthropic", "opaque-model")
     assert entry.failure_code == code
     assert entry.validation_reason == (detail or None)
     assert service.solver.calls == (2 if code == "timeout" else 1)
+
+
+async def test_explicit_retry_reuses_extraction_and_completes_solver():
+    from app.application.authoring import FailureCode, ProviderFailure
+    class OnceFailedSolver(Solver):
+        async def solve(self, value):
+            self.inputs.append(value)
+            if len(self.inputs) == 1:
+                raise ProviderFailure(FailureCode.MALFORMED_RESPONSE)
+            return SOLUTION
+    record, repo, extractor, _, service = setup()
+    service.solver = OnceFailedSolver()
+    session = await service.create_session(owner_id=record.owner_id,
+        input_artifact_id=record.id)
+    with pytest.raises(ProviderFailure):
+        await service.run(session_id=session.session_id, owner_id=record.owner_id)
+    result = await service.run(session_id=session.session_id, owner_id=record.owner_id)
+    assert len(extractor.inputs) == 1 and len(service.solver.inputs) == 2
+    assert result.lifecycle_status is ImageSolvingStatus.VALIDATED

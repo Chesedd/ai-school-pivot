@@ -193,6 +193,17 @@ async def test_anthropic_solver_forces_tool_and_parses_strict_contract():
     tool=call.kwargs["tools"][0]
     assert tool["name"] == "record_solution"
     assert tool["input_schema"] == SolutionResultV1.model_json_schema()
+    assert call.kwargs["max_tokens"] == 8192
+
+
+async def test_anthropic_solver_classifies_exhausted_output_budget():
+    call = Call(NS(id="truncated", stop_reason="max_tokens", content=[
+        NS(type="text", text="partial")], usage=NS(input_tokens=5, output_tokens=8192)))
+    with pytest.raises(ProviderFailure) as error:
+        await AnthropicSolverAdapter(NS(messages=call),
+            ModelRoute("anthropic", "opaque-model")).solve(solver_input())
+    assert error.value.code is FailureCode.OUTPUT_BUDGET
+    assert error.value.adapter_detail == "stop_reason=max_tokens"
 
 
 async def test_anthropic_solver_normalizes_real_runtime_payload():

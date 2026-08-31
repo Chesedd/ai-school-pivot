@@ -204,6 +204,7 @@ class FailureCode(StrEnum):
     CONTEXT_LIMIT="context_limit"; UNSUPPORTED_CAPABILITY="unsupported_capability"; MALFORMED_RESPONSE="malformed_response"
     SCHEMA_VIOLATION="schema_violation"; UNKNOWN_PROVIDER_ERROR="unknown_provider_error"
     AUTHENTICATION_ERROR="authentication_error"; RATE_LIMITED="rate_limited"; INVALID_REQUEST="invalid_request"
+    OUTPUT_BUDGET="output_budget"
 
 
 RETRYABLE=frozenset({FailureCode.TIMEOUT,FailureCode.RATE_LIMIT,FailureCode.TRANSIENT_TRANSPORT,FailureCode.PROVIDER_5XX,

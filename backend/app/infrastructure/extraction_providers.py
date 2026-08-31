@@ -227,13 +227,23 @@ class AnthropicSolverAdapter:
         started = monotonic()
         try:
             response = await self._client.messages.create(model=self._route.model_id,
-                system=SOLVER_SYSTEM, max_tokens=4096,
+                system=SOLVER_SYSTEM, max_tokens=8192,
                 messages=[{"role": "user", "content": value.model_dump_json()}],
                 tools=[{"name": "record_solution", "description": (
                     "Record the final solution for the extracted task according to "
                     "the required solver contract."),
                     "input_schema": SolutionResultV1.model_json_schema()}],
                 tool_choice={"type": "tool", "name": "record_solution"})
+            stop_reason = getattr(response, "stop_reason", None)
+            if stop_reason == "max_tokens":
+                raise ProviderFailure(FailureCode.OUTPUT_BUDGET,
+                    "stop_reason=max_tokens")
+            if stop_reason in {"refusal", "content_filter"}:
+                raise ProviderFailure(FailureCode.CONTENT_BLOCKED,
+                    f"stop_reason={stop_reason}")
+            if stop_reason not in {None, "tool_use"}:
+                raise ProviderFailure(FailureCode.MALFORMED_RESPONSE,
+                    f"terminal_stop_reason={stop_reason}")
             payload = _tool_input(response, "record_solution")
             normalized_payload = _normalize_tool_strings(payload,
                 ("status", "reasoning_summary", "final_answer"))

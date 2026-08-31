@@ -2,7 +2,7 @@ import {request} from "../api";
 export const IMAGE_SOLVING_MIME_TYPES=["image/png","image/jpeg","image/webp","application/pdf"] as const;
 export const MAX_IMAGE_SOLVING_FILE_SIZE=25*1024*1024;
 export type ImageSolvingStatus="created"|"extracting"|"extracted"|"solving"|"solved"|"validated"|"failed";
-export type ImageSolvingSession={session_id:string;artifact_id:string;status:ImageSolvingStatus;stages?:{extraction:string;solver:string;validation:string};created_at?:string;updated_at?:string};
+export type ImageSolvingSession={session_id:string;artifact_id:string;status:ImageSolvingStatus;failure_code?:string|null;failure_stage?:string|null;stages?:{extraction:string;solver:string;validation:string};created_at?:string;updated_at?:string};
 export type ExtractionMetadata={title:string;subject:string;grade:number;topic:string;subtopic:string|null;skills:string[];task_type:string;answer_format:string;difficulty:number;tags:string[]};
 export type ImageSolvingResult={session_id:string;artifact_id:string;extraction:{extracted_text:string;structured_statement:string;task_classification:{task_type:string|null;answer_format:string|null};confidence:string|number;choices?:string[]|null;metadata?:ExtractionMetadata};solution:{answer:string;reasoning_summary:string;confidence:string|number};validation:{status:string;findings:string[];manual_review:boolean}};
 export type ExistingRecommendation={kind:"existing";id:string;confidence:string|number;reason:string};

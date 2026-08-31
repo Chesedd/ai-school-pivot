@@ -201,5 +201,6 @@ class ImageSolvingSession(BaseModel):
     solver_checkpoint: SolverResultV1 | None = None
     validation_checkpoint: ValidationResultV1 | None = None
     lifecycle_status: ImageSolvingStatus
+    failure_code: StrictStr | None = None
     created_at: datetime
     updated_at: datetime

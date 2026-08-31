@@ -13,13 +13,17 @@ CONTRACTS = {"extraction": ExtractionResultV1, "solver": SolutionResultV1, "vali
 Contract = TypeVar("Contract", bound=BaseModel)
 
 
-def _deserialize_checkpoint(payload: object, contract: type[Contract]) -> Contract:
+def deserialize_json_contract(payload: object, contract: type[Contract]) -> Contract:
     """Restore a strict contract through the same JSON boundary used by JSONB."""
     try:
         serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
         return contract.model_validate_json(serialized)
     except (TypeError, ValueError, ValidationError) as exc:
         raise ValueError("invalid_checkpoint") from exc
+
+
+# Compatibility for callers predating the shared public JSON-boundary helper.
+_deserialize_checkpoint = deserialize_json_contract
 
 class SqlAlchemyImageSolvingRepository:
     """The only adapter aware of persisted checkpoint representation."""
@@ -35,10 +39,10 @@ class SqlAlchemyImageSolvingRepository:
         for item in values:
             contract = CONTRACTS.get(item.stage)
             if contract is None: continue
-            value = _deserialize_checkpoint(item.payload, contract)
+            value = deserialize_json_contract(item.payload, contract)
             if value.fingerprint != item.fingerprint: raise ValueError("invalid_checkpoint")
             checkpoints[item.stage] = value
-        return ImageSolvingSession(session_id=row.id, owner_id=row.owner_id, input_artifact_id=row.input_artifact_id, extraction_checkpoint=checkpoints.get("extraction"), solver_checkpoint=checkpoints.get("solver"), validation_checkpoint=checkpoints.get("validation"), lifecycle_status=ImageSolvingStatus(row.status), created_at=row.created_at, updated_at=row.updated_at)
+        return ImageSolvingSession(session_id=row.id, owner_id=row.owner_id, input_artifact_id=row.input_artifact_id, extraction_checkpoint=checkpoints.get("extraction"), solver_checkpoint=checkpoints.get("solver"), validation_checkpoint=checkpoints.get("validation"), lifecycle_status=ImageSolvingStatus(row.status), failure_code=row.failure_code, created_at=row.created_at, updated_at=row.updated_at)
     async def claim(self, session_id: UUID, expected: ImageSolvingStatus, running: ImageSolvingStatus) -> bool:
         # A fresh running lease rejects concurrent work; an abandoned lease is
         # recoverable after five minutes without weakening the checkpoint CAS.
@@ -67,6 +71,17 @@ class SqlAlchemyImageSolvingRepository:
     async def fail(self, session_id: UUID, code: str) -> None:
         await self.db.execute(update(ImageSolvingSessionRow).where(ImageSolvingSessionRow.id == session_id).values(status="failed", failure_code=code, updated_at=func.clock_timestamp()))
         await self.db.commit()
+    async def retry_solver(self, session_id: UUID) -> bool:
+        """Explicitly reopen only a failed session whose extraction is durable."""
+        result = await self.db.execute(update(ImageSolvingSessionRow).where(
+            ImageSolvingSessionRow.id == session_id,
+            ImageSolvingSessionRow.status == "failed",
+            ImageSolvingSessionRow.failure_code.in_(("timeout", "connection_error",
+                "provider_unavailable", "malformed_response", "output_budget")),
+        ).values(status="extracted", failure_code=None,
+            updated_at=func.clock_timestamp()))
+        await self.db.commit()
+        return result.rowcount == 1
     async def attempts(self, session_id: UUID) -> tuple[ImageSolvingAttempt, ...]:
         rows = (await self.db.execute(select(ImageSolvingCheckpointRow).where(
             ImageSolvingCheckpointRow.session_id == session_id).order_by(
@@ -79,7 +94,7 @@ class SqlAlchemyImageSolvingRepository:
     async def get_recommendation(self, session_id: UUID):
         row=await self.db.scalar(select(ImageSolvingMetadataRecommendationRow).where(
             ImageSolvingMetadataRecommendationRow.session_id==session_id))
-        return None if row is None else _deserialize_checkpoint(row.payload,ImageTaskMetadataRecommendationV1)
+        return None if row is None else deserialize_json_contract(row.payload,ImageTaskMetadataRecommendationV1)
 
     async def save_recommendation(self, session_id, value, catalog_fingerprint):
         self.db.add(ImageSolvingMetadataRecommendationRow(session_id=session_id,
