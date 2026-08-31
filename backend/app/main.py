@@ -21,6 +21,8 @@ from app.application.image_solving_api import ImageSolvingApiError
 from app.presentation.image_solving_routes import router as image_solving_router
 from app.presentation.image_artifact_routes import router as image_artifact_router
 from app.presentation.auth_routes import router as auth_router
+from app.presentation.admin_user_routes import router as admin_user_router
+from app.application.user_administration import AdministrationError
 
 
 app = FastAPI()
@@ -28,6 +30,7 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 app.add_middleware(CORSMiddleware, allow_origins=list(settings.allowed_origins), allow_credentials=True, allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"], allow_headers=["Content-Type", "Authorization", "Idempotency-Key", "X-Filename"])
 app.include_router(auth_router)
+app.include_router(admin_user_router)
 app.include_router(router)
 app.include_router(assessment_router)
 app.include_router(student_assessment_router)
@@ -35,6 +38,10 @@ app.include_router(attachment_router)
 app.include_router(authoring_router)
 app.include_router(image_solving_router)
 app.include_router(image_artifact_router)
+
+@app.exception_handler(AdministrationError)
+async def administration_error(_: Request, exc: AdministrationError) -> JSONResponse:
+    return error_response(exc.code, exc.code.replace("_", " ").capitalize() + ".", [], exc.status)
 
 @app.exception_handler(ImageSolvingApiError)
 async def image_solving_error(_: Request, exc: ImageSolvingApiError) -> JSONResponse:
