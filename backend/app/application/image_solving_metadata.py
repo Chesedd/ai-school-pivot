@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 import unicodedata
 from decimal import Decimal
@@ -16,6 +17,16 @@ from app.application.image_solving import ImageSolvingError
 from app.application.image_solving_contracts import Confidence, ImageSolvingSession, ImageSolvingStatus
 
 TAG_LIMIT = 8
+logger = logging.getLogger(__name__)
+
+
+class MetadataResolutionError(ImageSolvingError):
+    """A controlled, disclosure-safe failure in local metadata resolution."""
+
+    def __init__(self, stage: str, cause: Exception):
+        self.stage = stage
+        self.cause_category = type(cause).__name__
+        super().__init__("metadata_resolution_failed")
 
 
 class _Strict(BaseModel):
@@ -220,11 +231,42 @@ class MetadataRecommendationService:
         return await self.repository.get_recommendation(session_id)
 
     async def generate(self, session_id: UUID, owner_id: UUID):
-        session=await self.sessions.get_state(session_id=session_id,owner_id=owner_id)
+        stage = "session_load"
+        try:
+            session=await self.sessions.get_state(session_id=session_id,owner_id=owner_id)
+        except Exception as exc:
+            self._failed(session_id, stage, exc)
         if session.lifecycle_status is not ImageSolvingStatus.VALIDATED or not session.validation_checkpoint:
             raise ImageSolvingError("recommendation_session_incomplete")
-        cached=await self.repository.get_recommendation(session_id)
+        stage = "cached_load"
+        try:
+            cached=await self.repository.get_recommendation(session_id)
+        except Exception as exc:
+            self._failed(session_id, stage, exc)
         if cached is not None: return cached
-        catalog=await self.catalog_loader.load()
-        result=resolve_metadata(session,catalog)
-        return await self.repository.save_recommendation(session_id,result,catalog.fingerprint)
+        stage = "catalog_load"
+        try:
+            catalog=await self.catalog_loader.load()
+        except Exception as exc:
+            self._failed(session_id, stage, exc)
+        stage = "resolve"
+        try:
+            result=resolve_metadata(session,catalog)
+        except Exception as exc:
+            self._failed(session_id, stage, exc)
+        stage = "persistence"
+        try:
+            return await self.repository.save_recommendation(session_id,result,catalog.fingerprint)
+        except Exception as exc:
+            self._failed(session_id, stage, exc)
+
+    @staticmethod
+    def _failed(session_id: UUID, stage: str, exc: Exception):
+        logger.exception("metadata resolution failed", extra={
+            "session_id": str(session_id), "operation": "metadata_resolution",
+            "stage": stage, "exception_category": type(exc).__name__,
+            "safe_error": f"metadata resolution failed during {stage}",
+        })
+        if isinstance(exc, ImageSolvingError):
+            raise exc
+        raise MetadataResolutionError(stage, exc) from exc

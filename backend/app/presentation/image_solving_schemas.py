@@ -46,6 +46,20 @@ class ExtractionResponse(ImageSolvingDto):
     task_classification: TaskClassificationResponse
     confidence: Decimal
     choices: tuple[StrictStr, ...] | None = None
+    metadata: "ExtractionMetadataResponse"
+
+
+class ExtractionMetadataResponse(ImageSolvingDto):
+    title: StrictStr
+    subject: StrictStr
+    grade: StrictInt
+    topic: StrictStr
+    subtopic: StrictStr | None
+    skills: tuple[StrictStr, ...]
+    task_type: StrictStr
+    answer_format: StrictStr
+    difficulty: StrictInt
+    tags: tuple[StrictStr, ...]
 
 
 class SolutionResponse(ImageSolvingDto):
