@@ -82,8 +82,16 @@ class _ExtractionAdapter:
             request_id = response.id
             if type(request_id) is not str or not request_id:
                 raise ValueError
-        except (ValidationError, AttributeError, TypeError, ValueError):
-            raise ProviderFailure(FailureCode.MALFORMED_RESPONSE) from None
+        except ValidationError as exc:
+            details = "; ".join(
+                f"{'.'.join(map(str, error['loc']))}: {error['type']}"
+                for error in exc.errors(include_url=False, include_input=False)
+            )
+            raise ProviderFailure(FailureCode.MALFORMED_RESPONSE,
+                f"ValidationError: {details}") from None
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ProviderFailure(FailureCode.MALFORMED_RESPONSE,
+                type(exc).__name__) from None
         cost = self._pricing.calculate(route, usage) if self._pricing is not None else None
         self.last_telemetry = ExtractionTelemetry(request_id, usage, cost,
             max(0, int((monotonic() - started) * 1000)))
@@ -150,6 +158,15 @@ class AnthropicExtractionAdapter(_ExtractionAdapter):
             _normalize_string_list(payload, "choices")
             _normalize_string_list(payload, "ocr_issues")
             metadata = payload.get("metadata")
+            if type(metadata) is str:
+                try:
+                    metadata = json.loads(metadata)
+                except json.JSONDecodeError:
+                    raise ProviderFailure(FailureCode.MALFORMED_RESPONSE,
+                        "metadata: malformed JSON string") from None
+                if type(metadata) is not dict:
+                    raise ProviderFailure(FailureCode.MALFORMED_RESPONSE,
+                        "metadata: decoded value is not an object")
             if type(metadata) is dict:
                 metadata = _normalize_tool_strings(metadata, ("title", "subject", "topic",
                     "subtopic", "task_type", "answer_format"))
@@ -171,6 +188,14 @@ class RoutedAnthropicExtractor:
     """Bind the configured model route to the provider-neutral extraction port."""
     def __init__(self, adapter: AnthropicExtractionAdapter, route: ModelRoute):
         self.adapter, self.route = adapter, route
+
+    @property
+    def provider_id(self) -> str:
+        return self.adapter.provider_id
+
+    @property
+    def model_id(self) -> str:
+        return self.route.model_id
 
     async def extract(self, artifact: InputArtifactV1) -> ExtractionResultV1:
         return await self.adapter.extract(artifact, self.route)

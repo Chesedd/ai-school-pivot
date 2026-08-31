@@ -1,4 +1,5 @@
 import hashlib
+import json
 from types import SimpleNamespace as NS
 
 import pytest
@@ -58,6 +59,58 @@ async def test_anthropic_extraction_forces_tool_and_uses_its_input():
     tool=call.kwargs["tools"][0]
     assert tool["name"] == "record_extraction"
     assert tool["input_schema"] == ExtractionResultV1.model_json_schema()
+
+
+@pytest.mark.parametrize("metadata", [
+    PAYLOAD["metadata"],
+    json.dumps(PAYLOAD["metadata"], ensure_ascii=False),
+])
+async def test_anthropic_accepts_metadata_object_or_once_encoded_object(metadata):
+    payload = dict(PAYLOAD, metadata=metadata)
+    call = Call(NS(id="metadata", content=[NS(type="tool_use",
+        name="record_extraction", input=payload)], usage=NS(input_tokens=4, output_tokens=2)))
+    result = await AnthropicExtractionAdapter(NS(messages=call), Storage()).extract(
+        artifact(), ModelRoute("anthropic", "opaque-model"))
+    assert result.metadata.task_type == "calculation"
+    assert result.metadata.answer_format == "number"
+
+
+@pytest.mark.parametrize("metadata", [
+    "hello", "[1]", "null", "123", "{bad json",
+    json.dumps(json.dumps(PAYLOAD["metadata"])),
+])
+async def test_anthropic_rejects_non_object_stringified_metadata(metadata):
+    payload = dict(PAYLOAD, metadata=metadata)
+    call = Call(NS(id="bad-metadata", content=[NS(type="tool_use",
+        name="record_extraction", input=payload)], usage=NS(input_tokens=1, output_tokens=1)))
+    with pytest.raises(ProviderFailure) as error:
+        await AnthropicExtractionAdapter(NS(messages=call), Storage()).extract(
+            artifact(), ModelRoute("anthropic", "opaque-model"))
+    assert error.value.code is FailureCode.MALFORMED_RESPONSE
+
+
+@pytest.mark.parametrize("metadata", [
+    dict(PAYLOAD["metadata"], task_type="решение линейного уравнения"),
+    dict(PAYLOAD["metadata"], answer_format="значение переменной X"),
+    dict(PAYLOAD["metadata"], unknown_field="value"),
+])
+async def test_anthropic_metadata_object_remains_strict(metadata):
+    payload = dict(PAYLOAD, metadata=metadata)
+    call = Call(NS(id="strict-metadata", content=[NS(type="tool_use",
+        name="record_extraction", input=payload)], usage=NS(input_tokens=1, output_tokens=1)))
+    with pytest.raises(ProviderFailure) as error:
+        await AnthropicExtractionAdapter(NS(messages=call), Storage()).extract(
+            artifact(), ModelRoute("anthropic", "opaque-model"))
+    assert error.value.code is FailureCode.MALFORMED_RESPONSE
+
+
+def test_extraction_schema_exposes_content_bank_machine_values():
+    schema = ExtractionResultV1.model_json_schema()
+    metadata = schema["$defs"]["ExtractionMetadataV1"]["properties"]
+    assert set(metadata["task_type"]["enum"]) == {
+        "test", "calculation", "problem", "open_question", "essay"}
+    assert set(metadata["answer_format"]["enum"]) == {
+        "single_choice", "multiple_choice", "short_text", "number", "expression", "long_text"}
 
 
 async def test_anthropic_extraction_normalizes_only_supported_text_edges():
@@ -241,3 +294,5 @@ def test_prompt_has_no_solver_leakage():
     from app.application.extraction_prompts import IMAGE_EXTRACT_V1_SYSTEM
     lowered=IMAGE_EXTRACT_V1_SYSTEM.lower()
     assert "never solve" in lowered and "create hints" in lowered
+    assert "choices = null" in lowered and "solution steps" in lowered
+    assert "machine values" in lowered and "never translate" in lowered

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+import logging
 from typing import Protocol
 from uuid import UUID
 
@@ -11,6 +12,9 @@ from app.application.image_solving_contracts import (
     SolutionResultV1, ValidationResultV1, ValidationStatus,
 )
 from app.application.input_artifacts import ArtifactOwnershipService, InputArtifactRecord
+from app.application.authoring import ProviderFailure
+
+logger = logging.getLogger(__name__)
 
 
 class ImageSolvingError(RuntimeError):
@@ -118,7 +122,18 @@ class ImageSolvingService:
                 ImageSolvingStatus.VALIDATED)
         except ImageSolvingError:
             raise
-        except Exception:
+        except Exception as exc:
+            if extraction is None:
+                failure_code = exc.code.value if isinstance(exc, ProviderFailure) else None
+                logger.error("image solving extraction failed", extra={
+                    "session_id": str(session_id),
+                    "stage": "extraction",
+                    "provider": getattr(self.extractor, "provider_id", "unknown"),
+                    "model": getattr(self.extractor, "model_id", "unknown"),
+                    "failure_code": failure_code,
+                    "exception_category": type(exc).__name__,
+                    "validation_reason": getattr(exc, "adapter_detail", "") or None,
+                })
             await self.repository.fail(session_id, "pipeline_failed")
             raise
 

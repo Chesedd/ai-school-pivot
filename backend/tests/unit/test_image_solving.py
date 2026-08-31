@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
+import logging
 import pytest
 from app.application.image_solving import ImageSolvingError, ImageSolvingService
 from app.application.image_solving_contracts import ExtractionResultV1, ImageSolvingSession, ImageSolvingStatus, SolutionResultV1
@@ -77,3 +78,29 @@ async def test_invalid_checkpoint_fails_closed_before_calls():
     repo.state=repo.state.model_copy(update={"solver_checkpoint":SOLUTION,"lifecycle_status":ImageSolvingStatus.SOLVED})
     with pytest.raises(ImageSolvingError, match="invalid_checkpoint"): await service.resume(session_id=session.session_id,owner_id=record.owner_id)
     assert extractor.inputs == solver.inputs == []
+
+
+async def test_extraction_failure_logs_safe_structured_diagnostics(caplog):
+    class FailedExtractor:
+        provider_id = "anthropic"
+        model_id = "opaque-model"
+        async def extract(self, value):
+            from app.application.authoring import FailureCode, ProviderFailure
+            raise ProviderFailure(FailureCode.MALFORMED_RESPONSE,
+                "ValidationError: metadata: dict_type")
+
+    record, repo, _, solver, service = setup()
+    service.extractor = FailedExtractor()
+    session = await service.create_session(owner_id=record.owner_id,
+        input_artifact_id=record.id)
+    with caplog.at_level(logging.ERROR), pytest.raises(Exception):
+        await service.run(session_id=session.session_id, owner_id=record.owner_id)
+    entry = next(item for item in caplog.records
+        if item.message == "image solving extraction failed")
+    assert entry.session_id == str(session.session_id)
+    assert (entry.stage, entry.provider, entry.model) == (
+        "extraction", "anthropic", "opaque-model")
+    assert entry.failure_code == "malformed_response"
+    assert entry.exception_category == "ProviderFailure"
+    assert entry.validation_reason == "ValidationError: metadata: dict_type"
+    assert repo.state.lifecycle_status == ImageSolvingStatus.FAILED
