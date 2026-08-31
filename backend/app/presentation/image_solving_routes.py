@@ -1,5 +1,6 @@
 """Thin REST adapter for the standalone image-solving bounded context."""
 from uuid import UUID
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from fastapi import APIRouter, Depends, Response
 
@@ -39,8 +40,8 @@ class _UnavailablePipelinePort:
         raise ProviderFailure(FailureCode.PROVIDER_UNAVAILABLE)
 
 
-def image_solving_service(db=Depends(get_session),
-        settings: Settings = Depends(get_settings)) -> ImageSolvingApplicationService:
+def _build_image_solving_flow(db: AsyncSession, settings: Settings) -> ImageSolvingService:
+    """Pure composition root: unlike FastAPI dependencies, arguments are concrete."""
     repository = SqlAlchemyImageSolvingRepository(db)
     artifact_repository = SqlAlchemyArtifactRepository(db)
     artifacts = ArtifactOwnershipService(artifact_repository)
@@ -61,7 +62,13 @@ def image_solving_service(db=Depends(get_session),
     else:
         unavailable = _UnavailablePipelinePort()
         flow = ImageSolvingService(repository, artifacts, unavailable, unavailable, unavailable)
-    return ImageSolvingApplicationService(flow, repository)
+    return flow
+
+
+def image_solving_service(db=Depends(get_session),
+        settings: Settings = Depends(get_settings)) -> ImageSolvingApplicationService:
+    flow = _build_image_solving_flow(db, settings)
+    return ImageSolvingApplicationService(flow, flow.repository)
 
 
 @router.post("/sessions", response_model=ImageSolvingSessionResponse, status_code=201)
@@ -100,10 +107,10 @@ async def get_attempts(session_id: UUID,
         settings: Settings = Depends(get_settings)):
     return await service.attempts(session_id, settings.content_bank_dev_actor_id)
 
-def metadata_service(db, settings):
+def metadata_service(db: AsyncSession, settings: Settings):
     repository=SqlAlchemyImageSolvingRepository(db)
-    facade=image_solving_service(db,settings)
-    return MetadataRecommendationService(facade.flow,repository,
+    flow = _build_image_solving_flow(db, settings)
+    return MetadataRecommendationService(flow,repository,
         SqlAlchemyMetadataCatalogLoader(db))
 
 @router.get("/sessions/{session_id}/recommendations",response_model=ImageTaskMetadataRecommendationV1)

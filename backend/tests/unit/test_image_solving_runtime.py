@@ -14,7 +14,7 @@ from app.application.authoring import FailureCode, ProviderFailure
 from app.config import Settings
 from app.infrastructure.extraction_providers import (AnthropicSolverAdapter,
     RoutedAnthropicExtractor)
-from app.presentation.image_solving_routes import image_solving_service
+from app.presentation.image_solving_routes import image_solving_service, metadata_service
 
 
 def settings(**overrides):
@@ -27,6 +27,13 @@ def settings(**overrides):
 
 def test_image_solving_uses_confirmed_anthropic_model_by_default():
     assert settings().image_solving_anthropic_model == "claude-sonnet-4-6"
+
+
+def test_metadata_composition_keeps_concrete_database_session():
+    db = NS()
+    recommendations = metadata_service(db, settings())
+    assert recommendations.sessions.repository.db is db
+    assert recommendations.repository.db is db
 
 
 def test_gateway_token_builds_real_runtime_and_passes_base_url(monkeypatch):

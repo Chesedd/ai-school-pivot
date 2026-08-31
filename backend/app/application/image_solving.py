@@ -161,12 +161,16 @@ class ImageSolvingService:
             logger.error(
                 "image solving stage failed session_id=%s stage=%s provider=%s "
                 "model=%s failure_code=%s exception=%s detail=%r request_id=%s "
-                "latency_ms=%s retry_count=%s",
+                "latency_ms=%s retry_count=%s solver_provider_calls=%s "
+                "repair_used=%s first_stop_reason=%s",
                 session_id, stage, getattr(port, "provider_id", "unknown"),
                 getattr(port, "model_id", "unknown"), failure_code,
                 type(exc).__name__, detail,
                 getattr(telemetry, "provider_request_id", None), latency_ms,
-                retry_count if stage == "solver" else 0, extra={
+                retry_count if stage == "solver" else 0,
+                getattr(telemetry, "provider_calls", 0),
+                getattr(telemetry, "repair_used", False),
+                getattr(telemetry, "first_stop_reason", None), extra={
                 "session_id": str(session_id), "stage": stage,
                 "provider": getattr(port, "provider_id", "unknown"),
                 "model": getattr(port, "model_id", "unknown"),

@@ -1,4 +1,5 @@
 from uuid import uuid4
+import logging
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -22,6 +23,7 @@ from app.presentation.image_artifact_routes import router as image_artifact_rout
 
 
 app = FastAPI()
+logger = logging.getLogger(__name__)
 settings = get_settings()
 app.add_middleware(CORSMiddleware, allow_origins=[x.strip() for x in settings.cors_origins.split(",") if x.strip()], allow_credentials=False, allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"], allow_headers=["Content-Type", "Authorization", "Idempotency-Key", "X-Filename"])
 app.include_router(router)
@@ -85,8 +87,11 @@ async def gone_error(_: Request, exc: GoneError) -> JSONResponse:
 
 
 @app.exception_handler(RequestValidationError)
-async def request_validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
+async def request_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     details = [{"field": ".".join(str(x) for x in error["loc"] if x != "body"), "code": error["type"], "message": error["msg"]} for error in exc.errors()]
+    if request.url.path.endswith("/promote"):
+        logger.warning("image solving promotion failed operation=image_solving_promotion "
+            "stage=request_validation fields=%s", [item["field"] for item in details])
     return error_response("validation_error", "Запрос содержит ошибки.", details, 422)
 
 
