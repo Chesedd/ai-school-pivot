@@ -12,6 +12,7 @@ from app.application.principal import Principal, PrincipalResolver
 from app.config import Settings, get_settings
 from app.db.session import get_session
 from app.infrastructure.auth_repository import SQLAlchemyAuthRepository
+from app.security.origin import TrustedOriginPolicy
 
 
 def get_authentication_service(
@@ -53,4 +54,26 @@ def require_capability(capability: str) -> Callable[..., AsyncGenerator[Principa
             raise HTTPException(status_code=403, detail="forbidden")
         return principal
 
+    return dependency
+
+
+def require_trusted_origin(
+    request: Request, settings: Settings = Depends(get_settings)
+) -> None:
+    """Apply the shared mutation-only Origin policy at presentation boundaries."""
+    TrustedOriginPolicy(settings.allowed_origins).enforce(request)
+
+
+
+def enforce_capability(principal: Principal, capability: str) -> None:
+    """Enforce a capability after a polymorphic resource has been classified."""
+    if capability not in principal.capabilities:
+        raise HTTPException(status_code=403, detail="forbidden")
+
+def require_any_capability(*capabilities: str):
+    """Require one of several capabilities for a resource-polymorphic route."""
+    async def dependency(principal: Principal = Depends(require_principal)) -> Principal:
+        if principal.capabilities.isdisjoint(capabilities):
+            raise HTTPException(status_code=403, detail="forbidden")
+        return principal
     return dependency

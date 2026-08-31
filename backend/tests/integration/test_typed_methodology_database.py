@@ -25,7 +25,6 @@ async def engine():
 @pytest_asyncio.fixture
 async def api_client(engine,monkeypatch):
     os.environ["DATABASE_URL"]=URL
-    os.environ.setdefault("CONTENT_BANK_DEV_ACTOR_ID","00000000-0000-4000-8000-000000000001")
     from httpx import ASGITransport,AsyncClient
     from app.application.principal import Principal
     from app.main import app

@@ -7,7 +7,6 @@ import httpx
 import pytest
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://unit:unit@localhost/unit")
-os.environ.setdefault("CONTENT_BANK_DEV_ACTOR_ID", "00000000-0000-4000-8000-000000000001")
 
 from app.application.input_artifacts import ArtifactUploadService, InputArtifactRecord
 from app.application.principal import Principal

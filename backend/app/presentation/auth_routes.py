@@ -17,8 +17,8 @@ from app.presentation.auth_dependencies import (
     get_authentication_service,
     get_principal_resolver,
     require_principal,
+    require_trusted_origin,
 )
-from app.security.origin import TrustedOriginPolicy
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -48,9 +48,6 @@ class PrincipalResponse(BaseModel):
             student_id=principal.student_id,
         )
 
-
-def require_trusted_origin(request: Request, settings: Settings = Depends(get_settings)) -> None:
-    TrustedOriginPolicy(settings.allowed_origins).enforce(request)
 
 
 @router.post("/login", response_model=PrincipalResponse, dependencies=[Depends(require_trusted_origin)])
