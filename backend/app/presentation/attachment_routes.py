@@ -6,11 +6,14 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 
+from app.application.auth_errors import AuthenticationError
+from app.application.principal import PrincipalResolver
 from app.config import Settings, get_settings
 from app.db.session import async_session_factory
 from app.infrastructure.models import Attachment, TaskVersion, TaskVersionAttachment
-from app.infrastructure.assessment_models import (AssessmentItem, AssignmentParticipant,
+from app.infrastructure.assessment_models import (AssignmentParticipant,
     StudentAnswer, StudentAnswerAttachment, StudentSubmission)
+from app.presentation.auth_dependencies import get_principal_resolver, require_student_identity
 
 router=APIRouter(prefix="/api")
 MIMES={"image/png":b"\x89PNG\r\n\x1a\n","image/jpeg":b"\xff\xd8\xff","image/webp":b"RIFF"}
@@ -49,26 +52,47 @@ async def owned_answer(s,submission_id,item_id,student_id):
     return (await s.execute(select(StudentAnswer).join(StudentSubmission,StudentAnswer.submission_id==StudentSubmission.id).join(AssignmentParticipant,StudentSubmission.assignment_participant_id==AssignmentParticipant.id).where(StudentSubmission.id==submission_id,StudentAnswer.assessment_item_id==item_id,AssignmentParticipant.student_id==student_id))).scalar_one_or_none()
 
 @router.post("/assessment-core/student/attempts/{submission_id}/answers/{item_id}/attachments",status_code=201)
-async def upload_answer(submission_id:UUID,item_id:UUID,request:Request,x_filename:str=Header(...),content_type:str=Header(...),settings:Settings=Depends(get_settings)):
+async def upload_answer(submission_id:UUID,item_id:UUID,request:Request,x_filename:str=Header(...),content_type:str=Header(...),settings:Settings=Depends(get_settings),student_id:UUID=Depends(require_student_identity)):
     async with async_session_factory() as s:
-        answer=await owned_answer(s,submission_id,item_id,settings.assessment_dev_student_id)
+        answer=await owned_answer(s,submission_id,item_id,student_id)
         submission=await s.get(StudentSubmission,submission_id)
         if not answer: raise HTTPException(404,"Saved answer not found")
         if submission.status!="draft": raise HTTPException(409,"Submitted answer is read-only")
         a=await payload(request,x_filename,content_type,settings);s.add(a);await s.flush();s.add(StudentAnswerAttachment(student_answer_id=answer.id,attachment_id=a.id));await s.commit();await s.refresh(a);return serialize(a)
 
 @router.get("/assessment-core/student/attempts/{submission_id}/answers/{item_id}/attachments")
-async def answer_files(submission_id:UUID,item_id:UUID,settings:Settings=Depends(get_settings)):
+async def answer_files(submission_id:UUID,item_id:UUID,student_id:UUID=Depends(require_student_identity)):
     async with async_session_factory() as s:
-        answer=await owned_answer(s,submission_id,item_id,settings.assessment_dev_student_id)
+        answer=await owned_answer(s,submission_id,item_id,student_id)
         if not answer:return {"items":[]}
         rows=(await s.scalars(select(Attachment).join(StudentAnswerAttachment).where(StudentAnswerAttachment.student_answer_id==answer.id).order_by(Attachment.created_at,Attachment.id))).all()
         return {"items":[serialize(a) for a in rows]}
 
 @router.get("/attachments/{attachment_id}/content")
-async def content(attachment_id:UUID,settings:Settings=Depends(get_settings)):
-    async with async_session_factory() as s:a=await s.get(Attachment,attachment_id)
-    if not a:raise HTTPException(404,"Attachment not found")
+async def content(attachment_id:UUID,request:Request,settings:Settings=Depends(get_settings),resolver:PrincipalResolver=Depends(get_principal_resolver)):
+    async with async_session_factory() as s:
+        a=await s.get(Attachment,attachment_id)
+        student_owner = await s.scalar(
+            select(AssignmentParticipant.student_id)
+            .join(StudentSubmission, StudentSubmission.assignment_participant_id == AssignmentParticipant.id)
+            .join(StudentAnswer, StudentAnswer.submission_id == StudentSubmission.id)
+            .join(StudentAnswerAttachment, StudentAnswerAttachment.student_answer_id == StudentAnswer.id)
+            .where(StudentAnswerAttachment.attachment_id == attachment_id)
+        )
+    if not a:
+        raise HTTPException(404, "Attachment not found")
+    if student_owner is not None:
+        secret = request.cookies.get(settings.auth_session_cookie_name)
+        if not secret:
+            raise HTTPException(401, "authentication_required")
+        try:
+            principal = await resolver.resolve(secret)
+        except AuthenticationError as exc:
+            raise HTTPException(401, "authentication_required") from exc
+        if principal.student_id is None:
+            raise HTTPException(403, "student_identity_required")
+        if principal.student_id != student_owner:
+            raise HTTPException(404, "Attachment not found")
     path=Path(settings.attachment_storage_path)/a.storage_reference
     if not path.is_file():raise HTTPException(404,"Attachment content not found")
     return FileResponse(path,media_type=a.mime_type,filename=a.filename,headers={"Content-Disposition":f'inline; filename="{a.filename}"',"X-Content-Type-Options":"nosniff","Content-Security-Policy":"default-src 'none'; sandbox"})

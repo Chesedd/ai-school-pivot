@@ -1,6 +1,7 @@
 """FastAPI composition for session authentication and coarse capabilities."""
 
 from collections.abc import AsyncGenerator, Callable
+from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,6 +38,13 @@ async def require_principal(
         return await resolver.resolve(secret)
     except AuthenticationError as exc:
         raise HTTPException(status_code=401, detail="authentication_required") from exc
+
+
+def require_student_identity(principal: Principal = Depends(require_principal)) -> UUID:
+    """Return the current Assessment Student link or reject an unlinked account."""
+    if principal.student_id is None:
+        raise HTTPException(status_code=403, detail="student_identity_required")
+    return principal.student_id
 
 
 def require_capability(capability: str) -> Callable[..., AsyncGenerator[Principal, None]]:

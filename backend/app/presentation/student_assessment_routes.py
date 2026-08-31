@@ -4,17 +4,17 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Header, Query, Response
 
 from app.application.student_assessments import PilotStudentContext, validate_idempotency_key
-from app.config import Settings, get_settings
 from app.db.session import async_session_factory
 from app.infrastructure.student_assessment_repository import StudentAssessmentService
 from app.presentation.assessment_schemas import EmptyRequest
+from app.presentation.auth_dependencies import require_student_identity
 from app.presentation.student_assessment_schemas import (AnswerPutRequest, StudentAnswerResponse,
     StudentAssignmentDetail, StudentAssignmentPage, SubmissionResponse)
 
 router=APIRouter(prefix="/api/assessment-core/student")
 
-def student_context(settings: Settings=Depends(get_settings)) -> PilotStudentContext:
-    return PilotStudentContext(settings.assessment_dev_student_id)
+def student_context(student_id: UUID = Depends(require_student_identity)) -> PilotStudentContext:
+    return PilotStudentContext(student_id)
 
 def service(): return StudentAssessmentService(async_session_factory)
 
