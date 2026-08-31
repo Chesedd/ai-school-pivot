@@ -5,6 +5,11 @@ from app.application.image_solving_metadata import (CatalogItemV1,
     MetadataCatalogSnapshotV1, TagCandidateV1)
 from app.infrastructure.models import Grade, Skill, Subject, Subtopic, Tag, TagCategory, TaskFolder, Topic
 
+class MetadataCatalogConsistencyError(RuntimeError):
+    def __init__(self, entity_type, entity_id, relation):
+        self.entity_type = entity_type
+        super().__init__(f"inconsistent_{entity_type}:{entity_id}:{relation}")
+
 class SqlAlchemyMetadataCatalogLoader:
     def __init__(self,db):self.db=db
     async def load(self):
@@ -17,6 +22,24 @@ class SqlAlchemyMetadataCatalogLoader:
         categories=(await self.db.scalars(select(TagCategory.code).order_by(TagCategory.sort_order))).all()
         tags=(await self.db.scalars(select(Tag).where(Tag.status=="active").order_by(Tag.normalized_name))).all()
         topic_by={x.id:x for x in topics}; sub_by={x.id:x for x in subs}
+        subject_ids={x.id for x in subjects}; grade_ids={x.id for x in grades}
+        category_codes=set(categories); folder_ids={x.id for x in folders}
+        folder_by={x.id:x for x in folders}
+        def require(entity, entity_id, relation, valid):
+            if not valid:
+                raise MetadataCatalogConsistencyError(entity, entity_id, relation)
+        for x in topics:
+            require("topic",x.id,"subject",x.subject_id in subject_ids)
+            require("topic",x.id,"grade",x.grade_id in grade_ids)
+        for x in subs: require("subtopic",x.id,"topic",x.topic_id in topic_by)
+        for x in skills: require("skill",x.id,"subtopic",x.subtopic_id in sub_by)
+        for x in folders:
+            require("folder",x.id,"subject",x.subject_id in subject_ids)
+            require("folder",x.id,"parent",x.parent_id is None or x.parent_id in folder_ids)
+            require("folder",x.id,"parent_subject",x.parent_id is None or folder_by[x.parent_id].subject_id==x.subject_id)
+        for x in tags:
+            require("tag",x.id,"category",x.category_code in category_codes)
+            require("tag",x.id,"subject",x.subject_id is None or x.subject_id in subject_ids)
         return MetadataCatalogSnapshotV1(
             subjects=tuple(CatalogItemV1(id=x.id,name=x.name) for x in subjects),
             grades=tuple(CatalogItemV1(id=x.id,name=x.name,grade_number=x.number) for x in grades),

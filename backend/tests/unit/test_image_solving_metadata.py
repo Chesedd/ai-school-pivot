@@ -56,3 +56,40 @@ def test_ambiguous_subject_leaves_hierarchy_unresolved_without_fake_ids():
 def test_incompatible_tag_is_an_unresolved_name():
     result,_=resolve(incompatible_tag=True)
     assert result.tags[0].kind=="new" and result.tags[0].name=="Алгебра"
+
+import pytest
+from types import SimpleNamespace
+from app.application.image_solving_metadata import MetadataRecommendationService, MetadataResolutionError
+
+class _Sessions:
+    async def get_state(self, **_):
+        return SimpleNamespace(lifecycle_status=ImageSolvingStatus.VALIDATED, validation_checkpoint=object())
+class _Repository:
+    def __init__(self, *, cached=None, save_error=None): self.cached,self.save_error=cached,save_error
+    async def get_recommendation(self, _): return self.cached
+    async def save_recommendation(self, *_):
+        if self.save_error: raise self.save_error
+        return "saved"
+class _Catalog:
+    fingerprint="fingerprint"
+class _Loader:
+    def __init__(self, error=None): self.error=error
+    async def load(self):
+        if self.error: raise self.error
+        return _Catalog()
+
+@pytest.mark.asyncio
+async def test_cached_recommendation_returns_without_catalog_or_provider():
+    cached=object(); loader=_Loader(AssertionError("catalog must not load"))
+    assert await MetadataRecommendationService(_Sessions(),_Repository(cached=cached),loader).generate(uuid4(),uuid4()) is cached
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("failure","stage"),[("catalog","catalog_load"),("resolve","resolve"),("persistence","persistence")])
+async def test_local_resolution_failures_are_controlled(monkeypatch,failure,stage):
+    loader=_Loader(RuntimeError("catalog")) if failure=="catalog" else _Loader()
+    repository=_Repository(save_error=RuntimeError("save")) if failure=="persistence" else _Repository()
+    if failure=="resolve": monkeypatch.setattr("app.application.image_solving_metadata.resolve_metadata",lambda *_: (_ for _ in ()).throw(ValueError("resolve")))
+    else: monkeypatch.setattr("app.application.image_solving_metadata.resolve_metadata",lambda *_: object())
+    with pytest.raises(MetadataResolutionError) as error:
+        await MetadataRecommendationService(_Sessions(),repository,loader).generate(uuid4(),uuid4())
+    assert error.value.stage==stage

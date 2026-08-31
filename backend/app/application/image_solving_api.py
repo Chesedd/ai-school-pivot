@@ -11,7 +11,7 @@ from app.application.authoring import ProviderFailure
 from app.application.image_solving import ImageSolvingError, ImageSolvingService
 from app.application.input_artifacts import ArtifactError
 from app.presentation.image_solving_schemas import (
-    AttemptUsageResponse, CreateImageSolvingSessionRequest, ExtractionResponse,
+    AttemptUsageResponse, CreateImageSolvingSessionRequest, ExtractionMetadataResponse, ExtractionResponse,
     ImageSolvingAttemptResponse, ImageSolvingAttemptsResponse, ImageSolvingResultResponse,
     ImageSolvingSessionResponse, ImageSolvingStateResponse, SolutionResponse,
     StageStatusResponse, TaskClassificationResponse, ValidationResponse,
@@ -50,6 +50,7 @@ _ERRORS = {
     "invalid_checkpoint": ("invalid_artifact_or_checkpoint", 422),
     "artifact_integrity_failed": ("invalid_artifact_or_checkpoint", 422),
     "recommendation_session_incomplete": ("image_solving_not_ready", 409),
+    "metadata_resolution_failed": ("image_solving_metadata_resolution_failed", 503),
 }
 
 
@@ -103,7 +104,7 @@ class ImageSolvingApplicationService:
                 structured_statement=e.structured_statement,
                 task_classification=TaskClassificationResponse(task_type=e.detected_task_type,
                     answer_format=e.detected_answer_format), confidence=e.extraction_confidence,
-                choices=e.choices),
+                choices=e.choices, metadata=ExtractionMetadataResponse(**e.metadata.model_dump())),
             solution=SolutionResponse(answer=s.final_answer, reasoning_summary=s.reasoning_summary,
                 confidence=s.confidence),
             validation=ValidationResponse(status=v.validation_status, findings=v.findings,
