@@ -212,8 +212,8 @@ RETRYABLE=frozenset({FailureCode.TIMEOUT,FailureCode.RATE_LIMIT,FailureCode.TRAN
 
 class ProviderFailure(Exception):
     def __init__(self, code: FailureCode, adapter_detail: str=""):
-        del adapter_detail
         self.code=code
+        self.adapter_detail=adapter_detail
         super().__init__(code.value)
 
 

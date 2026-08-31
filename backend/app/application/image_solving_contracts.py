@@ -15,7 +15,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, field_validator, model_validator
 
 from app.application.authoring import canonical_json_bytes
-from app.application.content_bank import ANSWER_FORMATS, TASK_TYPES
+from app.application.content_bank import AnswerFormatValue, TaskTypeValue
 
 MAX_ARTIFACT_ID = 128
 MAX_MIME_TYPE = 127
@@ -79,12 +79,12 @@ class ExtractionMetadataV1(_ContractV1):
     topic: StrictStr = Field(min_length=1, max_length=200)
     subtopic: StrictStr | None = Field(default=None, min_length=1, max_length=200)
     skills: tuple[StrictStr, ...] = Field(min_length=1, max_length=5)
-    task_type: StrictStr
-    answer_format: StrictStr
+    task_type: TaskTypeValue
+    answer_format: AnswerFormatValue
     difficulty: StrictInt = Field(ge=1, le=100)
     tags: tuple[StrictStr, ...] = Field(default=(), max_length=8)
 
-    @field_validator("title", "subject", "topic", "subtopic", "task_type", "answer_format")
+    @field_validator("title", "subject", "topic", "subtopic")
     @classmethod
     def clean_metadata_text(cls, value: str | None) -> str | None:
         return None if value is None else _clean(value)
@@ -97,15 +97,6 @@ class ExtractionMetadataV1(_ContractV1):
         if len({_normalized_metadata_name(item) for item in value}) != len(value):
             raise ValueError("duplicate_metadata_name")
         return value
-
-    @model_validator(mode="after")
-    def known_machine_values(self):
-        if self.task_type not in TASK_TYPES:
-            raise ValueError("unknown_task_type")
-        if self.answer_format not in ANSWER_FORMATS:
-            raise ValueError("unknown_answer_format")
-        return self
-
 
 def _normalized_metadata_name(value: str) -> str:
     return " ".join(value.casefold().replace("ё", "е").split())
