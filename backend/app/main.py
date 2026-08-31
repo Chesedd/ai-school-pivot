@@ -20,12 +20,14 @@ from app.application.authoring_api import AuthoringApiError
 from app.application.image_solving_api import ImageSolvingApiError
 from app.presentation.image_solving_routes import router as image_solving_router
 from app.presentation.image_artifact_routes import router as image_artifact_router
+from app.presentation.auth_routes import router as auth_router
 
 
 app = FastAPI()
 logger = logging.getLogger(__name__)
 settings = get_settings()
-app.add_middleware(CORSMiddleware, allow_origins=[x.strip() for x in settings.cors_origins.split(",") if x.strip()], allow_credentials=False, allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"], allow_headers=["Content-Type", "Authorization", "Idempotency-Key", "X-Filename"])
+app.add_middleware(CORSMiddleware, allow_origins=list(settings.allowed_origins), allow_credentials=True, allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"], allow_headers=["Content-Type", "Authorization", "Idempotency-Key", "X-Filename"])
+app.include_router(auth_router)
 app.include_router(router)
 app.include_router(assessment_router)
 app.include_router(student_assessment_router)
@@ -97,8 +99,9 @@ async def request_validation_error(request: Request, exc: RequestValidationError
 
 @app.exception_handler(HTTPException)
 async def http_error(_: Request, exc: HTTPException) -> JSONResponse:
-    code = "not_found" if exc.status_code == 404 else "validation_error"
-    return error_response(code, str(exc.detail), [], exc.status_code)
+    default_codes = {401: "authentication_required", 403: "forbidden", 404: "not_found"}
+    code = str(exc.detail) if isinstance(exc.detail, str) else default_codes.get(exc.status_code, "validation_error")
+    return error_response(code, code.replace("_", " ").capitalize() + ".", [], exc.status_code)
 
 
 @app.exception_handler(Exception)
