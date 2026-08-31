@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +18,10 @@ class DuplicateNormalizedLogin(Exception):
 
 class SessionTokenCollision(Exception):
     """A generated session digest collided with an existing digest."""
+
+
+class StudentLinkConflict(Exception):
+    """A one-to-one student link conflicted with an existing link."""
 
 
 def _constraint_name(exc: IntegrityError) -> str | None:
@@ -129,8 +133,12 @@ class SQLAlchemyAuthRepository:
         self, user_id: UUID, student_id: UUID
     ) -> StudentUserLink:
         row = StudentUserLink(user_id=user_id, student_id=student_id)
-        self.session.add(row)
-        await self.session.flush()
+        try:
+            async with self.session.begin_nested():
+                self.session.add(row)
+                await self.session.flush()
+        except IntegrityError as exc:
+            raise StudentLinkConflict from exc
         await self.session.refresh(row)
         return row
 
@@ -139,3 +147,66 @@ class SQLAlchemyAuthRepository:
             delete(StudentUserLink).where(StudentUserLink.user_id == user_id)
         )
         return bool(result.rowcount)
+
+    async def list_users(self, *, offset: int, limit: int) -> tuple[list[User], int]:
+        total = await self.session.scalar(select(func.count()).select_from(User))
+        rows = await self.session.scalars(
+            select(User).order_by(User.created_at, User.id).offset(offset).limit(limit)
+        )
+        return list(rows), int(total or 0)
+
+    async def update_user_identity(
+        self, user_id: UUID, *, login: str, normalized_login: str, display_name: str
+    ) -> User:
+        row = await self.get_user(user_id)
+        assert row is not None
+        row.login, row.normalized_login, row.display_name = login, normalized_login, display_name
+        try:
+            async with self.session.begin_nested():
+                await self.session.flush()
+        except IntegrityError as exc:
+            if _constraint_name(exc) == "uq_users_normalized_login":
+                raise DuplicateNormalizedLogin from exc
+            raise
+        await self.session.refresh(row)
+        return row
+
+    async def set_user_active(self, user_id: UUID, active: bool) -> None:
+        await self.session.execute(
+            update(User).where(User.id == user_id).values(is_active=active, updated_at=func.clock_timestamp())
+        )
+
+    async def replace_roles(self, user_id: UUID, roles: frozenset[str]) -> None:
+        await self.session.execute(delete(UserRole).where(UserRole.user_id == user_id))
+        self.session.add_all(UserRole(user_id=user_id, role=role) for role in sorted(roles))
+        await self.session.flush()
+
+    async def revoke_sessions_for_user(self, user_id: UUID, revoked_at: datetime) -> int:
+        result = await self.session.execute(
+            update(AuthSession)
+            .where(AuthSession.user_id == user_id, AuthSession.revoked_at.is_(None))
+            .values(revoked_at=revoked_at)
+        )
+        return int(result.rowcount or 0)
+
+    async def update_password_hash(self, user_id: UUID, password_hash: str) -> None:
+        await self.session.execute(
+            update(User).where(User.id == user_id).values(password_hash=password_hash, updated_at=func.clock_timestamp())
+        )
+
+    async def student_exists(self, student_id: UUID) -> bool:
+        from app.infrastructure.assessment_models import Student
+        return await self.session.get(Student, student_id) is not None
+
+    async def lock_admin_invariant(self) -> None:
+        # A transaction-scoped PostgreSQL advisory lock serializes every operation
+        # that can reduce the active-admin set (and bootstrap). It works across
+        # application processes and is released automatically on commit/rollback.
+        await self.session.execute(text("SELECT pg_advisory_xact_lock(71431001)"))
+
+    async def count_active_admins(self) -> int:
+        value = await self.session.scalar(
+            select(func.count()).select_from(UserRole).join(User, User.id == UserRole.user_id)
+            .where(UserRole.role == "admin", User.is_active.is_(True))
+        )
+        return int(value or 0)
