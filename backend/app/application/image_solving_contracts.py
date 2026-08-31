@@ -12,9 +12,10 @@ from enum import StrEnum
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, field_validator, model_validator
 
 from app.application.authoring import canonical_json_bytes
+from app.application.content_bank import ANSWER_FORMATS, TASK_TYPES
 
 MAX_ARTIFACT_ID = 128
 MAX_MIME_TYPE = 127
@@ -31,6 +32,7 @@ MAX_ISSUE = 2_000
 MAX_ISSUES = 32
 MAX_FINDING = 2_000
 MAX_FINDINGS = 32
+MAX_METADATA_NAME = 500
 
 Confidence = Annotated[Decimal, Field(strict=True, ge=Decimal("0"), le=Decimal("1"))]
 
@@ -68,6 +70,47 @@ class InputArtifactV1(_ContractV1):
         return _clean(value)
 
 
+class ExtractionMetadataV1(_ContractV1):
+    """Semantic Content Bank hints produced without knowledge of catalog IDs."""
+
+    title: StrictStr = Field(min_length=1, max_length=MAX_METADATA_NAME)
+    subject: StrictStr = Field(min_length=1, max_length=200)
+    grade: StrictInt = Field(ge=1, le=11)
+    topic: StrictStr = Field(min_length=1, max_length=200)
+    subtopic: StrictStr | None = Field(default=None, min_length=1, max_length=200)
+    skills: tuple[StrictStr, ...] = Field(min_length=1, max_length=5)
+    task_type: StrictStr
+    answer_format: StrictStr
+    difficulty: StrictInt = Field(ge=1, le=100)
+    tags: tuple[StrictStr, ...] = Field(default=(), max_length=8)
+
+    @field_validator("title", "subject", "topic", "subtopic", "task_type", "answer_format")
+    @classmethod
+    def clean_metadata_text(cls, value: str | None) -> str | None:
+        return None if value is None else _clean(value)
+
+    @field_validator("skills", "tags")
+    @classmethod
+    def clean_metadata_lists(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if any(not item or len(item) > 200 or item != item.strip() for item in value):
+            raise ValueError("invalid_contract")
+        if len({_normalized_metadata_name(item) for item in value}) != len(value):
+            raise ValueError("duplicate_metadata_name")
+        return value
+
+    @model_validator(mode="after")
+    def known_machine_values(self):
+        if self.task_type not in TASK_TYPES:
+            raise ValueError("unknown_task_type")
+        if self.answer_format not in ANSWER_FORMATS:
+            raise ValueError("unknown_answer_format")
+        return self
+
+
+def _normalized_metadata_name(value: str) -> str:
+    return " ".join(value.casefold().replace("ё", "е").split())
+
+
 class ExtractionResultV1(_ContractV1):
     extracted_text: StrictStr = Field(min_length=1, max_length=MAX_EXTRACTED_TEXT)
     structured_statement: StrictStr = Field(min_length=1, max_length=MAX_STRUCTURED_STATEMENT)
@@ -76,6 +119,7 @@ class ExtractionResultV1(_ContractV1):
     choices: tuple[StrictStr, ...] | None = Field(default=None, min_length=1, max_length=MAX_CHOICES)
     extraction_confidence: Confidence
     ocr_issues: tuple[StrictStr, ...] = Field(max_length=MAX_ISSUES)
+    metadata: ExtractionMetadataV1
 
     @field_validator("extracted_text", "structured_statement", "detected_task_type", "detected_answer_format")
     @classmethod

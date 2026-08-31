@@ -38,7 +38,7 @@ def test_input_artifact_is_strict_frozen_bounded_and_closed():
 def test_extraction_contract_bounds_optional_fields_and_uses_immutable_collections():
     value = ExtractionResultV1(extracted_text="What is 2 + 2?", structured_statement="Compute 2 + 2.",
         detected_task_type=None, detected_answer_format="number", choices=None,
-        extraction_confidence=Decimal("0.95"), ocr_issues=("Superscript was faint.",))
+        extraction_confidence=Decimal("0.95"), ocr_issues=("Superscript was faint.",), metadata={"title":"Сложение чисел","subject":"Математика","grade":1,"topic":"Сложение","subtopic":"Натуральные числа","skills":("Складывать числа",),"task_type":"calculation","answer_format":"number","difficulty":1,"tags":()})
     assert value.choices is None and isinstance(value.ocr_issues, tuple)
     with pytest.raises(ValidationError):
         ExtractionResultV1.model_validate({**value.model_dump(), "ocr_issues": ["mutable input"]})
@@ -74,3 +74,20 @@ def test_fingerprints_use_deterministic_canonical_json_and_change_with_semantics
 def test_legacy_authoring_contracts_remain_available_without_pipeline_changes():
     assert AuthoringRequestV1.__name__ == "AuthoringRequestV1"
     assert GeneratedTaskDraftV1.__name__ == "GeneratedTaskDraftV1"
+
+
+def test_extraction_metadata_is_russian_unicode_strict_frozen_and_closed():
+    value = ExtractionResultV1(extracted_text="7 · (X - 3) = 21",
+        structured_statement="Решить уравнение 7 · (X - 3) = 21.",
+        detected_task_type="calculation", detected_answer_format="number", choices=None,
+        extraction_confidence=Decimal(".99"), ocr_issues=(), metadata={
+            "title":"Решение линейного уравнения","subject":"Математика","grade":6,
+            "topic":"Уравнения","subtopic":"Линейные уравнения",
+            "skills":("Решать линейные уравнения",),"task_type":"calculation",
+            "answer_format":"number","difficulty":2,"tags":()})
+    assert value.metadata.subject == "Математика" and value.metadata.grade == 6
+    with pytest.raises(ValidationError):
+        value.metadata.title = "changed"
+    for bad in ({"grade":"6"}, {"task_type":"invented"}, {"uuid":"not-allowed"}):
+        with pytest.raises(ValidationError):
+            type(value.metadata).model_validate({**value.metadata.model_dump(), **bad})

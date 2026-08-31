@@ -10,6 +10,7 @@ from typing import Literal, Protocol, Self
 from uuid import UUID, uuid4
 
 TASK_TYPES = frozenset({"test", "calculation", "problem", "open_question", "essay"})
+ANSWER_FORMATS = frozenset({"single_choice", "multiple_choice", "short_text", "number", "expression", "long_text"})
 STATUSES = frozenset({"draft", "review", "approved", "archived"})
 AUDIT_ACTIONS = frozenset({"task_created", "methodology_updated", "submitted_for_review", "returned_to_draft", "version_approved", "version_created", "task_archived", "tag_added_to_version", "tag_removed_from_version"})
 SORT_FIELDS = frozenset({"created_at", "updated_at", "title", "difficulty", "status", "version_no", "relevance"})

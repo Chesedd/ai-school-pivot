@@ -35,7 +35,7 @@ class SolverInputV1(BaseModel):
     @classmethod
     def from_extraction(cls, value: ExtractionResultV1) -> "SolverInputV1":
         # Confidence is extraction metadata, not task data needed to solve it.
-        return cls(**value.model_dump(exclude={"extraction_confidence"}))
+        return cls(**value.model_dump(exclude={"extraction_confidence", "metadata"}))
 
     @property
     def fingerprint(self) -> str:

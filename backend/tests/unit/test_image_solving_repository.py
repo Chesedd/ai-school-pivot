@@ -20,6 +20,10 @@ EXTRACTION = ExtractionResultV1(
     detected_task_type="solve_linear_equation", detected_answer_format="integer",
     choices=("X = 6", "X = 0", "X = 3", "X = 24"),
     extraction_confidence=Decimal("0.95"), ocr_issues=(),
+    metadata={"title":"Решение линейного уравнения","subject":"Математика",
+        "grade":6,"topic":"Уравнения","subtopic":"Линейные уравнения",
+        "skills":("Решать линейные уравнения",),"task_type":"calculation",
+        "answer_format":"number","difficulty":2,"tags":()},
 )
 SOLUTION = SolutionResultV1(
     status="solved", reasoning_summary="Divide by 7, then add 3.",

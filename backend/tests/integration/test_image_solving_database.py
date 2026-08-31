@@ -54,7 +54,7 @@ async def test_checkpoint_jsonb_roundtrip_for_every_stage(context):
         structured_statement="Решить уравнение: 7 · (X - 3) = 21. Найти X.",
         detected_task_type="solve_linear_equation", detected_answer_format="integer",
         choices=("X = 6", "X = 0", "X = 3", "X = 24"),
-        extraction_confidence=Decimal("0.95"), ocr_issues=())
+        extraction_confidence=Decimal("0.95"), ocr_issues=(), metadata={"title":"Сложение чисел","subject":"Математика","grade":1,"topic":"Сложение","subtopic":"Натуральные числа","skills":("Складывать числа",),"task_type":"calculation","answer_format":"number","difficulty":1,"tags":()})
     solution = SolutionResultV1(status="solved",
         reasoning_summary="Divide by 7, then add 3.", final_answer="X = 6",
         confidence=Decimal("0.97"))

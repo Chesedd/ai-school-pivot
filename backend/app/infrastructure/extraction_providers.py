@@ -149,6 +149,13 @@ class AnthropicExtractionAdapter(_ExtractionAdapter):
                 "structured_statement", "detected_task_type", "detected_answer_format"))
             _normalize_string_list(payload, "choices")
             _normalize_string_list(payload, "ocr_issues")
+            metadata = payload.get("metadata")
+            if type(metadata) is dict:
+                metadata = _normalize_tool_strings(metadata, ("title", "subject", "topic",
+                    "subtopic", "task_type", "answer_format"))
+                _normalize_string_list(metadata, "skills")
+                _normalize_string_list(metadata, "tags")
+                payload["metadata"] = metadata
             usage = Usage(response.usage.input_tokens, response.usage.output_tokens,
                 getattr(response.usage, "cache_read_input_tokens", 0) or 0,
                 getattr(response.usage, "cache_creation_input_tokens", 0) or 0)

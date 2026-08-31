@@ -14,7 +14,11 @@ from app.application.input_artifacts import InputArtifactRecord
 
 EXTRACTION = {"extracted_text":"2 + 2 = ?", "structured_statement":"2 + 2 = ?",
     "detected_task_type":"calculation", "detected_answer_format":"number",
-    "choices":None, "extraction_confidence":"0.98", "ocr_issues":[]}
+    "choices":None, "extraction_confidence":"0.98", "ocr_issues":[],
+    "metadata":{"title":"Сложение чисел","subject":"Математика","grade":1,
+        "topic":"Сложение","subtopic":"Натуральные числа",
+        "skills":["Складывать числа"],"task_type":"calculation",
+        "answer_format":"number","difficulty":1,"tags":[]}}
 SOLUTION = {"status":"solvable", "reasoning_summary":"Adding gives four.",
     "final_answer":"4", "confidence":"0.99"}
 
@@ -85,4 +89,4 @@ async def test_extraction_path_has_no_task_version_creation_capability():
     repo=Repo(); await run(repo,Provider(EXTRACTION),Provider(SOLUTION))
     assert not hasattr(repo,"create_task_version")
     assert set(repo.saved[0]) == {"extracted_text","structured_statement","detected_task_type",
-        "detected_answer_format","choices","extraction_confidence","ocr_issues"}
+        "detected_answer_format","choices","extraction_confidence","ocr_issues","metadata"}

@@ -16,7 +16,7 @@ def state(owner=None, status=ImageSolvingStatus.CREATED, complete=False):
     now = datetime.now(UTC)
     extraction = ExtractionResultV1(extracted_text="2 + 2", structured_statement="2 + 2",
         detected_task_type="calculation", detected_answer_format="number", choices=None,
-        extraction_confidence=Decimal(".98"), ocr_issues=()) if complete else None
+        extraction_confidence=Decimal(".98"), ocr_issues=(), metadata={"title":"Сложение чисел","subject":"Математика","grade":1,"topic":"Сложение","subtopic":"Натуральные числа","skills":("Складывать числа",),"task_type":"calculation","answer_format":"number","difficulty":1,"tags":()}) if complete else None
     solution = SolutionResultV1(status="solved", reasoning_summary="Add both values.",
         final_answer="4", confidence=Decimal(".99")) if complete else None
     validation = ValidationResultV1(validation_status="validated", confidence=Decimal(".98"),
