@@ -84,6 +84,7 @@ class AssessmentRecord:
     updated_at: datetime
     published_at: datetime | None
     published_by: UUID | None
+    created_by: UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -183,7 +184,25 @@ class AssessmentService:
 
     async def list(self, status: str | None, offset: int, limit: int, actor: ActorContext):
         async with self.uow:
-            return await self.uow.repository.list(status, offset, limit)
+            scoped = getattr(self.uow.repository, "list_scoped", None)
+            if scoped is not None:
+                return await scoped(status, offset, limit, actor.object_scope)
+            result = await self.uow.repository.list(status, offset, limit)
+            items = [row for row in result["items"]
+                     if row.created_by is None or actor.object_scope.owns(row.created_by)]
+            return {**result, "items": items, "total": len(items)}
+
+    async def _get(self, assessment_id: UUID, actor: ActorContext, *, lock: bool = False):
+        name = "lock_scoped" if lock else "get_scoped"
+        scoped = getattr(self.uow.repository, name, None)
+        if scoped is not None:
+            return await scoped(assessment_id, actor.object_scope)
+        row = await (self.uow.repository.lock(assessment_id) if lock
+                     else self.uow.repository.get(assessment_id))
+        owner = getattr(row, "created_by", None) if row is not None else None
+        # Legacy unit doubles without owner metadata retain their old behavior;
+        # production records always provide an owner.
+        return row if row is not None and (owner is None or actor.object_scope.owns(owner)) else None
 
     async def list_class_groups(self, offset: int, limit: int, actor: ActorContext):
         async with self.uow:
@@ -191,13 +210,13 @@ class AssessmentService:
 
     async def list_assignments(self, assessment_id: UUID, offset: int, limit: int, actor: ActorContext):
         async with self.uow:
-            if await self.uow.repository.get(assessment_id) is None:
+            if await self._get(assessment_id, actor) is None:
                 raise AssessmentError("assessment_not_found", "Работа не найдена.", 404)
             return await self.uow.repository.list_assignments(assessment_id, offset, limit)
 
     async def get(self, assessment_id: UUID, actor: ActorContext):
         async with self.uow:
-            row = await self.uow.repository.get(assessment_id)
+            row = await self._get(assessment_id, actor)
             if row is None:
                 raise AssessmentError("assessment_not_found", "Работа не найдена.", 404)
             return row
@@ -211,7 +230,7 @@ class AssessmentService:
 
     async def update(self, command: UpdateAssessmentCommand, actor: ActorContext):
         async with self.uow:
-            current = await self.uow.repository.lock(command.assessment_id)
+            current = await self._get(command.assessment_id, actor, lock=True)
             if current is None:
                 raise AssessmentError("assessment_not_found", "Работа не найдена.", 404)
             _require_draft(current)
@@ -229,7 +248,7 @@ class AssessmentService:
 
     async def create_variant(self, assessment_id: UUID, name: str, actor: ActorContext):
         async with self.uow:
-            assessment = await self.uow.repository.lock(assessment_id)
+            assessment = await self._get(assessment_id, actor, lock=True)
             if assessment is None:
                 raise AssessmentError("assessment_not_found", "Работа не найдена.", 404)
             _require_draft(assessment)
@@ -246,7 +265,7 @@ class AssessmentService:
 
     async def delete_variant(self, assessment_id: UUID, variant_id: UUID, actor: ActorContext) -> None:
         async with self.uow:
-            assessment = await self.uow.repository.lock(assessment_id)
+            assessment = await self._get(assessment_id, actor, lock=True)
             if assessment is None:
                 raise AssessmentError("assessment_not_found", "Работа не найдена.", 404)
             _require_draft(assessment)
@@ -262,7 +281,7 @@ class AssessmentService:
 
     async def add_item(self, command: AddAssessmentItemCommand, actor: ActorContext):
         async with self.uow:
-            assessment = await self.uow.repository.lock(command.assessment_id)
+            assessment = await self._get(command.assessment_id, actor, lock=True)
             if assessment is None:
                 raise AssessmentError("assessment_not_found", "Работа не найдена.", 404)
             _require_draft(assessment)
@@ -282,7 +301,7 @@ class AssessmentService:
 
     async def delete_item(self, assessment_id: UUID, variant_id: UUID, item_id: UUID, actor: ActorContext) -> None:
         async with self.uow:
-            assessment = await self.uow.repository.lock(assessment_id)
+            assessment = await self._get(assessment_id, actor, lock=True)
             if assessment is None:
                 raise AssessmentError("assessment_not_found", "Работа не найдена.", 404)
             _require_draft(assessment)
@@ -298,7 +317,7 @@ class AssessmentService:
 
     async def reorder_items(self, command: ReorderAssessmentItemsCommand, actor: ActorContext):
         async with self.uow:
-            assessment = await self.uow.repository.lock(command.assessment_id)
+            assessment = await self._get(command.assessment_id, actor, lock=True)
             if assessment is None:
                 raise AssessmentError("assessment_not_found", "Работа не найдена.", 404)
             _require_draft(assessment)
@@ -319,7 +338,7 @@ class AssessmentService:
 
     async def change_item_points(self, command: ChangeAssessmentItemPointsCommand, actor: ActorContext):
         async with self.uow:
-            assessment = await self.uow.repository.lock(command.assessment_id)
+            assessment = await self._get(command.assessment_id, actor, lock=True)
             if assessment is None:
                 raise AssessmentError("assessment_not_found", "Работа не найдена.", 404)
             _require_draft(assessment)
@@ -338,7 +357,7 @@ class AssessmentService:
 
     async def publish_and_assign(self, command: PublishAssessmentCommand, actor: ActorContext):
         async with self.uow:
-            assessment = await self.uow.repository.lock(command.assessment_id)
+            assessment = await self._get(command.assessment_id, actor, lock=True)
             if assessment is None:
                 raise AssessmentError("assessment_not_found", "Работа не найдена.", 404)
             _require_draft(assessment)
@@ -375,14 +394,16 @@ class AssessmentService:
 
     async def get_assignment(self, assignment_id: UUID, actor: ActorContext):
         async with self.uow:
-            row = await self.uow.repository.get_assignment(assignment_id)
+            scoped = getattr(self.uow.repository, "get_assignment_scoped", None)
+            row = await scoped(assignment_id, actor.object_scope) if scoped else await self.uow.repository.get_assignment(assignment_id)
             if row is None:
                 raise AssessmentError("assignment_not_found", "Назначение не найдено.", 404)
             return row
 
     async def close_assignment(self, assignment_id: UUID, actor: ActorContext):
         async with self.uow:
-            row = await self.uow.repository.lock_assignment(assignment_id)
+            scoped = getattr(self.uow.repository, "lock_assignment_scoped", None)
+            row = await scoped(assignment_id, actor.object_scope) if scoped else await self.uow.repository.lock_assignment(assignment_id)
             if row is None:
                 raise AssessmentError("assignment_not_found", "Назначение не найдено.", 404)
             if row.status != "open":

@@ -16,6 +16,7 @@ from app.application.assessments import (AssignmentRecord, AssignmentSummary, As
 from app.infrastructure.assessment_models import (Assignment, AssignmentParticipant, Assessment, AssessmentAuditLog,
     AssessmentItem, AssessmentVariant, ClassGroup, Student)
 from app.infrastructure.models import Task, TaskVersion
+from app.application.object_access import ObjectAccessScope
 
 
 class SQLAlchemyContentBankReadPort:
@@ -90,7 +91,31 @@ class SQLAlchemyAssessmentRepository:
         variants = tuple(cls._variant_record(variant)
                          for variant in sorted(row.variants, key=lambda value: (value.position, value.id)))
         return AssessmentRecord(row.id, row.title, row.description, row.status, variants, row.created_at,
-                                row.updated_at, row.published_at, row.published_by)
+                                row.updated_at, row.published_at, row.published_by, row.created_by)
+
+    @staticmethod
+    def _scope(statement, scope: ObjectAccessScope):
+        return statement if scope.unrestricted else statement.where(Assessment.created_by == scope.actor_id)
+
+    async def list_scoped(self, status: str | None, offset: int, limit: int, scope: ObjectAccessScope):
+        base = self._scope(select(Assessment), scope)
+        if status:
+            base = base.where(Assessment.status == status)
+        total = await self.session.scalar(select(func.count()).select_from(base.order_by(None).subquery()))
+        rows = (await self.session.execute(base.options(*self._options()).order_by(
+            Assessment.created_at.desc(), Assessment.id).offset(offset).limit(limit))).scalars().all()
+        return {"items": [self._record(row) for row in rows], "total": total or 0,
+                "offset": offset, "limit": limit}
+
+    async def get_scoped(self, assessment_id: UUID, scope: ObjectAccessScope):
+        statement = self._scope(select(Assessment), scope).where(Assessment.id == assessment_id)
+        row = (await self.session.execute(statement.options(*self._options()))).scalar_one_or_none()
+        return self._record(row) if row is not None else None
+
+    async def lock_scoped(self, assessment_id: UUID, scope: ObjectAccessScope):
+        statement = self._scope(select(Assessment), scope).where(
+            Assessment.id == assessment_id).with_for_update()
+        return await self.session.scalar(statement)
 
     async def list(self, status: str | None, offset: int, limit: int):
         base = select(Assessment)
@@ -139,7 +164,7 @@ class SQLAlchemyAssessmentRepository:
         # refresh expires unloaded relationships; creation nevertheless has a
         # domain-known empty composition, so materialize without touching it.
         return AssessmentRecord(row.id, row.title, row.description, row.status, (), row.created_at,
-                                row.updated_at, row.published_at, row.published_by)
+                                row.updated_at, row.published_at, row.published_by, row.created_by)
 
     async def lock(self, assessment_id: UUID):
         return await self.session.scalar(select(Assessment).where(Assessment.id == assessment_id).with_for_update())
@@ -190,8 +215,28 @@ class SQLAlchemyAssessmentRepository:
             AssignmentParticipant.assignment_id == assignment_id).order_by(AssignmentParticipant.student_id))).all())
         return self._assignment_record(row, ids)
 
+    async def get_assignment_scoped(self, assignment_id: UUID, scope: ObjectAccessScope):
+        statement = (select(Assignment).join(Assessment, Assessment.id == Assignment.assessment_id)
+                     .where(Assignment.id == assignment_id))
+        if not scope.unrestricted:
+            statement = statement.where(Assessment.created_by == scope.actor_id)
+        row = await self.session.scalar(statement)
+        if row is None:
+            return None
+        ids = tuple((await self.session.scalars(select(AssignmentParticipant.student_id).where(
+            AssignmentParticipant.assignment_id == assignment_id).order_by(
+                AssignmentParticipant.student_id))).all())
+        return self._assignment_record(row, ids)
+
     async def lock_assignment(self, assignment_id: UUID):
         return await self.session.scalar(select(Assignment).where(Assignment.id == assignment_id).with_for_update())
+
+    async def lock_assignment_scoped(self, assignment_id: UUID, scope: ObjectAccessScope):
+        statement = (select(Assignment).join(Assessment, Assessment.id == Assignment.assessment_id)
+                     .where(Assignment.id == assignment_id).with_for_update())
+        if not scope.unrestricted:
+            statement = statement.where(Assessment.created_by == scope.actor_id)
+        return await self.session.scalar(statement)
 
     async def close_assignment(self, assignment_id: UUID, now: datetime, actor_id: UUID):
         await self.session.execute(update(Assignment).where(Assignment.id == assignment_id).values(

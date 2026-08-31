@@ -10,7 +10,8 @@ from app.application.principal import Principal
 from app.application.capabilities import CONTENT_EDIT, CONTENT_READ, STUDENT_ASSIGNMENTS_READ, STUDENT_ATTEMPTS_SUBMIT
 from app.config import Settings, get_settings
 from app.db.session import async_session_factory
-from app.infrastructure.models import Attachment, TaskVersion, TaskVersionAttachment
+from app.infrastructure.models import Attachment, Task, TaskVersion, TaskVersionAttachment
+from app.application.object_access import object_access_scope
 from app.infrastructure.assessment_models import (AssignmentParticipant,
     StudentAnswer, StudentAnswerAttachment, StudentSubmission)
 from app.presentation.auth_dependencies import (enforce_capability, require_any_capability,
@@ -34,18 +35,25 @@ async def payload(request:Request,filename:str,mime:str,settings:Settings):
     (root/ref).write_bytes(data)
     return Attachment(filename=clean,mime_type=mime,storage_reference=ref,size_bytes=len(data))
 
-@router.post("/content-bank/task-versions/{version_id}/attachments",status_code=201, dependencies=[Depends(require_capability(CONTENT_EDIT))])
-async def upload_task(version_id:UUID,request:Request,role:str,x_filename:str=Header(...),content_type:str=Header(...),settings:Settings=Depends(get_settings)):
+@router.post("/content-bank/task-versions/{version_id}/attachments",status_code=201)
+async def upload_task(version_id:UUID,request:Request,role:str,x_filename:str=Header(...),content_type:str=Header(...),settings:Settings=Depends(get_settings),principal:Principal=Depends(require_capability(CONTENT_EDIT))):
     if role not in ROLES: raise HTTPException(422,"Unsupported attachment role")
     async with async_session_factory() as s:
-        version=await s.get(TaskVersion,version_id)
+        scope=object_access_scope(principal)
+        statement=select(TaskVersion).join(Task).where(TaskVersion.id==version_id)
+        if not scope.unrestricted: statement=statement.where(Task.created_by==scope.actor_id)
+        version=await s.scalar(statement)
         if not version: raise HTTPException(404,"Task version not found")
         if version.status!="draft": raise HTTPException(409,"Attachments can only be changed on draft versions")
         a=await payload(request,x_filename,content_type,settings);s.add(a);await s.flush();s.add(TaskVersionAttachment(task_version_id=version_id,attachment_id=a.id,role=role));await s.commit();await s.refresh(a);return serialize(a,role)
 
-@router.get("/content-bank/task-versions/{version_id}/attachments", dependencies=[Depends(require_capability(CONTENT_READ))])
-async def task_files(version_id:UUID):
+@router.get("/content-bank/task-versions/{version_id}/attachments")
+async def task_files(version_id:UUID,principal:Principal=Depends(require_capability(CONTENT_READ))):
     async with async_session_factory() as s:
+        scope=object_access_scope(principal)
+        visible=select(TaskVersion.id).join(Task).where(TaskVersion.id==version_id)
+        if not scope.unrestricted: visible=visible.where((Task.created_by==scope.actor_id)|((TaskVersion.status=="approved")&Task.archived_at.is_(None)))
+        if await s.scalar(visible) is None: raise HTTPException(404,"Task version not found")
         rows=(await s.execute(select(Attachment,TaskVersionAttachment.role).join(TaskVersionAttachment).where(TaskVersionAttachment.task_version_id==version_id).order_by(Attachment.created_at,Attachment.id))).all()
         return {"items":[serialize(a,r) for a,r in rows]}
 
@@ -82,6 +90,11 @@ async def content(attachment_id:UUID, settings:Settings=Depends(get_settings), p
             .join(StudentAnswerAttachment, StudentAnswerAttachment.student_answer_id == StudentAnswer.id)
             .where(StudentAnswerAttachment.attachment_id == attachment_id)
         )
+        content_parent = await s.execute(select(Task.created_by, TaskVersion.status, Task.archived_at)
+            .join(TaskVersion, TaskVersion.task_id == Task.id)
+            .join(TaskVersionAttachment, TaskVersionAttachment.task_version_id == TaskVersion.id)
+            .where(TaskVersionAttachment.attachment_id == attachment_id))
+        content_parent = content_parent.one_or_none()
     if not a:
         raise HTTPException(404, "Attachment not found")
     if student_owner is not None:
@@ -92,6 +105,12 @@ async def content(attachment_id:UUID, settings:Settings=Depends(get_settings), p
             raise HTTPException(404, "Attachment not found")
     else:
         enforce_capability(principal, CONTENT_READ)
+        if content_parent is None:
+            raise HTTPException(404, "Attachment not found")
+        scope=object_access_scope(principal)
+        owner,status,archived_at=content_parent
+        if not scope.unrestricted and owner!=scope.actor_id and not (status=="approved" and archived_at is None):
+            raise HTTPException(404, "Attachment not found")
     path=Path(settings.attachment_storage_path)/a.storage_reference
     if not path.is_file():raise HTTPException(404,"Attachment content not found")
     return FileResponse(path,media_type=a.mime_type,filename=a.filename,headers={"Content-Disposition":f'inline; filename="{a.filename}"',"X-Content-Type-Options":"nosniff","Content-Security-Policy":"default-src 'none'; sandbox"})
