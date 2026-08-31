@@ -4,16 +4,17 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from app.application.principal import Principal
+from app.application.capabilities import IMAGE_SOLVING_USE
 from app.application.input_artifacts import (ArtifactError, ArtifactOwnershipService,
     ArtifactUploadService, MAX_ARTIFACT_SIZE_BYTES)
 from app.config import Settings, get_settings
 from app.db.session import get_session
 from app.infrastructure.artifact_storage import FilesystemArtifactStorage
 from app.infrastructure.input_artifact_repository import SqlAlchemyArtifactRepository
-from app.presentation.auth_dependencies import require_principal
+from app.presentation.auth_dependencies import require_capability, require_trusted_origin
 from app.presentation.image_artifact_schemas import ImageArtifactResponse
 
-router = APIRouter(prefix="/api/image-solving/artifacts", tags=["image-solving"])
+router = APIRouter(prefix="/api/image-solving/artifacts", tags=["image-solving"], dependencies=[Depends(require_trusted_origin)])
 _UPLOAD_FIELDS = frozenset({"file", "context"})
 
 def response(record) -> ImageArtifactResponse:
@@ -33,7 +34,7 @@ def translate(exc: ArtifactError) -> HTTPException:
 @router.post("", response_model=ImageArtifactResponse, status_code=201)
 async def upload(request: Request,
         upload_service: ArtifactUploadService = Depends(service),
-        principal: Principal = Depends(require_principal)):
+        principal: Principal = Depends(require_capability(IMAGE_SOLVING_USE))):
     form = await request.form()
     # Keep server-owned metadata out of the public contract. Rejecting unknown
     # fields also prevents clients from assuming that a supplied value was used.
@@ -57,7 +58,7 @@ async def upload(request: Request,
 
 @router.get("/{artifact_id}", response_model=ImageArtifactResponse)
 async def metadata(artifact_id: UUID, db=Depends(get_session),
-        principal: Principal = Depends(require_principal)):
+        principal: Principal = Depends(require_capability(IMAGE_SOLVING_USE))):
     try:
         record = await ArtifactOwnershipService(SqlAlchemyArtifactRepository(db)).get_owned_artifact(
             artifact_id=artifact_id, owner_id=principal.user_id)

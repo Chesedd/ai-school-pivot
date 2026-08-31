@@ -8,7 +8,8 @@ from app.application.assessments import (AddAssessmentItemCommand, AssessmentSer
     ChangeAssessmentItemPointsCommand, CreateAssessmentCommand,
     PublishAssessmentCommand, ReorderAssessmentItemsCommand, UpdateAssessmentCommand)
 from app.application.content_bank import ActorContext
-from app.config import Settings, get_settings
+from app.application.capabilities import ASSESSMENT_CREATE, ASSESSMENT_MANAGE
+from app.application.principal import Principal
 from app.db.session import async_session_factory
 from app.infrastructure.assessment_repository import SQLAlchemyAssessmentUnitOfWork
 from app.presentation.assessment_schemas import (AssessmentCreateRequest, AssessmentItemCreateRequest,
@@ -17,25 +18,31 @@ from app.presentation.assessment_schemas import (AssessmentCreateRequest, Assess
     TeacherAssignmentPage, VariantCreateRequest, VariantResponse)
 from app.presentation.assessment_schemas import (AssignmentResponse, EmptyRequest,
     PublicationResponse, PublishAssessmentRequest)
+from app.presentation.auth_dependencies import require_capability, require_trusted_origin
 
-router = APIRouter(prefix="/api/assessment-core")
+router = APIRouter(prefix="/api/assessment-core", dependencies=[Depends(require_trusted_origin)])
 
 
 def service() -> AssessmentService:
     return AssessmentService(SQLAlchemyAssessmentUnitOfWork(async_session_factory))
 
 
-def actor(settings: Settings = Depends(get_settings)) -> ActorContext:
-    return ActorContext(settings.content_bank_dev_actor_id)
+def actor_for(capability: str):
+    def actor(principal: Principal = Depends(require_capability(capability))) -> ActorContext:
+        return ActorContext(principal.user_id)
+    return actor
+
+manage_actor = actor_for(ASSESSMENT_MANAGE)
+create_actor = actor_for(ASSESSMENT_CREATE)
 
 @router.get("/class-groups", response_model=AssessmentClassGroupPage)
-async def list_class_groups(context: Annotated[ActorContext, Depends(actor)],
+async def list_class_groups(context: Annotated[ActorContext, Depends(manage_actor)],
         offset: Annotated[int, Query(ge=0)] = 0, limit: Annotated[int, Query(ge=1, le=100)] = 20):
     return await service().list_class_groups(offset, limit, context)
 
 @router.get("/assessments/{assessment_id}/assignments", response_model=TeacherAssignmentPage)
 async def list_assessment_assignments(assessment_id: UUID,
-        context: Annotated[ActorContext, Depends(actor)], offset: Annotated[int, Query(ge=0)] = 0,
+        context: Annotated[ActorContext, Depends(manage_actor)], offset: Annotated[int, Query(ge=0)] = 0,
         limit: Annotated[int, Query(ge=1, le=100)] = 20):
     return await service().list_assignments(assessment_id, offset, limit, context)
 
@@ -52,7 +59,7 @@ def assessment_view(row):
 
 
 @router.get("/assessments", response_model=AssessmentListPage)
-async def list_assessments(context: Annotated[ActorContext, Depends(actor)], status: Literal["draft", "published"] | None = None, offset: Annotated[int, Query(ge=0)] = 0, limit: Annotated[int, Query(ge=1, le=100)] = 20):
+async def list_assessments(context: Annotated[ActorContext, Depends(manage_actor)], status: Literal["draft", "published"] | None = None, offset: Annotated[int, Query(ge=0)] = 0, limit: Annotated[int, Query(ge=1, le=100)] = 20):
     result = await service().list(status, offset, limit, context)
     result["items"] = [{"id": x.id, "title": x.title, "description": x.description, "status": x.status,
                         "variant_count": len(x.variants), "created_at": x.created_at, "updated_at": x.updated_at,
@@ -61,32 +68,32 @@ async def list_assessments(context: Annotated[ActorContext, Depends(actor)], sta
 
 
 @router.post("/assessments", response_model=AssessmentResponse, status_code=201)
-async def create_assessment(payload: AssessmentCreateRequest, response: Response, context: Annotated[ActorContext, Depends(actor)]):
+async def create_assessment(payload: AssessmentCreateRequest, response: Response, context: Annotated[ActorContext, Depends(create_actor)]):
     result = await service().create(CreateAssessmentCommand(payload.title, payload.description), context)
     response.headers["Location"] = f"/api/assessment-core/assessments/{result.id}"
     return assessment_view(result)
 
 
 @router.get("/assessments/{assessment_id}", response_model=AssessmentResponse)
-async def get_assessment(assessment_id: UUID, context: Annotated[ActorContext, Depends(actor)]):
+async def get_assessment(assessment_id: UUID, context: Annotated[ActorContext, Depends(manage_actor)]):
     return assessment_view(await service().get(assessment_id, context))
 
 
 @router.patch("/assessments/{assessment_id}", response_model=AssessmentResponse)
-async def patch_assessment(assessment_id: UUID, payload: AssessmentPatchRequest, context: Annotated[ActorContext, Depends(actor)]):
+async def patch_assessment(assessment_id: UUID, payload: AssessmentPatchRequest, context: Annotated[ActorContext, Depends(manage_actor)]):
     values = payload.model_dump(include=payload.model_fields_set - {"expected_updated_at"})
     return assessment_view(await service().update(UpdateAssessmentCommand(assessment_id, payload.expected_updated_at, values), context))
 
 
 @router.post("/assessments/{assessment_id}/variants", response_model=VariantResponse, status_code=201)
-async def create_variant(assessment_id: UUID, payload: VariantCreateRequest, response: Response, context: Annotated[ActorContext, Depends(actor)]):
+async def create_variant(assessment_id: UUID, payload: VariantCreateRequest, response: Response, context: Annotated[ActorContext, Depends(manage_actor)]):
     result = await service().create_variant(assessment_id, payload.name, context)
     response.headers["Location"] = f"/api/assessment-core/assessments/{assessment_id}/variants/{result.id}"
     return result
 
 
 @router.delete("/assessments/{assessment_id}/variants/{variant_id}", status_code=204)
-async def delete_variant(assessment_id: UUID, variant_id: UUID, context: Annotated[ActorContext, Depends(actor)]):
+async def delete_variant(assessment_id: UUID, variant_id: UUID, context: Annotated[ActorContext, Depends(manage_actor)]):
     await service().delete_variant(assessment_id, variant_id, context)
     return Response(status_code=204)
 
@@ -94,7 +101,7 @@ async def delete_variant(assessment_id: UUID, variant_id: UUID, context: Annotat
 @router.post("/assessments/{assessment_id}/variants/{variant_id}/items",
              response_model=AssessmentItemResponse, status_code=201)
 async def add_item(assessment_id: UUID, variant_id: UUID, payload: AssessmentItemCreateRequest,
-                   response: Response, context: Annotated[ActorContext, Depends(actor)]):
+                   response: Response, context: Annotated[ActorContext, Depends(manage_actor)]):
     result = await service().add_item(AddAssessmentItemCommand(
         assessment_id, variant_id, payload.task_version_id, payload.points), context)
     response.headers["Location"] = (
@@ -104,14 +111,14 @@ async def add_item(assessment_id: UUID, variant_id: UUID, payload: AssessmentIte
 
 @router.delete("/assessments/{assessment_id}/variants/{variant_id}/items/{item_id}", status_code=204)
 async def delete_item(assessment_id: UUID, variant_id: UUID, item_id: UUID,
-                      context: Annotated[ActorContext, Depends(actor)]):
+                      context: Annotated[ActorContext, Depends(manage_actor)]):
     await service().delete_item(assessment_id, variant_id, item_id, context)
     return Response(status_code=204)
 
 
 @router.put("/assessments/{assessment_id}/variants/{variant_id}/item-order", response_model=VariantResponse)
 async def reorder_items(assessment_id: UUID, variant_id: UUID, payload: AssessmentItemOrderRequest,
-                        context: Annotated[ActorContext, Depends(actor)]):
+                        context: Annotated[ActorContext, Depends(manage_actor)]):
     return await service().reorder_items(ReorderAssessmentItemsCommand(
         assessment_id, variant_id, tuple(payload.item_ids), payload.expected_updated_at), context)
 
@@ -120,14 +127,14 @@ async def reorder_items(assessment_id: UUID, variant_id: UUID, payload: Assessme
               response_model=AssessmentItemResponse)
 async def patch_item(assessment_id: UUID, variant_id: UUID, item_id: UUID,
                      payload: AssessmentItemPatchRequest,
-                     context: Annotated[ActorContext, Depends(actor)]):
+                     context: Annotated[ActorContext, Depends(manage_actor)]):
     return await service().change_item_points(ChangeAssessmentItemPointsCommand(
         assessment_id, variant_id, item_id, payload.points, payload.expected_updated_at), context)
 
 
 @router.post("/assessments/{assessment_id}/publish-and-assign", response_model=PublicationResponse, status_code=201)
 async def publish_and_assign(assessment_id: UUID, payload: PublishAssessmentRequest, response: Response,
-                             context: Annotated[ActorContext, Depends(actor)]):
+                             context: Annotated[ActorContext, Depends(manage_actor)]):
     result = await service().publish_and_assign(PublishAssessmentCommand(
         assessment_id, payload.class_group_id, payload.start_at, payload.due_at, payload.max_attempts), context)
     response.headers["Location"] = f"/api/assessment-core/assignments/{result.assignment.id}"
@@ -135,11 +142,11 @@ async def publish_and_assign(assessment_id: UUID, payload: PublishAssessmentRequ
 
 
 @router.get("/assignments/{assignment_id}", response_model=AssignmentResponse)
-async def get_assignment(assignment_id: UUID, context: Annotated[ActorContext, Depends(actor)]):
+async def get_assignment(assignment_id: UUID, context: Annotated[ActorContext, Depends(manage_actor)]):
     return await service().get_assignment(assignment_id, context)
 
 
 @router.post("/assignments/{assignment_id}/close", response_model=AssignmentResponse)
 async def close_assignment(assignment_id: UUID, payload: EmptyRequest,
-                           context: Annotated[ActorContext, Depends(actor)]):
+                           context: Annotated[ActorContext, Depends(manage_actor)]):
     return await service().close_assignment(assignment_id, context)

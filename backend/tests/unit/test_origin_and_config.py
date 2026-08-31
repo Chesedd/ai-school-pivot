@@ -33,7 +33,6 @@ def test_wildcard_credentialed_cors_is_invalid():
     with pytest.raises(ValidationError):
         Settings(
             database_url="postgresql+asyncpg://u:p@localhost/db",
-            content_bank_dev_actor_id=uuid4(),
             cors_origins="*",
         )
 

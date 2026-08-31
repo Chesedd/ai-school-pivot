@@ -3,7 +3,6 @@ import os
 from uuid import uuid4
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://user:pass@localhost/db")
-os.environ.setdefault("CONTENT_BANK_DEV_ACTOR_ID", "00000000-0000-4000-8000-000000000001")
 
 from fastapi.testclient import TestClient
 
@@ -23,7 +22,7 @@ class RecordingService:
 
 
 def principal(user_id, student_id):
-    return Principal(user_id, "account", "Student", frozenset(), frozenset(), student_id)
+    return Principal(user_id, "account", "Student", frozenset({"student"}), frozenset({"student.assignments.read", "student.attempts.submit", "student.results.read"}), student_id)
 
 
 def test_assignment_list_uses_link_not_user_or_spoofed_identity(monkeypatch):

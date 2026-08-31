@@ -20,7 +20,6 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
 os.environ["DATABASE_URL"] = database_url
-os.environ.setdefault("CONTENT_BANK_DEV_ACTOR_ID", "00000000-0000-4000-8000-000000000001")
 
 from app.db.session import async_session_factory, engine  # noqa: E402
 from app.main import app  # noqa: E402
@@ -333,7 +332,7 @@ async def _clone_revision(task_id, source_version_no=1):
     """Exercise the retained internal revision mechanism, not a public route."""
     return await CreateVersionService(SQLAlchemyUnitOfWork(async_session_factory)).create(
         CreateVersionCommand(UUID(str(task_id)), source_version_no),
-        ActorContext(UUID(os.environ["CONTENT_BANK_DEV_ACTOR_ID"])),
+        ActorContext(UUID("00000000-0000-4000-8000-000000000001")),
     )
 
 

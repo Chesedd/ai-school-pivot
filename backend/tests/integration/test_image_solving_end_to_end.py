@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 URL = os.environ.get("TEST_DATABASE_URL", "")
 os.environ.setdefault("DATABASE_URL", URL or "postgresql+asyncpg://unit:unit@localhost/unit")
-os.environ.setdefault("CONTENT_BANK_DEV_ACTOR_ID", "00000000-0000-4000-8000-000000000001")
 
 from app.application.image_solving import ImageSolvingService
 from app.application.image_solving_api import ImageSolvingApplicationService
