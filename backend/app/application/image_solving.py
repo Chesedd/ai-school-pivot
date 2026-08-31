@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from decimal import Decimal
 import logging
+from time import monotonic
 from typing import Protocol
 from uuid import UUID
 
@@ -32,6 +33,7 @@ class ImageSolvingRepository(Protocol):
     async def save_checkpoint(self, session_id: UUID, stage: str, payload: object,
                               status: ImageSolvingStatus, **kwargs) -> ImageSolvingSession: ...
     async def fail(self, session_id: UUID, code: str) -> None: ...
+    async def retry_solver(self, session_id: UUID) -> bool: ...
 
 
 class ArtifactIntegrityVerifier(Protocol):
@@ -96,8 +98,16 @@ class ImageSolvingService:
     async def resume(self, *, session_id: UUID, owner_id: UUID,
                      user_context: str = "Solve the task shown in this artifact") -> ImageSolvingSession:
         state = await self.get_state(session_id=session_id, owner_id=owner_id)
-        if state.validation_checkpoint is not None or state.lifecycle_status is ImageSolvingStatus.FAILED:
+        retried_failure_code = None
+        if state.validation_checkpoint is not None:
             return state
+        if state.lifecycle_status is ImageSolvingStatus.FAILED:
+            if state.extraction_checkpoint is None or state.solver_checkpoint is not None:
+                return state
+            retried_failure_code = state.failure_code
+            if not await self.repository.retry_solver(session_id):
+                return state
+            state = await self.get_state(session_id=session_id, owner_id=owner_id)
         artifact = await self.artifacts.get_owned_artifact(artifact_id=state.input_artifact_id, owner_id=owner_id)
         if await self.integrity.sha256(artifact) != artifact.content_hash_sha256:
             await self.repository.fail(session_id, "artifact_integrity_failed")
@@ -119,12 +129,15 @@ class ImageSolvingService:
                 if not await self.repository.claim(session_id, ImageSolvingStatus.EXTRACTED, ImageSolvingStatus.SOLVING):
                     raise ImageSolvingError("session_in_progress")
                 solver_input = SolverInputV1.from_extraction(extraction)
+                attempt_started = monotonic()
+                retry_count = 0
                 try:
                     solution = await self.solver.solve(solver_input)
                 except ProviderFailure as exc:
                     if exc.code not in {FailureCode.TIMEOUT, FailureCode.CONNECTION_ERROR,
                                         FailureCode.PROVIDER_UNAVAILABLE}:
                         raise
+                    retry_count = 1
                     await asyncio.sleep(0.1)
                     solution = await self.solver.solve(solver_input)
                 state = await self.repository.save_checkpoint(session_id, "solver", solution,
@@ -138,7 +151,22 @@ class ImageSolvingService:
         except Exception as exc:
             port = self.extractor if stage == "extraction" else self.solver if stage == "solver" else None
             failure_code = exc.code.value if isinstance(exc, ProviderFailure) else None
-            logger.error(f"image solving {stage} failed", extra={
+            failure_code = failure_code or "unexpected_internal_error"
+            telemetry = getattr(port, "last_telemetry", None)
+            latency_ms = (getattr(telemetry, "latency_ms", None) if telemetry else
+                max(0, int((monotonic() - attempt_started) * 1000)) if stage == "solver" else None)
+            detail = getattr(exc, "adapter_detail", "") or "none"
+            # Put diagnostics in the message because the production formatter does
+            # not render LogRecord ``extra`` fields.
+            logger.error(
+                "image solving stage failed session_id=%s stage=%s provider=%s "
+                "model=%s failure_code=%s exception=%s detail=%r request_id=%s "
+                "latency_ms=%s retry_count=%s",
+                session_id, stage, getattr(port, "provider_id", "unknown"),
+                getattr(port, "model_id", "unknown"), failure_code,
+                type(exc).__name__, detail,
+                getattr(telemetry, "provider_request_id", None), latency_ms,
+                retry_count if stage == "solver" else 0, extra={
                 "session_id": str(session_id), "stage": stage,
                 "provider": getattr(port, "provider_id", "unknown"),
                 "model": getattr(port, "model_id", "unknown"),
@@ -146,7 +174,10 @@ class ImageSolvingService:
                 "exception_category": type(exc).__name__,
                 "validation_reason": getattr(exc, "adapter_detail", "") or None,
             })
-            await self.repository.fail(session_id, "pipeline_failed")
+            persisted_code = ("malformed_response_retried"
+                if retried_failure_code == "malformed_response" and
+                failure_code == "malformed_response" else failure_code)
+            await self.repository.fail(session_id, persisted_code)
             raise
 
     @staticmethod

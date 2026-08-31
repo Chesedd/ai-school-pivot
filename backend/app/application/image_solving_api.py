@@ -71,7 +71,9 @@ class ImageSolvingApplicationService:
         try: state = await self.flow.create_session(owner_id=owner_id, input_artifact_id=request.artifact_id)
         except Exception as exc: self._raise(exc)
         return ImageSolvingSessionResponse(session_id=state.session_id,
-            artifact_id=state.input_artifact_id, status=state.lifecycle_status.value)
+            artifact_id=state.input_artifact_id, status=state.lifecycle_status.value,
+            failure_code=state.failure_code,
+            failure_stage=self._failure_stage(state))
 
     async def _owned(self, session_id: UUID, owner_id: UUID):
         try: return await self.flow.get_state(session_id=session_id, owner_id=owner_id)
@@ -81,7 +83,9 @@ class ImageSolvingApplicationService:
         try: state = await self.flow.resume(session_id=session_id, owner_id=owner_id)
         except Exception as exc: self._raise(exc)
         return ImageSolvingSessionResponse(session_id=state.session_id,
-            artifact_id=state.input_artifact_id, status=state.lifecycle_status.value)
+            artifact_id=state.input_artifact_id, status=state.lifecycle_status.value,
+            failure_code=state.failure_code,
+            failure_stage=self._failure_stage(state))
 
     async def state(self, session_id: UUID, owner_id: UUID):
         state = await self._owned(session_id, owner_id)
@@ -92,7 +96,15 @@ class ImageSolvingApplicationService:
             validation="completed" if state.validation_checkpoint else "pending")
         return ImageSolvingStateResponse(session_id=state.session_id,
             artifact_id=state.input_artifact_id, status=lifecycle, stages=stages,
+            failure_code=state.failure_code, failure_stage=self._failure_stage(state),
             created_at=state.created_at, updated_at=state.updated_at)
+
+    @staticmethod
+    def _failure_stage(state):
+        if state.lifecycle_status.value != "failed": return None
+        if state.extraction_checkpoint is None: return "extraction"
+        if state.solver_checkpoint is None: return "solver"
+        return "validation"
 
     async def result(self, session_id: UUID, owner_id: UUID):
         state = await self._owned(session_id, owner_id)

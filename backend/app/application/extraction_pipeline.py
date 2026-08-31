@@ -74,7 +74,15 @@ SOLVER_SYSTEM = (
     "mathematically correct final-answer form, and required foreign-language answers; "
     "do not translate them incorrectly. The status field is a machine field: use "
     "the exact schema value `solved` and never translate it into Russian. Russian-first "
-    "applies to reasoning text, not machine enums."
+    "applies to reasoning text, not machine enums. Give a concise but sufficient "
+    "worked solution: formulas, substitutions, transformations, units, and useful "
+    "verification, without exhaustive hidden reasoning. When relevant, identify known "
+    "quantities, preserve units, symbols and indices exactly, state necessary unit "
+    "conversions, distinguish scalar and vector quantities, and give the final answer "
+    "with its unit. Use supplied values and constants. If a standard school-level "
+    "physical constant is required, state the conventional value briefly. Never invent "
+    "missing givens; for a genuinely underspecified task return a controlled schema-valid "
+    "result explaining that no determinate answer is possible."
 )
 
 

@@ -13,6 +13,7 @@ from app.application.image_solving_contracts import (
 from app.infrastructure.image_solving_repository import (
     SqlAlchemyImageSolvingRepository, _deserialize_checkpoint,
 )
+from app.application.image_solving_promotion import validate_persisted_checkpoints
 
 EXTRACTION = ExtractionResultV1(
     extracted_text="7 · (X - 3) = 21",
@@ -43,6 +44,18 @@ def test_strict_checkpoint_roundtrips_through_jsonb_representation(original):
 
     assert restored == original
     assert restored.fingerprint == original.fingerprint
+
+
+def test_promotion_uses_the_same_strict_jsonb_roundtrip_and_provenance():
+    # model_dump(mode="json") is the exact dict/list/string representation
+    # returned after PostgreSQL JSONB persistence, including Decimal strings.
+    values = {"extraction": EXTRACTION, "solver": SOLUTION,
+        "validation": VALIDATION}
+    rows = {name: SimpleNamespace(payload=value.model_dump(mode="json"),
+        fingerprint=value.fingerprint) for name, value in values.items()}
+    restored = validate_persisted_checkpoints(rows)
+    assert restored == values
+    assert restored["validation"].findings == ()  # findings remain advisory
 
 
 @pytest.mark.parametrize("mutation", [
