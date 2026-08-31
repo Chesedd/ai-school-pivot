@@ -8,7 +8,6 @@ import pytest
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://unit:unit@localhost/unit")
 os.environ.setdefault("CONTENT_BANK_DEV_ACTOR_ID", "00000000-0000-4000-8000-000000000001")
-os.environ.setdefault("ASSESSMENT_DEV_STUDENT_ID", "00000000-0000-4000-8000-000000000002")
 
 from app.application.authoring import FailureCode, ProviderFailure
 from app.config import Settings
@@ -20,7 +19,6 @@ from app.presentation.image_solving_routes import image_solving_service, metadat
 def settings(**overrides):
     values = dict(database_url="postgresql+asyncpg://unit:unit@localhost/unit",
         content_bank_dev_actor_id="00000000-0000-4000-8000-000000000001",
-        assessment_dev_student_id="00000000-0000-4000-8000-000000000002",
         anthropic_auth_token=None, anthropic_api_key=None,
         anthropic_base_url=None)
     values.update(overrides)
