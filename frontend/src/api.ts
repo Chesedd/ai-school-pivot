@@ -2,7 +2,14 @@ import type {Methodology} from "./methodology";
 export const apiBase=import.meta.env.VITE_API_BASE_URL??"http://localhost:8000";
 export type ValidationIssue={field?:string;code?:string;message:string};
 export class ApiError extends Error{constructor(public status:number,public code:string,message:string,public details:any=[]){super(message)}}
-export async function request<T=any>(path:string,init?:RequestInit):Promise<T>{const response=await fetch(`${apiBase}${path}`,init);let data:any={};try{data=await response.json()}catch{}if(!response.ok)throw new ApiError(response.status,data.error?.code??"unexpected_error",data.error?.message??"Ошибка API",data.error?.details??[]);return data as T}
+type UnauthorizedHandler=()=>void;
+let unauthorizedHandler:UnauthorizedHandler|undefined;
+export const setUnauthorizedHandler=(handler?:UnauthorizedHandler)=>{unauthorizedHandler=handler};
+export async function request<T=any>(path:string,init?:RequestInit):Promise<T>{
+ const response=await fetch(`${apiBase}${path}`,{...init,credentials:"include"});let data:any={};
+ if(response.status!==204)try{data=await response.clone().json()}catch{}
+ if(!response.ok){const detail=typeof data?.detail==="string"?data.detail:undefined;const error=new ApiError(response.status,data.error?.code??detail??"unexpected_error",data.error?.message??"Ошибка API",data.error?.details??[]);if(response.status===401&&error.code==="authentication_required")unauthorizedHandler?.();throw error}return data as T
+}
 export type Folder={id:string;subject_id:string;parent_id:string|null;name:string;depth:number;created_at:string;updated_at:string};
 export type FolderNode=Folder&{children:FolderNode[]};
 export type SubjectRoot={id:string;name:string};
