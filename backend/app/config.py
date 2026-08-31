@@ -1,5 +1,6 @@
 """Centralized typed backend configuration."""
 
+from datetime import timedelta
 from functools import lru_cache
 from uuid import UUID
 
@@ -20,6 +21,7 @@ class Settings(BaseSettings):
     attachment_storage_path: str = "/tmp/ai-school-pivot-attachments"
     attachment_max_bytes: int = 5 * 1024 * 1024
     artifact_storage_path: str = "/tmp/ai-school-pivot-image-artifacts"
+    auth_session_ttl: timedelta = timedelta(hours=12)
     openai_api_key: str | None = None
     anthropic_api_key: SecretStr | None = None
     anthropic_auth_token: SecretStr | None = None

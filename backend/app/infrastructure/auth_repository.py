@@ -6,9 +6,26 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import delete, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.auth_models import AuthSession, StudentUserLink, User, UserRole
+
+
+class DuplicateNormalizedLogin(Exception):
+    """Canonical login already exists (without leaking database details)."""
+
+
+class SessionTokenCollision(Exception):
+    """A generated session digest collided with an existing digest."""
+
+
+def _constraint_name(exc: IntegrityError) -> str | None:
+    """Read asyncpg's constraint metadata through SQLAlchemy's wrapper."""
+    original = getattr(exc, "orig", None)
+    return getattr(original, "constraint_name", None) or getattr(
+        getattr(original, "__cause__", None), "constraint_name", None
+    )
 
 
 class SQLAlchemyAuthRepository:
@@ -31,8 +48,14 @@ class SQLAlchemyAuthRepository:
             display_name=display_name,
             password_hash=password_hash,
         )
-        self.session.add(row)
-        await self.session.flush()
+        try:
+            async with self.session.begin_nested():
+                self.session.add(row)
+                await self.session.flush()
+        except IntegrityError as exc:
+            if _constraint_name(exc) == "uq_users_normalized_login":
+                raise DuplicateNormalizedLogin from exc
+            raise
         await self.session.refresh(row)
         return row
 
@@ -64,8 +87,14 @@ class SQLAlchemyAuthRepository:
         self, *, user_id: UUID, token_hash: bytes, expires_at: datetime
     ) -> AuthSession:
         row = AuthSession(user_id=user_id, token_hash=token_hash, expires_at=expires_at)
-        self.session.add(row)
-        await self.session.flush()
+        try:
+            async with self.session.begin_nested():
+                self.session.add(row)
+                await self.session.flush()
+        except IntegrityError as exc:
+            if _constraint_name(exc) == "uq_auth_sessions_token_hash":
+                raise SessionTokenCollision from exc
+            raise
         await self.session.refresh(row)
         return row
 
