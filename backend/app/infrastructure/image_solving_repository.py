@@ -81,16 +81,9 @@ class SqlAlchemyImageSolvingRepository:
             ImageSolvingMetadataRecommendationRow.session_id==session_id))
         return None if row is None else _deserialize_checkpoint(row.payload,ImageTaskMetadataRecommendationV1)
 
-    async def save_recommendation(self, session_id, value, catalog_fingerprint, provider):
-        telemetry=getattr(provider,"last_telemetry",None); route=getattr(provider,"route",None)
-        values={}
-        if telemetry is not None:
-            values={"provider_id":getattr(provider,"provider_id",None),"model_id":getattr(route,"model_id",None),
-                "provider_request_id":telemetry.provider_request_id,"input_tokens":telemetry.usage.input_tokens,
-                "output_tokens":telemetry.usage.output_tokens,"cost_amount":None if telemetry.cost is None else telemetry.cost.amount,
-                "currency":None if telemetry.cost is None else telemetry.cost.currency}
+    async def save_recommendation(self, session_id, value, catalog_fingerprint):
         self.db.add(ImageSolvingMetadataRecommendationRow(session_id=session_id,
-            payload=value.model_dump(mode="json"),catalog_fingerprint=catalog_fingerprint,**values))
+            payload=value.model_dump(mode="json"),catalog_fingerprint=catalog_fingerprint))
         try: await self.db.commit()
         except Exception:
             await self.db.rollback()

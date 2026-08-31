@@ -12,7 +12,11 @@ from app.infrastructure.extraction_providers import (AnthropicExtractionAdapter,
 
 PAYLOAD = {"extracted_text":"2 + 2?", "structured_statement":"2 + 2?",
     "detected_task_type":"calculation", "detected_answer_format":"number",
-    "choices":None, "extraction_confidence":"0.98", "ocr_issues":[]}
+    "choices":None, "extraction_confidence":"0.98", "ocr_issues":[],
+    "metadata":{"title":"Сложение чисел","subject":"Математика","grade":1,
+    "topic":"Сложение","subtopic":"Сложение натуральных чисел",
+    "skills":["Складывать натуральные числа"],"task_type":"calculation",
+    "answer_format":"number","difficulty":1,"tags":[]}}
 
 class Storage:
     def __init__(self): self.ids=[]

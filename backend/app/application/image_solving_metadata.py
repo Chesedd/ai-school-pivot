@@ -1,22 +1,20 @@
-"""Post-solve Content Bank classification, isolated from extraction and solving."""
+"""Deterministic resolution of extraction metadata against Content Bank."""
 from __future__ import annotations
 
 import hashlib
 import json
 import re
 import unicodedata
-from difflib import SequenceMatcher
 from decimal import Decimal
 from typing import Annotated, Literal, Protocol
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_validator, model_validator
 
-from app.application.content_bank import TASK_TYPES
+from app.application.content_bank import ANSWER_FORMATS, TASK_TYPES
 from app.application.image_solving import ImageSolvingError
 from app.application.image_solving_contracts import Confidence, ImageSolvingSession, ImageSolvingStatus
 
-ANSWER_FORMATS = frozenset({"single_choice", "multiple_choice", "short_text", "number", "expression", "long_text"})
 TAG_LIMIT = 8
 
 
@@ -91,7 +89,7 @@ class ImageTaskMetadataRecommendationV1(_Strict):
     answer_format: EnumRecommendationV1
     difficulty: DifficultyRecommendationV1
     subject: CatalogSelectionV1
-    grade: GradeSelectionV1
+    grade: GradeSelectionV1 | NewCatalogSelectionV1
     topic: CatalogSelectionV1
     subtopic: CatalogSelectionV1 | None = None
     skills: tuple[CatalogSelectionV1, ...] = Field(min_length=1, max_length=5)
@@ -118,6 +116,7 @@ class CatalogItemV1(_Strict):
     grade_id: UUID | None = None
     topic_id: UUID | None = None
     subtopic_id: UUID | None = None
+    grade_number: StrictInt | None = None
 
 
 class TagCandidateV1(_Strict):
@@ -143,77 +142,76 @@ class MetadataCatalogSnapshotV1(_Strict):
         return hashlib.sha256(raw.encode()).hexdigest()
 
 
-class MetadataRecommendationProvider(Protocol):
-    async def recommend(self, session: ImageSolvingSession, catalog: MetadataCatalogSnapshotV1) -> ImageTaskMetadataRecommendationV1: ...
-
-
 class MetadataRecommendationRepository(Protocol):
     async def get_recommendation(self, session_id: UUID): ...
     async def save_recommendation(self, session_id: UUID, value: ImageTaskMetadataRecommendationV1,
-                                  catalog_fingerprint: str, provider: object): ...
+                                  catalog_fingerprint: str): ...
 
 
-def validate_recommendation(value: ImageTaskMetadataRecommendationV1,
-                            catalog: MetadataCatalogSnapshotV1) -> ImageTaskMetadataRecommendationV1:
-    """Fail closed on invented IDs, invalid hierarchy, tags, and near duplicates."""
-    groups={"subject":catalog.subjects,"grade":catalog.grades,"topic":catalog.topics,
-            "subtopic":catalog.subtopics,"skill":catalog.skills,"folder":catalog.folders}
-    def existing(selection, group):
-        if selection is None or selection.kind != "existing": return None
-        row=next((x for x in groups[group] if x.id==selection.id),None)
-        if row is None: raise ValueError(f"unknown_{group}_id")
-        return row
-    subject=existing(value.subject,"subject"); grade=existing(value.grade,"grade")
-    topic=existing(value.topic,"topic"); subtopic=existing(value.subtopic,"subtopic")
-    if topic and subject and topic.subject_id != subject.id: raise ValueError("topic_subject_mismatch")
-    if topic and grade and topic.grade_id != grade.id: raise ValueError("topic_grade_mismatch")
-    if subtopic and topic and subtopic.topic_id != topic.id: raise ValueError("subtopic_topic_mismatch")
-    for skill in value.skills:
-        row=existing(skill,"skill")
-        if row and subtopic and row.subtopic_id != subtopic.id: raise ValueError("skill_subtopic_mismatch")
-        if row and not subtopic and topic and row.topic_id not in (None,topic.id): raise ValueError("skill_topic_mismatch")
-    existing(value.folder,"folder")
-    categories=set(catalog.tag_categories); active={x.id:x for x in catalog.tags}
-    def normalized(name:str)->str:
-        return re.sub(r"[^\w]+"," ",unicodedata.normalize("NFKC",name).casefold().replace("ё","е")).strip()
-    # Existing-first protection is deterministic. Provider-proposed tag spelling
-    # variants are converted to the real active tag rather than shown as "new".
-    collapsed=[]
-    for tag in value.tags:
-        if tag.kind=="new":
-            candidate=max(catalog.tags,key=lambda x:SequenceMatcher(None,normalized(tag.name),normalized(x.name)).ratio(),default=None)
-            if candidate and SequenceMatcher(None,normalized(tag.name),normalized(candidate.name)).ratio()>=.82:
-                if subject and candidate.subject_id not in (None,subject.id): raise ValueError("tag_subject_mismatch")
-                collapsed.append(ExistingTagRecommendationV1(kind="existing",id=candidate.id,
-                    confidence=tag.confidence,reason=f"Найден близкий существующий тег: {candidate.name}."))
-                continue
-        collapsed.append(tag)
-    # Preserve objects while removing duplicates introduced by collapsing.
-    unique=[];seen=set()
-    for tag in collapsed:
-        key=(tag.kind,getattr(tag,"id",None),getattr(tag,"name",None))
-        if key not in seen:seen.add(key);unique.append(tag)
-    value=value.model_copy(update={"tags":tuple(unique)})
-    for tag in value.tags:
-        if tag.kind=="existing":
-            row=active.get(tag.id)
-            if row is None: raise ValueError("unknown_or_inactive_tag_id")
-            if subject and row.subject_id not in (None,subject.id): raise ValueError("tag_subject_mismatch")
-        else:
-            if tag.category_code not in categories: raise ValueError("unknown_tag_category")
-            if subject and tag.subject_scope not in (None,subject.id): raise ValueError("tag_subject_mismatch")
-    # Do not allow an obvious taxonomy duplicate to escape as a NEW proposal.
-    for selection,rows in ((value.subject,catalog.subjects),(value.topic,catalog.topics),
-                           (value.subtopic,catalog.subtopics),*[(x,catalog.skills) for x in value.skills]):
-        if selection is not None and selection.kind=="new" and any(
-                normalized(selection.proposed_name)==normalized(row.name) for row in rows):
-            raise ValueError("new_catalog_duplicate")
-    return value
+def _normalized(name: str) -> str:
+    return re.sub(r"[^\w]+", " ", unicodedata.normalize("NFKC", name)
+        .casefold().replace("ё", "е")).strip()
+
+
+def _unique_match(name, rows):
+    matches = [row for row in rows if _normalized(row.name) == _normalized(name)]
+    return matches[0] if len(matches) == 1 else None
+
+
+def resolve_metadata(session: ImageSolvingSession,
+                     catalog: MetadataCatalogSnapshotV1) -> ImageTaskMetadataRecommendationV1:
+    """Resolve only unique canonical textual matches inside the chosen hierarchy."""
+    semantic = session.extraction_checkpoint.metadata
+    one, none = Decimal("1"), Decimal("0")
+    def selection(name, row, parent_id=None):
+        if row is not None:
+            return ExistingCatalogSelectionV1(kind="existing", id=row.id, confidence=one,
+                reason="Точное совпадение с текущим каталогом.")
+        return NewCatalogSelectionV1(kind="new", proposed_name=name, parent_id=parent_id,
+            confidence=none, reason="Безопасное совпадение в текущем каталоге не найдено.")
+
+    subject = _unique_match(semantic.subject, catalog.subjects)
+    grades = [row for row in catalog.grades if row.grade_number == semantic.grade]
+    grade = grades[0] if len(grades) == 1 else None
+    topics = [row for row in catalog.topics if subject and grade and
+        row.subject_id == subject.id and row.grade_id == grade.id]
+    topic = _unique_match(semantic.topic, topics)
+    subs = [row for row in catalog.subtopics if topic and row.topic_id == topic.id]
+    subtopic = _unique_match(semantic.subtopic, subs) if semantic.subtopic else None
+    skill_rows = [row for row in catalog.skills if
+        (subtopic and row.subtopic_id == subtopic.id) or
+        (not semantic.subtopic and topic and row.topic_id == topic.id)]
+    skills = tuple(selection(name, _unique_match(name, skill_rows),
+        subtopic.id if subtopic else None) for name in semantic.skills)
+    tags = []
+    for name in semantic.tags:
+        compatible = [row for row in catalog.tags if subject and row.subject_id in (None, subject.id)]
+        row = _unique_match(name, compatible)
+        tags.append(ExistingTagRecommendationV1(kind="existing", id=row.id, confidence=one,
+            reason="Точное совпадение с активным совместимым тегом.") if row else
+            NewTagRecommendationV1(kind="new", name=name, category_code="unresolved",
+                subject_scope=subject.id if subject else None, confidence=none,
+                reason="Безопасное совместимое совпадение с активным тегом не найдено."))
+    grade_selection = (GradeSelectionV1(kind="existing", id=grade.id, confidence=one,
+        reason="Класс точно совпал по номеру.") if grade else
+        NewCatalogSelectionV1(kind="new", proposed_name=str(semantic.grade), confidence=none,
+            reason="Класс с таким номером однозначно не найден."))
+    return ImageTaskMetadataRecommendationV1(title_suggestion=semantic.title,
+        task_type=EnumRecommendationV1(value=semantic.task_type, confidence=one,
+            reason="Предложено при анализе изображения."),
+        answer_format=EnumRecommendationV1(value=semantic.answer_format, confidence=one,
+            reason="Предложено при анализе изображения."),
+        difficulty=DifficultyRecommendationV1(value=semantic.difficulty, confidence=one,
+            reason="Предложено при анализе изображения."),
+        subject=selection(semantic.subject, subject), grade=grade_selection,
+        topic=selection(semantic.topic, topic, subject.id if subject else None),
+        subtopic=(selection(semantic.subtopic, subtopic, topic.id if topic else None)
+            if semantic.subtopic else None), skills=skills, tags=tuple(tags), folder=None)
 
 
 class MetadataRecommendationService:
-    def __init__(self, sessions, repository: MetadataRecommendationRepository, catalog_loader, provider):
-        self.sessions,self.repository,self.catalog_loader,self.provider=sessions,repository,catalog_loader,provider
+    def __init__(self, sessions, repository: MetadataRecommendationRepository, catalog_loader):
+        self.sessions,self.repository,self.catalog_loader=sessions,repository,catalog_loader
 
     async def get(self, session_id: UUID, owner_id: UUID):
         session=await self.sessions.get_state(session_id=session_id,owner_id=owner_id)
@@ -228,5 +226,5 @@ class MetadataRecommendationService:
         cached=await self.repository.get_recommendation(session_id)
         if cached is not None: return cached
         catalog=await self.catalog_loader.load()
-        result=validate_recommendation(await self.provider.recommend(session,catalog),catalog)
-        return await self.repository.save_recommendation(session_id,result,catalog.fingerprint,self.provider)
+        result=resolve_metadata(session,catalog)
+        return await self.repository.save_recommendation(session_id,result,catalog.fingerprint)

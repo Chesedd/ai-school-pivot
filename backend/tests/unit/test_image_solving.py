@@ -6,7 +6,7 @@ from app.application.image_solving import ImageSolvingError, ImageSolvingService
 from app.application.image_solving_contracts import ExtractionResultV1, ImageSolvingSession, ImageSolvingStatus, SolutionResultV1
 from app.application.input_artifacts import ArtifactOwnershipService, InputArtifactRecord
 
-EXTRACTION = ExtractionResultV1(extracted_text="2 + 2 = ?", structured_statement="2 + 2 = ?", detected_task_type="calculation", detected_answer_format="number", choices=None, extraction_confidence=Decimal(".98"), ocr_issues=())
+EXTRACTION = ExtractionResultV1(extracted_text="2 + 2 = ?", structured_statement="2 + 2 = ?", detected_task_type="calculation", detected_answer_format="number", choices=None, extraction_confidence=Decimal(".98"), ocr_issues=(), metadata={"title":"Сложение чисел","subject":"Математика","grade":1,"topic":"Сложение","subtopic":"Натуральные числа","skills":("Складывать числа",),"task_type":"calculation","answer_format":"number","difficulty":1,"tags":()})
 SOLUTION = SolutionResultV1(status="solved", reasoning_summary="Add the values.", final_answer="4", confidence=Decimal(".99"))
 
 class Artifacts:
