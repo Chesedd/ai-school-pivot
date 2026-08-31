@@ -6,7 +6,10 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+import pytest_asyncio
 import sqlalchemy as sa
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -23,6 +26,24 @@ pytestmark = [
 BACKEND = Path(__file__).parents[2]
 
 
+def repository_head() -> str:
+    """Resolve the sole head of the migration graph in this checkout."""
+    config = Config(BACKEND / "alembic.ini")
+    config.set_main_option("script_location", str(BACKEND / "alembic"))
+    heads = ScriptDirectory.from_config(config).get_heads()
+    assert len(heads) == 1, f"expected a single Alembic head, found {heads}"
+    return heads[0]
+
+
+async def assert_database_at_repository_head(engine) -> None:
+    """Verify the database revision, rather than Alembic's display text."""
+    async with engine.connect() as connection:
+        revisions = (await connection.execute(
+            sa.text("SELECT version_num FROM alembic_version")
+        )).scalars().all()
+    assert revisions == [repository_head()]
+
+
 def alembic(*arguments: str) -> str:
     environment = os.environ.copy()
     environment["DATABASE_URL"] = URL
@@ -35,6 +56,20 @@ def alembic(*arguments: str) -> str:
         text=True,
     )
     return completed.stdout
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def restore_current_schema():
+    """Leave the shared integration database complete, even after failures."""
+    yield
+    engine = create_async_engine(URL)
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(sa.text("DROP SCHEMA public CASCADE"))
+            await connection.execute(sa.text("CREATE SCHEMA public"))
+    finally:
+        await engine.dispose()
+    alembic("upgrade", "head")
 
 
 async def test_clean_database_upgrades_to_head_with_observability_columns():
@@ -83,7 +118,7 @@ async def test_clean_database_upgrades_to_head_with_observability_columns():
         ]
 
         alembic("upgrade", "head")
-        assert "20260824_02 (head)" in alembic("current")
+        await assert_database_at_repository_head(engine)
     finally:
         await engine.dispose()
 
@@ -213,7 +248,7 @@ async def test_upgrade_from_supported_20260823_02_baseline_to_head():
             )
 
         alembic("upgrade", "head")
-        assert "20260824_02 (head)" in alembic("current")
+        await assert_database_at_repository_head(engine)
 
         async with engine.connect() as connection:
             result = (await connection.execute(
