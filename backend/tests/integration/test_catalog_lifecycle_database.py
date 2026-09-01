@@ -214,7 +214,7 @@ async def test_concurrent_topic_insert_has_exactly_one_winner(engine):
                     text(
                         "INSERT INTO topics(subject_id,grade_id,code,name,normalized_name,status,proposed_by) VALUES (:s,:g,:code,'Дроби','дроби','provisional',:a)"
                     ),
-                    locals(),
+                    {"s": s, "g": g, "code": code, "a": a},
                 )
             return "created"
         except IntegrityError:
@@ -228,9 +228,10 @@ async def test_concurrent_topic_insert_has_exactly_one_winner(engine):
         assert (
             await c.scalar(
                 text(
-                    "SELECT count(*) FROM topics WHERE subject_id=:s AND grade_id=:g AND normalized_name='дроби'"
+                    "SELECT count(*) FROM topics WHERE subject_id=:s AND grade_id=:g "
+                    "AND normalized_name='дроби' AND status IN ('active','provisional')"
                 ),
-                locals(),
+                {"s": s, "g": g},
             )
             == 1
         )
