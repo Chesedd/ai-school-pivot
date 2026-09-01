@@ -13,7 +13,7 @@ from app.application.image_solving_promotion import PromoteImageSolvingService
 from app.application.image_solving_metadata import MetadataRecommendationService, ImageTaskMetadataRecommendationV1
 from app.infrastructure.image_solving_metadata import SqlAlchemyMetadataCatalogLoader
 from app.config import Settings, get_settings
-from app.db.session import get_session
+from app.db.session import get_session as get_db_session
 from app.infrastructure.image_solving_repository import SqlAlchemyImageSolvingRepository
 from app.infrastructure.input_artifact_repository import SqlAlchemyArtifactRepository
 from app.infrastructure.artifact_storage import (DatabaseArtifactStorageReader,
@@ -68,7 +68,7 @@ def _build_image_solving_flow(db: AsyncSession, settings: Settings) -> ImageSolv
     return flow
 
 
-def image_solving_service(db=Depends(get_session),
+def image_solving_service(db=Depends(get_db_session),
         settings: Settings = Depends(get_settings)) -> ImageSolvingApplicationService:
     flow = _build_image_solving_flow(db, settings)
     return ImageSolvingApplicationService(flow, flow.repository)
@@ -117,7 +117,7 @@ def metadata_service(db: AsyncSession, settings: Settings):
         SqlAlchemyMetadataCatalogLoader(db))
 
 @router.get("/sessions/{session_id}/recommendations",response_model=ImageTaskMetadataRecommendationV1)
-async def get_recommendations(session_id:UUID,db=Depends(get_session),settings:Settings=Depends(get_settings),principal:Principal=Depends(require_capability(IMAGE_SOLVING_USE))):
+async def get_recommendations(session_id:UUID,db=Depends(get_db_session),settings:Settings=Depends(get_settings),principal:Principal=Depends(require_capability(IMAGE_SOLVING_USE))):
     try:
         result=await metadata_service(db,settings).get(session_id,principal.user_id)
         if result is None: raise ImageSolvingApiError("image_solving_recommendations_not_found",404)
@@ -126,13 +126,13 @@ async def get_recommendations(session_id:UUID,db=Depends(get_session),settings:S
     except Exception as exc: ImageSolvingApplicationService._raise(exc)
 
 @router.post("/sessions/{session_id}/recommendations",response_model=ImageTaskMetadataRecommendationV1)
-async def create_recommendations(session_id:UUID,db=Depends(get_session),settings:Settings=Depends(get_settings),principal:Principal=Depends(require_capability(IMAGE_SOLVING_USE))):
+async def create_recommendations(session_id:UUID,db=Depends(get_db_session),settings:Settings=Depends(get_settings),principal:Principal=Depends(require_capability(IMAGE_SOLVING_USE))):
     try:return await metadata_service(db,settings).generate(session_id,principal.user_id)
     except Exception as exc: ImageSolvingApplicationService._raise(exc)
 
 
 @router.post("/sessions/{session_id}/promote", response_model=PromoteImageSolvingResponse)
 async def promote_session(session_id: UUID, payload: PromoteImageSolvingRequest,
-        db=Depends(get_session), principal: Principal = Depends(require_capability(IMAGE_SOLVING_USE))):
+        db=Depends(get_db_session), principal: Principal = Depends(require_capability(IMAGE_SOLVING_USE))):
     return await PromoteImageSolvingService(db).promote(
         session_id, principal.user_id, payload)
