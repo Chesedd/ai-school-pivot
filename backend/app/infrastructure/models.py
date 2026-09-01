@@ -44,13 +44,12 @@ class CatalogLifecycleMixin:
     @declared_attr
     def proposed_by(cls) -> Mapped[UUID | None]:
         return mapped_column(ForeignKey("users.id", ondelete="RESTRICT", onupdate="RESTRICT", name=f"fk_{cls.__tablename__}_proposed_by_users"), nullable=True)
-    replacement_id: Mapped[UUID | None]
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("clock_timestamp()"))
 
 
 class Subject(CatalogLifecycleMixin, IdMixin, Base):
     __tablename__ = "subjects"
-    __table_args__ = (UniqueConstraint("code", name="uq_subjects_code"), CheckConstraint("status <> 'provisional' OR proposed_by IS NOT NULL", name="ck_subjects_provisional_proposer"), CheckConstraint("replacement_id IS NULL OR replacement_id <> id", name="ck_subjects_replacement_not_self"), Index("uq_subjects_live_normalized_name", "normalized_name", unique=True, postgresql_where=text("status IN ('active','provisional')")), ForeignKeyConstraint(["replacement_id"], ["subjects.id"], name="fk_subjects_replacement_id_subjects", ondelete="RESTRICT"))
+    __table_args__ = (UniqueConstraint("code", name="uq_subjects_code"), CheckConstraint("status <> 'provisional' OR proposed_by IS NOT NULL", name="ck_subjects_provisional_proposer"), Index("uq_subjects_live_normalized_name", "normalized_name", unique=True, postgresql_where=text("status IN ('active','provisional')")))
     code: Mapped[str] = mapped_column(String(64))
     name: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
@@ -88,7 +87,7 @@ class TaskFolder(IdMixin, Base):
 
 class Grade(CatalogLifecycleMixin, IdMixin, Base):
     __tablename__ = "grades"
-    __table_args__ = (CheckConstraint("number BETWEEN 1 AND 11", name="ck_grades_number_range"), CheckConstraint("status <> 'provisional' OR proposed_by IS NOT NULL", name="ck_grades_provisional_proposer"), CheckConstraint("replacement_id IS NULL OR replacement_id <> id", name="ck_grades_replacement_not_self"), Index("uq_grades_live_number", "number", unique=True, postgresql_where=text("status IN ('active','provisional')")), ForeignKeyConstraint(["replacement_id"], ["grades.id"], name="fk_grades_replacement_id_grades", ondelete="RESTRICT"))
+    __table_args__ = (CheckConstraint("number BETWEEN 1 AND 11", name="ck_grades_number_range"), CheckConstraint("status <> 'provisional' OR proposed_by IS NOT NULL", name="ck_grades_provisional_proposer"), Index("uq_grades_live_number", "number", unique=True, postgresql_where=text("status IN ('active','provisional')")))
     number: Mapped[int] = mapped_column(SmallInteger)
     name: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
@@ -98,7 +97,7 @@ class Grade(CatalogLifecycleMixin, IdMixin, Base):
 
 class Topic(CatalogLifecycleMixin, IdMixin, Base):
     __tablename__ = "topics"
-    __table_args__ = (UniqueConstraint("subject_id", "grade_id", "code", name="uq_topics_subject_grade_code"), Index("ix_topics_subject_id", "subject_id"), Index("ix_topics_grade_id", "grade_id"), CheckConstraint("status <> 'provisional' OR proposed_by IS NOT NULL", name="ck_topics_provisional_proposer"), CheckConstraint("replacement_id IS NULL OR replacement_id <> id", name="ck_topics_replacement_not_self"), Index("uq_topics_live_identity", "subject_id", "grade_id", "normalized_name", unique=True, postgresql_where=text("status IN ('active','provisional')")), ForeignKeyConstraint(["replacement_id"], ["topics.id"], name="fk_topics_replacement_id_topics", ondelete="RESTRICT"))
+    __table_args__ = (UniqueConstraint("subject_id", "grade_id", "code", name="uq_topics_subject_grade_code"), Index("ix_topics_subject_id", "subject_id"), Index("ix_topics_grade_id", "grade_id"), CheckConstraint("status <> 'provisional' OR proposed_by IS NOT NULL", name="ck_topics_provisional_proposer"), Index("uq_topics_live_identity", "subject_id", "grade_id", "normalized_name", unique=True, postgresql_where=text("status IN ('active','provisional')")))
     subject_id: Mapped[UUID] = mapped_column(ForeignKey("subjects.id", ondelete="RESTRICT", name="fk_topics_subject_id_subjects"))
     grade_id: Mapped[UUID] = mapped_column(ForeignKey("grades.id", ondelete="RESTRICT", name="fk_topics_grade_id_grades"))
     code: Mapped[str] = mapped_column(String(64))
@@ -112,7 +111,7 @@ class Topic(CatalogLifecycleMixin, IdMixin, Base):
 
 class Subtopic(CatalogLifecycleMixin, IdMixin, Base):
     __tablename__ = "subtopics"
-    __table_args__ = (UniqueConstraint("topic_id", "code", name="uq_subtopics_topic_code"), Index("ix_subtopics_topic_id", "topic_id"), CheckConstraint("status <> 'provisional' OR proposed_by IS NOT NULL", name="ck_subtopics_provisional_proposer"), CheckConstraint("replacement_id IS NULL OR replacement_id <> id", name="ck_subtopics_replacement_not_self"), Index("uq_subtopics_live_identity", "topic_id", "normalized_name", unique=True, postgresql_where=text("status IN ('active','provisional')")), ForeignKeyConstraint(["replacement_id"], ["subtopics.id"], name="fk_subtopics_replacement_id_subtopics", ondelete="RESTRICT"))
+    __table_args__ = (UniqueConstraint("topic_id", "code", name="uq_subtopics_topic_code"), Index("ix_subtopics_topic_id", "topic_id"), CheckConstraint("status <> 'provisional' OR proposed_by IS NOT NULL", name="ck_subtopics_provisional_proposer"), Index("uq_subtopics_live_identity", "topic_id", "normalized_name", unique=True, postgresql_where=text("status IN ('active','provisional')")))
     topic_id: Mapped[UUID] = mapped_column(ForeignKey("topics.id", ondelete="RESTRICT", name="fk_subtopics_topic_id_topics"))
     code: Mapped[str] = mapped_column(String(64))
     name: Mapped[str] = mapped_column(Text)
@@ -124,7 +123,7 @@ class Subtopic(CatalogLifecycleMixin, IdMixin, Base):
 
 class Skill(CatalogLifecycleMixin, IdMixin, Base):
     __tablename__ = "skills"
-    __table_args__ = (UniqueConstraint("subtopic_id", "code", name="uq_skills_subtopic_code"), Index("ix_skills_subtopic_id", "subtopic_id"), CheckConstraint("status <> 'provisional' OR proposed_by IS NOT NULL", name="ck_skills_provisional_proposer"), CheckConstraint("replacement_id IS NULL OR replacement_id <> id", name="ck_skills_replacement_not_self"), Index("uq_skills_live_identity", "subtopic_id", "normalized_name", unique=True, postgresql_where=text("status IN ('active','provisional')")), ForeignKeyConstraint(["replacement_id"], ["skills.id"], name="fk_skills_replacement_id_skills", ondelete="RESTRICT"))
+    __table_args__ = (UniqueConstraint("subtopic_id", "code", name="uq_skills_subtopic_code"), Index("ix_skills_subtopic_id", "subtopic_id"), CheckConstraint("status <> 'provisional' OR proposed_by IS NOT NULL", name="ck_skills_provisional_proposer"), Index("uq_skills_live_identity", "subtopic_id", "normalized_name", unique=True, postgresql_where=text("status IN ('active','provisional')")))
     subtopic_id: Mapped[UUID] = mapped_column(ForeignKey("subtopics.id", ondelete="RESTRICT", name="fk_skills_subtopic_id_subtopics"))
     code: Mapped[str] = mapped_column(String(64))
     name: Mapped[str] = mapped_column(Text)
