@@ -157,7 +157,46 @@ async def test_image_solving_proposals_content_bank_resolution_and_approval_vert
     repeated = await request("POST", f"/api/image-solving/sessions/{session_id}/promote", promotion_payload)
     assert repeated.status_code == 200 and repeated.json()["already_existing"] is True and UUID(repeated.json()["task_id"]) == task_id
 
-    assert (await request("POST", f"/api/content-bank/tasks/{task_id}/versions/1/submit-review", {})).status_code == 200
+    async with async_session_factory() as db:
+        assert await db.scalar(text(
+            "SELECT solution_text FROM expected_solutions WHERE task_version_id=:id"
+        ), {"id":version_id}) == "Разделить 100 на 20."
+        assert await db.scalar(text(
+            "SELECT count(*) FROM rubrics WHERE task_version_id=:id"
+        ), {"id":version_id}) == 0
+
+    methodology_payload = {
+        "expected_solution": {"solution_text":"Разделить 100 на 20.", "final_answer":"5 м/с", "solution_steps":[]},
+        "rubric": {"grading_mode":"points", "notes":None, "items":[{
+            "criterion":"Получен правильный ответ с корректным способом решения.",
+            "max_points":"1", "required":True, "common_failure":None,
+        }]},
+        "accepted_answers":[{
+            "answer_value":"5 м/с", "tolerance":None, "unit":None, "normalization_rule":None,
+            "value_kind":"legacy_untyped", "canonical_text":None, "canonical_decimal":None,
+            "option_keys":[], "absolute_tolerance":None, "relative_tolerance":None,
+            "unit_code":None, "normalization_policy_code":None, "normalization_policy_version":None,
+        }],
+        "typical_errors":[], "hints":[], "choice_options":[], "choice_scoring_policy":None,
+    }
+    methodology = await request(
+        "PUT", f"/api/content-bank/task-versions/{version_id}/methodology", methodology_payload
+    )
+    assert methodology.status_code == 200
+    assert methodology.json()["expected_solution"]["solution_text"] == "Разделить 100 на 20."
+    assert methodology.json()["rubric"]["max_score"] == "1.0000"
+    assert len(methodology.json()["rubric"]["items"]) == 1
+    assert len(extractor.calls) + len(solver.calls) == 2
+    async with async_session_factory() as db:
+        assert await db.scalar(text(
+            "SELECT count(*) FROM audit_log WHERE task_version_id=:id AND action='methodology_updated'"
+        ), {"id":version_id}) == 1
+        assert sum([await db.scalar(text(
+            f"SELECT count(*) FROM {table} WHERE status='provisional'"
+        )) for table in ("subjects", "grades", "topics", "subtopics", "skills")]) == 5
+
+    submitted = await request("POST", f"/api/content-bank/tasks/{task_id}/versions/1/submit-review", {})
+    assert submitted.status_code == 200 and submitted.json()["validation"]["valid_for_approval"] is True
     teacher_denied = await request("POST", f"/api/content-bank/tasks/{task_id}/versions/1/approve", {})
     assert teacher_denied.status_code == 403
     override_principal(app, admin_principal(admin))
