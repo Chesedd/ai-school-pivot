@@ -100,6 +100,77 @@ async def test_every_kind_lifecycle_attribution_hierarchy_and_history(engine):
         )
 
 
+async def test_content_bank_draft_accepts_provisional_canonical_foreign_keys(engine):
+    """A draft uses the ordinary catalog FKs; proposal workflow is out of scope."""
+    async with engine.begin() as c:
+        a = await user(c)
+        s, g = await parents(c, a)
+        t = await c.scalar(
+            text(
+                "INSERT INTO topics(subject_id,grade_id,code,name,normalized_name,status,proposed_by) "
+                "VALUES (:s,:g,'draft-topic','Черновик','черновик','provisional',:a) RETURNING id"
+            ),
+            locals(),
+        )
+        sub = await c.scalar(
+            text(
+                "INSERT INTO subtopics(topic_id,code,name,normalized_name,status,proposed_by) "
+                "VALUES (:t,'draft-subtopic','Раздел','раздел','provisional',:a) RETURNING id"
+            ),
+            locals(),
+        )
+        sk = await c.scalar(
+            text(
+                "INSERT INTO skills(subtopic_id,code,name,normalized_name,status,proposed_by) "
+                "VALUES (:sub,'draft-skill','Навык','навык','provisional',:a) RETURNING id"
+            ),
+            locals(),
+        )
+        task = await c.scalar(
+            text(
+                "INSERT INTO tasks(subject_id,grade_id,topic_id,subtopic_id,created_by) "
+                "VALUES (:s,:g,:t,:sub,:a) RETURNING id"
+            ),
+            locals(),
+        )
+        version = await c.scalar(
+            text(
+                "INSERT INTO task_versions(task_id,version_no,statement,task_type,answer_format,difficulty,created_by) "
+                "VALUES (:task,1,'Черновик задания','calculation','number',25,:a) RETURNING id"
+            ),
+            locals(),
+        )
+        await c.execute(
+            text(
+                "INSERT INTO task_skill_links(task_version_id,skill_id,weight,is_primary) "
+                "VALUES (:version,:sk,1,true)"
+            ),
+            locals(),
+        )
+
+        assert (
+            await c.execute(
+                text(
+                    "SELECT t.subject_id,t.grade_id,t.topic_id,t.subtopic_id,v.status,l.skill_id "
+                    "FROM tasks t JOIN task_versions v ON v.task_id=t.id "
+                    "JOIN task_skill_links l ON l.task_version_id=v.id WHERE t.id=:task"
+                ),
+                locals(),
+            )
+        ).one() == (s, g, t, sub, "draft", sk)
+
+        columns = set(
+            (await c.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema=current_schema() AND table_name='tasks'"
+                )
+            )).scalars()
+        )
+        assert {"subject_id", "grade_id", "topic_id", "subtopic_id"} <= columns
+        assert not any("proposal" in name or "metadata" in name for name in columns)
+
+
 async def test_live_duplicate_conflicts_and_deprecated_identity_is_reusable(engine):
     async with engine.begin() as c:
         a = await user(c)

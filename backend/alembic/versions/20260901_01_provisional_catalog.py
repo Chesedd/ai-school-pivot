@@ -41,7 +41,6 @@ def upgrade():
             ),
         )
         op.add_column(table, sa.Column("proposed_by", sa.Uuid(), nullable=True))
-        op.add_column(table, sa.Column("replacement_id", sa.Uuid(), nullable=True))
         op.add_column(
             table,
             sa.Column(
@@ -67,23 +66,10 @@ def upgrade():
             ondelete="RESTRICT",
             onupdate="RESTRICT",
         )
-        op.create_foreign_key(
-            f"fk_{table}_replacement_id_{table}",
-            table,
-            table,
-            ["replacement_id"],
-            ["id"],
-            ondelete="RESTRICT",
-        )
         op.create_check_constraint(
             f"ck_{table}_provisional_proposer",
             table,
             "status <> 'provisional' OR proposed_by IS NOT NULL",
-        )
-        op.create_check_constraint(
-            f"ck_{table}_replacement_not_self",
-            table,
-            "replacement_id IS NULL OR replacement_id <> id",
         )
     op.create_index(
         "uq_subjects_live_normalized_name",
@@ -134,15 +120,10 @@ def downgrade():
     ):
         op.drop_index(index, table_name=table)
     for table in reversed(TABLES):
-        op.drop_constraint(f"ck_{table}_replacement_not_self", table, type_="check")
         op.drop_constraint(f"ck_{table}_provisional_proposer", table, type_="check")
-        op.drop_constraint(
-            f"fk_{table}_replacement_id_{table}", table, type_="foreignkey"
-        )
         op.drop_constraint(f"fk_{table}_proposed_by_users", table, type_="foreignkey")
         for column in (
             "updated_at",
-            "replacement_id",
             "proposed_by",
             "status",
             "normalized_name",
