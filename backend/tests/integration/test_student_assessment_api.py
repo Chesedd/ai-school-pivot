@@ -17,12 +17,14 @@ if not URL:
 if not URL.rsplit("/", 1)[-1].split("?", 1)[0].endswith("_test"):
     raise RuntimeError("Student assessment tests require a database ending in _test")
 
-from app.application.student_assessments import PilotStudentContext
 from app.infrastructure.assessment_models import (Assignment, AssignmentParticipant,
     AssessmentAuditLog, AssessmentIdempotencyKey, StudentAnswer, StudentSubmission)
 from app.infrastructure.student_assessment_repository import StudentAssessmentService
 from app.main import app
 import app.presentation.student_assessment_routes as student_routes
+from tests.integration.auth_helpers import clear_principal_override, override_principal, student_principal
+
+STUDENT_ACCOUNT_ID = UUID("00000000-0000-4000-8000-100000000001")
 
 pytestmark = pytest.mark.asyncio
 RACE = pytest.mark.student_race
@@ -46,7 +48,7 @@ async def database(monkeypatch):
     try:
         yield engine, factory
     finally:
-        app.dependency_overrides.pop(student_routes.student_context, None)
+        clear_principal_override(app)
         await engine.dispose()
 
 
@@ -108,7 +110,7 @@ async def scenario(database, *, formats=("short_text", "short_text"), max_attemp
             {**ids, "start": start, "due": due, "max_attempts": max_attempts})
         await c.execute(text("INSERT INTO assignment_participants(id,assignment_id,student_id) VALUES "
             "(:participant,:assignment,:student),(:foreign_participant,:foreign_assignment,:foreign_student)"), ids)
-    app.dependency_overrides[student_routes.student_context] = lambda: PilotStudentContext(ids["student"])
+    override_principal(app, student_principal(STUDENT_ACCOUNT_ID, ids["student"]))
     return ids
 
 
@@ -349,10 +351,10 @@ async def test_answer_create_with_non_null_expectation_and_foreign_submission_ar
         json={"raw_answer": "x", "expected_updated_at": datetime.now(timezone.utc).isoformat()})
     assert conflict.status_code == 409 and conflict.json()["error"]["code"] == "concurrent_conflict"
     # Create a real foreign submission, then restore the current server identity.
-    app.dependency_overrides[student_routes.student_context] = lambda: PilotStudentContext(ids["foreign_student"])
+    override_principal(app, student_principal(STUDENT_ACCOUNT_ID, ids["foreign_student"]))
     foreign = (await client.post(f"/api/assessment-core/student/assignments/{ids['foreign_assignment']}/attempts/start",
         json={}, headers={"Idempotency-Key": "foreign-start"})).json()
-    app.dependency_overrides[student_routes.student_context] = lambda: PilotStudentContext(ids["student"])
+    override_principal(app, student_principal(STUDENT_ACCOUNT_ID, ids["student"]))
     hidden = await client.get(f"/api/assessment-core/student/attempts/{foreign['id']}")
     assert hidden.status_code == 404 and hidden.json()["error"]["code"] == "submission_not_found"
 

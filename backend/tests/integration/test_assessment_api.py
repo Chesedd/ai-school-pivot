@@ -27,6 +27,9 @@ from app.infrastructure.assessment_repository import SQLAlchemyAssessmentUnitOfW
 from app.infrastructure.repository import SQLAlchemyUnitOfWork
 from app.main import app
 import app.presentation.assessment_routes as assessment_routes
+from tests.integration.auth_helpers import clear_principal_override, override_principal, teacher_principal
+
+TEACHER_ID = UUID("00000000-0000-4000-8000-000000000001")
 
 pytestmark = pytest.mark.asyncio
 
@@ -38,9 +41,11 @@ async def database(monkeypatch):
     monkeypatch.setattr(assessment_routes, "async_session_factory", factory)
     async with engine.begin() as connection:
         await connection.execute(text("TRUNCATE assessment_audit_log, assessment_idempotency_keys, student_answers, student_submissions, assignment_participants, assignments, assessment_items, assessment_variants, assessments, students, class_groups CASCADE"))
+    override_principal(app, teacher_principal(TEACHER_ID))
     try:
         yield engine, factory
     finally:
+        clear_principal_override(app)
         await engine.dispose()
 
 
@@ -62,7 +67,7 @@ async def create(client, title="Работа"):
 
 async def test_teacher_read_catalogues_are_ordered_scoped_and_private(client, database):
     engine, factory = database
-    actor_id = uuid4()
+    actor_id = TEACHER_ID
     group_a_id, group_a2_id, group_b_id, archived_id = sorted([uuid4(), uuid4(), uuid4(), uuid4()])
     assessment_id, foreign_assessment_id = uuid4(), uuid4()
     first_assignment_id, second_assignment_id, foreign_assignment_id = uuid4(), uuid4(), uuid4()
@@ -143,7 +148,7 @@ async def test_publish_assignment_snapshot_get_close_and_no_partial_failures(cli
     assert (await client.post(
         f"/api/assessment-core/assessments/{assessment['id']}/variants/{variant['id']}/items",
         json={"task_version_id": str(version["version"]), "points": "2.00"})).status_code == 201
-    actor_id = uuid4()
+    actor_id = TEACHER_ID
     async with factory() as session:
         group = ClassGroup(name="9А", created_by=actor_id)
         session.add(group); await session.flush()

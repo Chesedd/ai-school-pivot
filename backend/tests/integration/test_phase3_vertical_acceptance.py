@@ -17,12 +17,13 @@ if not URL.rsplit("/", 1)[-1].split("?", 1)[0].endswith("_test"):
     raise RuntimeError("Phase 3 vertical acceptance requires a database ending in _test")
 
 from app.application.content_bank import ActorContext, ArchiveTaskService
-from app.application.student_assessments import PilotStudentContext
 from app.infrastructure.repository import SQLAlchemyUnitOfWork
 from app.infrastructure.student_assessment_repository import AssessmentCheckingHandoffService
 from app.main import app
 import app.presentation.assessment_routes as teacher_routes
 import app.presentation.student_assessment_routes as student_routes
+from tests.integration.auth_helpers import (clear_principal_override, override_principal,
+    student_principal, teacher_principal)
 
 pytestmark = pytest.mark.asyncio
 RAW = " 001,2300e2 "
@@ -43,7 +44,7 @@ async def vertical_database(monkeypatch):
     try:
         yield engine, factory
     finally:
-        app.dependency_overrides.pop(student_routes.student_context, None)
+        clear_principal_override(app)
         await engine.dispose()
 
 
@@ -90,6 +91,7 @@ async def test_phase3_teacher_student_historical_handoff_vertical(vertical_clien
             "(:first,:group,'Pilot One'),(:second,:group,'Pilot Two')"),
             {"first": student_id, "second": second_student_id, "group": group_id})
     tasks = await approved_number_versions(engine, actor_id)
+    override_principal(app, teacher_principal(actor_id))
 
     created = await client.post("/api/assessment-core/assessments",
                                 json={"title": "Phase 3 vertical", "description": "Acceptance"})
@@ -131,7 +133,7 @@ async def test_phase3_teacher_student_historical_handoff_vertical(vertical_clien
     assert [(v["id"], v["position"], [(i["id"], i["task_version_id"], i["position"], i["points"])
             for i in v["items"]]) for v in after["variants"]] == original
 
-    app.dependency_overrides[student_routes.student_context] = lambda: PilotStudentContext(student_id)
+    override_principal(app, student_principal(uuid4(), student_id))
     ordered = sorted([(v["position"], UUID(v["id"])) for v in reloaded["variants"]])
     digest = hashlib.sha256(UUID(assignment_id).bytes + student_id.bytes).digest()
     expected_variant = ordered[int.from_bytes(digest[:8], "big") % 2][1]
