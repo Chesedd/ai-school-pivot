@@ -184,7 +184,7 @@ async def test_image_solving_proposals_content_bank_resolution_and_approval_vert
     )
     assert methodology.status_code == 200
     assert methodology.json()["expected_solution"]["solution_text"] == "Разделить 100 на 20."
-    assert methodology.json()["rubric"]["max_score"] == "1.0000"
+    assert Decimal(methodology.json()["rubric"]["max_score"]) == Decimal("1")
     assert len(methodology.json()["rubric"]["items"]) == 1
     assert len(extractor.calls) + len(solver.calls) == 2
     async with async_session_factory() as db:
