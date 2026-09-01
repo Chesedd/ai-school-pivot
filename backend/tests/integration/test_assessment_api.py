@@ -329,10 +329,10 @@ class PausingAssessmentUnitOfWork(SQLAlchemyAssessmentUnitOfWork):
         owner = self
         class RepositoryProxy:
             def __getattr__(self, name): return getattr(delegate, name)
-            async def lock(self, assessment_id):
+            async def lock_scoped(self, assessment_id, scope):
                 owner.pid = await owner.session.scalar(text("SELECT pg_backend_pid()"))
                 if owner.started is not None: owner.started.set()
-                result = await delegate.lock(assessment_id)
+                result = await delegate.lock_scoped(assessment_id, scope)
                 if owner.acquired is not None: owner.acquired.set()
                 if owner.release is not None: await owner.release.wait()
                 return result

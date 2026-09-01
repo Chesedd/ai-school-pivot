@@ -82,6 +82,7 @@ async def test_phase3_teacher_student_historical_handoff_vertical(vertical_clien
     engine, factory = vertical_database
     actor_id = UUID("00000000-0000-4000-8000-000000000001")
     student_id = UUID("00000000-0000-4000-8000-000000000002")
+    student_account_id = uuid4()
     second_student_id = UUID("00000000-0000-4000-8000-000000000003")
     group_id = uuid4()
     async with engine.begin() as connection:
@@ -133,7 +134,7 @@ async def test_phase3_teacher_student_historical_handoff_vertical(vertical_clien
     assert [(v["id"], v["position"], [(i["id"], i["task_version_id"], i["position"], i["points"])
             for i in v["items"]]) for v in after["variants"]] == original
 
-    override_principal(app, student_principal(uuid4(), student_id))
+    override_principal(app, student_principal(student_account_id, student_id))
     ordered = sorted([(v["position"], UUID(v["id"])) for v in reloaded["variants"]])
     digest = hashlib.sha256(UUID(assignment_id).bytes + student_id.bytes).digest()
     expected_variant = ordered[int.from_bytes(digest[:8], "big") % 2][1]
@@ -193,7 +194,7 @@ async def test_phase3_teacher_student_historical_handoff_vertical(vertical_clien
     closed = await client.post(f"/api/assessment-core/assignments/{assignment_id}/close", json={})
     assert closed.status_code == 200 and closed.json()["status"] == "closed"
     assert (await client.get(f"/api/assessment-core/assignments/{assignment_id}")).json()["status"] == "closed"
-    override_principal(app, student_principal(account_id, student_id))
+    override_principal(app, student_principal(student_account_id, student_id))
     assert (await client.get(f"/api/assessment-core/student/attempts/{submission_id}")).status_code == 200
     assert await AssessmentCheckingHandoffService(factory).get(UUID(submission_id)) == handoff
     blocked = await client.post(f"/api/assessment-core/student/assignments/{assignment_id}/attempts/start",
