@@ -36,6 +36,9 @@ class _Strict(BaseModel):
 class ExistingCatalogSelectionV1(_Strict):
     kind: Literal["existing"]
     id: UUID
+    # Optional only for backwards reads of recommendations persisted before J1D.
+    # Newly resolved selections always retain the recognized display text.
+    label: StrictStr | None = Field(default=None, min_length=1, max_length=200)
     confidence: Confidence
     reason: StrictStr = Field(min_length=1, max_length=500)
 
@@ -56,6 +59,7 @@ class GradeSelectionV1(_Strict):
     """Grades deliberately have no `new` variant."""
     kind: Literal["existing"]
     id: UUID
+    label: StrictStr | None = Field(default=None, min_length=1, max_length=200)
     confidence: Confidence
     reason: StrictStr = Field(min_length=1, max_length=500)
     requires_confirmation: bool = False
@@ -176,7 +180,7 @@ def resolve_metadata(session: ImageSolvingSession,
     one, none = Decimal("1"), Decimal("0")
     def selection(name, row, parent_id=None):
         if row is not None:
-            return ExistingCatalogSelectionV1(kind="existing", id=row.id, confidence=one,
+            return ExistingCatalogSelectionV1(kind="existing", id=row.id, label=name, confidence=one,
                 reason="Точное совпадение с текущим каталогом.")
         return NewCatalogSelectionV1(kind="new", proposed_name=name, parent_id=parent_id,
             confidence=none, reason="Безопасное совпадение в текущем каталоге не найдено.")
@@ -203,7 +207,7 @@ def resolve_metadata(session: ImageSolvingSession,
             NewTagRecommendationV1(kind="new", name=name, category_code="unresolved",
                 subject_scope=subject.id if subject else None, confidence=none,
                 reason="Безопасное совместимое совпадение с активным тегом не найдено."))
-    grade_selection = (GradeSelectionV1(kind="existing", id=grade.id, confidence=one,
+    grade_selection = (GradeSelectionV1(kind="existing", id=grade.id, label=str(semantic.grade), confidence=one,
         reason="Класс точно совпал по номеру.") if grade else
         NewCatalogSelectionV1(kind="new", proposed_name=str(semantic.grade), confidence=none,
             reason="Класс с таким номером однозначно не найден."))
