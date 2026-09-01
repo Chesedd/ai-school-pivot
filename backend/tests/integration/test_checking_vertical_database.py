@@ -87,11 +87,11 @@ async def test_phase410_real_postgresql_production_vertical():
         async with engine.begin() as connection:
             await connection.execute(text(f"TRUNCATE {TABLES} CASCADE"))
             for statement in (
-                "INSERT INTO subjects(id,code,name) VALUES (:subject,'phase410','Phase 410')",
-                "INSERT INTO grades(id,number,name) VALUES (:grade,10,'10')",
-                "INSERT INTO topics(id,subject_id,grade_id,code,name) VALUES (:topic,:subject,:grade,'phase410','Phase 410')",
-                "INSERT INTO subtopics(id,topic_id,code,name) VALUES (:subtopic,:topic,'phase410','Phase 410')",
-                "INSERT INTO skills(id,subtopic_id,code,name) VALUES (:skill,:subtopic,'skill_technical_v1','technical_skill_v1')",
+                "INSERT INTO subjects(id,code,name,normalized_name) VALUES (:subject,'phase410','Phase 410','phase 410')",
+                "INSERT INTO grades(id,number,name,normalized_name) VALUES (:grade,10,'10','10')",
+                "INSERT INTO topics(id,subject_id,grade_id,code,name,normalized_name) VALUES (:topic,:subject,:grade,'phase410','Phase 410','phase 410')",
+                "INSERT INTO subtopics(id,topic_id,code,name,normalized_name) VALUES (:subtopic,:topic,'phase410','Phase 410','phase 410')",
+                "INSERT INTO skills(id,subtopic_id,code,name,normalized_name) VALUES (:skill,:subtopic,'skill_technical_v1','technical_skill_v1','technical_skill_v1')",
                 "INSERT INTO typical_errors(id,skill_id,code,title,description,severity) VALUES (:typical_error,:skill,'error_technical_v1','PRIVATE_TYPICAL_ERROR_TITLE','PRIVATE_TYPICAL_ERROR_DESCRIPTION','high')",
                 "INSERT INTO class_groups(id,name,created_by) VALUES (:group,'PRIVATE_GROUP',:actor)",
                 "INSERT INTO students(id,class_group_id,display_name) VALUES (:student,:group,'PRIVATE_PERSON')",

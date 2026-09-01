@@ -50,9 +50,9 @@ async def seeded(engine):
         assert current.endswith("_test")
         await c.execute(text("TRUNCATE choice_option_rules,choice_scoring_policies,accepted_answer_options,choice_options,accepted_answers,audit_log,task_skill_links,task_versions,tasks,skills,subtopics,topics,grades,subjects CASCADE"))
         for sql in (
-            "INSERT INTO subjects(id,code,name) VALUES (:subject,'typed','Typed')",
-            "INSERT INTO grades(id,number,name) VALUES (:grade,7,'7')",
-            "INSERT INTO topics(id,subject_id,grade_id,code,name) VALUES (:topic,:subject,:grade,'typed','Typed')",
+            "INSERT INTO subjects(id,code,name,normalized_name) VALUES (:subject,'typed','Typed','typed')",
+            "INSERT INTO grades(id,number,name,normalized_name) VALUES (:grade,7,'7','7')",
+            "INSERT INTO topics(id,subject_id,grade_id,code,name,normalized_name) VALUES (:topic,:subject,:grade,'typed','Typed','typed')",
             "INSERT INTO tasks(id,subject_id,grade_id,topic_id,created_by) VALUES (:task,:subject,:grade,:topic,:actor)",
             "INSERT INTO task_versions(id,task_id,version_no,statement,task_type,answer_format,difficulty,status,created_by) VALUES (:v1,:task,1,'S','problem','multiple_choice',50,'approved',:actor),(:v2,:task,2,'S2','problem','multiple_choice',50,'draft',:actor)",
         ): await c.execute(text(sql),ids)

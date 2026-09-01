@@ -27,11 +27,11 @@ async def context():
     ids={x:uuid4() for x in names}
     async with engine.begin() as c:
         await c.execute(text("TRUNCATE cost_events,model_runs,checker_events,check_findings,check_results,prompt_versions,check_runs,assessment_audit_log,assessment_idempotency_keys,student_answers,student_submissions,assignment_participants,assignments,assessment_items,assessment_variants,assessments,students,class_groups,audit_log,task_skill_links,task_versions,tasks,skills,subtopics,topics,grades,subjects CASCADE"))
-        sqls=("INSERT INTO subjects(id,code,name) VALUES (:subject,'i','Intake')",
-          "INSERT INTO grades(id,number,name) VALUES (:grade,7,'7')",
-          "INSERT INTO topics(id,subject_id,grade_id,code,name) VALUES (:topic,:subject,:grade,'i','I')",
-          "INSERT INTO subtopics(id,topic_id,code,name) VALUES (:subtopic,:topic,'i','I')",
-          "INSERT INTO skills(id,subtopic_id,code,name) VALUES (:skill,:subtopic,'s','Skill')",
+        sqls=("INSERT INTO subjects(id,code,name,normalized_name) VALUES (:subject,'i','Intake','intake')",
+          "INSERT INTO grades(id,number,name,normalized_name) VALUES (:grade,7,'7','7')",
+          "INSERT INTO topics(id,subject_id,grade_id,code,name,normalized_name) VALUES (:topic,:subject,:grade,'i','I','i')",
+          "INSERT INTO subtopics(id,topic_id,code,name,normalized_name) VALUES (:subtopic,:topic,'i','I','i')",
+          "INSERT INTO skills(id,subtopic_id,code,name,normalized_name) VALUES (:skill,:subtopic,'s','Skill','skill')",
           "INSERT INTO tasks(id,subject_id,grade_id,topic_id,created_by) VALUES (:task,:subject,:grade,:topic,:actor),(:second_task,:subject,:grade,:topic,:actor)",
           "INSERT INTO task_versions(id,task_id,version_no,statement,task_type,answer_format,difficulty,status,created_by) VALUES (:version,:task,1,'Exact historical answered','problem','short_text',50,'approved',:actor),(:second_version,:second_task,1,'Exact historical unanswered','problem','short_text',50,'approved',:actor)",
           "INSERT INTO task_skill_links(task_version_id,skill_id,weight,is_primary) VALUES (:version,:skill,1,true),(:second_version,:skill,1,true)",

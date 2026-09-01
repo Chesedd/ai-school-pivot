@@ -42,7 +42,7 @@ async def db(engine):
         assert current.endswith("_test")
         await connection.execute(text("TRUNCATE assessment_audit_log, assessment_idempotency_keys, student_answers, student_submissions, assignment_participants, assignments, assessment_items, assessment_variants, assessments, students, class_groups, audit_log, task_skill_links, task_versions, tasks, skills, subtopics, topics, grades, subjects CASCADE"))
         catalog = {key: uuid4() for key in ("subject", "grade", "topic")}
-        for sql in ("INSERT INTO subjects(id,code,name) VALUES (:subject,'assessment-test','Assessment test')", "INSERT INTO grades(id,number,name) VALUES (:grade,7,'7')", "INSERT INTO topics(id,subject_id,grade_id,code,name) VALUES (:topic,:subject,:grade,'assessment-test','Assessment test')"):
+        for sql in ("INSERT INTO subjects(id,code,name,normalized_name) VALUES (:subject,'assessment-test','Assessment test','assessment test')", "INSERT INTO grades(id,number,name,normalized_name) VALUES (:grade,7,'7','7')", "INSERT INTO topics(id,subject_id,grade_id,code,name,normalized_name) VALUES (:topic,:subject,:grade,'assessment-test','Assessment test','assessment test')"):
             await connection.execute(text(sql), catalog)
         await connection.execute(text("INSERT INTO tasks(id,subject_id,grade_id,topic_id,created_by) VALUES (:task,:subject,:grade,:topic,:actor)"), {**ids, **catalog})
         await connection.execute(text("INSERT INTO task_versions(id,task_id,version_no,statement,task_type,answer_format,difficulty,status,created_by) VALUES (:version,:task,1,'Statement','problem','short_text',50,'approved',:actor)"), ids)

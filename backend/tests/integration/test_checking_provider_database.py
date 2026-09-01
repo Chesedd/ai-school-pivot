@@ -29,9 +29,9 @@ async def context():
     ids={key:uuid4() for key in ("actor","subject","grade","topic","task","version","group","student","assessment","variant","item","assignment","participant","submission")}
     async with engine.begin() as c:
         await c.execute(text("TRUNCATE cost_events,model_runs,checker_events,check_findings,check_results,prompt_versions,check_runs,assessment_audit_log,assessment_idempotency_keys,student_answers,student_submissions,assignment_participants,assignments,assessment_items,assessment_variants,assessments,students,class_groups,audit_log,task_skill_links,task_versions,tasks,skills,subtopics,topics,grades,subjects CASCADE"))
-        sqls=("INSERT INTO subjects(id,code,name) VALUES (:subject,'provider-test','Provider')",
-          "INSERT INTO grades(id,number,name) VALUES (:grade,7,'7')",
-          "INSERT INTO topics(id,subject_id,grade_id,code,name) VALUES (:topic,:subject,:grade,'provider','Provider')",
+        sqls=("INSERT INTO subjects(id,code,name,normalized_name) VALUES (:subject,'provider-test','Provider','provider')",
+          "INSERT INTO grades(id,number,name,normalized_name) VALUES (:grade,7,'7','7')",
+          "INSERT INTO topics(id,subject_id,grade_id,code,name,normalized_name) VALUES (:topic,:subject,:grade,'provider','Provider','provider')",
           "INSERT INTO tasks(id,subject_id,grade_id,topic_id,created_by) VALUES (:task,:subject,:grade,:topic,:actor)",
           "INSERT INTO task_versions(id,task_id,version_no,statement,task_type,answer_format,difficulty,status,created_by) VALUES (:version,:task,1,'Synthetic','problem','short_text',50,'approved',:actor)",
           "INSERT INTO class_groups(id,name,created_by) VALUES (:group,'G',:actor)",

@@ -125,11 +125,11 @@ async def content_version(engine, status="approved", archived=False):
     async with engine.begin() as connection:
         catalog = (await connection.execute(text("SELECT s.id,g.id,t.id FROM topics t JOIN subjects s ON s.id=t.subject_id JOIN grades g ON g.id=t.grade_id LIMIT 1"))).one_or_none()
         if catalog is None:
-            await connection.execute(text("INSERT INTO subjects(id,code,name) VALUES (:subject,:code,'Assessment composition')"),
+            await connection.execute(text("INSERT INTO subjects(id,code,name,normalized_name) VALUES (:subject,:code,'Assessment composition','assessment composition')"),
                                      {**values, "code": f"assessment-{values['subject']}"})
-            await connection.execute(text("INSERT INTO grades(id,number,name) VALUES (:grade,11,:name)"),
-                                     {**values, "name": str(values["grade"])})
-            await connection.execute(text("INSERT INTO topics(id,subject_id,grade_id,code,name) VALUES (:topic,:subject,:grade,:code,'Topic')"),
+            await connection.execute(text("INSERT INTO grades(id,number,name,normalized_name) VALUES (:grade,11,:name,:normalized_name)"),
+                                     {**values, "name": str(values["grade"]), "normalized_name": str(values["grade"])})
+            await connection.execute(text("INSERT INTO topics(id,subject_id,grade_id,code,name,normalized_name) VALUES (:topic,:subject,:grade,:code,'Topic','topic')"),
                                      {**values, "code": str(values["topic"])})
         else:
             values.update(subject=catalog[0], grade=catalog[1], topic=catalog[2])

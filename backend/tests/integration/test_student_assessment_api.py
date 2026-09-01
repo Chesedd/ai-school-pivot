@@ -86,9 +86,9 @@ async def scenario(database, *, formats=("short_text", "short_text"), max_attemp
             "(:foreign_variant,:foreign_assessment,'F',1)"), ids)
         base = {name: uuid4() for name in ("subject", "grade", "topic")}
         base.update(suffix=str(uuid4()))
-        await execute_many("INSERT INTO subjects(id,code,name) VALUES (:subject,:suffix,'S');"
-            "INSERT INTO grades(id,number,name) VALUES (:grade,10,'10');"
-            "INSERT INTO topics(id,subject_id,grade_id,code,name) VALUES (:topic,:subject,:grade,:suffix,'T')", base)
+        await execute_many("INSERT INTO subjects(id,code,name,normalized_name) VALUES (:subject,:suffix,'S','s');"
+            "INSERT INTO grades(id,number,name,normalized_name) VALUES (:grade,10,'10','10');"
+            "INSERT INTO topics(id,subject_id,grade_id,code,name,normalized_name) VALUES (:topic,:subject,:grade,:suffix,'T','t')", base)
         for index, (variant, answer_format) in enumerate(zip((ids["variant_a"], ids["variant_b"]), formats)):
             catalog = {name: uuid4() for name in ("task", "version", "item")}
             catalog.update(base, actor=ids["actor"], variant=variant, fmt=answer_format)

@@ -28,11 +28,11 @@ async def db():
     async with engine.begin() as c:
         await c.execute(text(f"TRUNCATE {TABLES} CASCADE"))
         statements=(
-          "INSERT INTO subjects(id,code,name) VALUES (:subject,'phase49','Phase 49')",
-          "INSERT INTO grades(id,number,name) VALUES (:grade,9,'9')",
-          "INSERT INTO topics(id,subject_id,grade_id,code,name) VALUES (:topic,:subject,:grade,'phase49','Phase 49')",
-          "INSERT INTO subtopics(id,topic_id,code,name) VALUES (:subtopic,:topic,'phase49','Phase 49')",
-          "INSERT INTO skills(id,subtopic_id,code,name) VALUES (:skill,:subtopic,'SK49','Skill 49')",
+          "INSERT INTO subjects(id,code,name,normalized_name) VALUES (:subject,'phase49','Phase 49','phase 49')",
+          "INSERT INTO grades(id,number,name,normalized_name) VALUES (:grade,9,'9','9')",
+          "INSERT INTO topics(id,subject_id,grade_id,code,name,normalized_name) VALUES (:topic,:subject,:grade,'phase49','Phase 49','phase 49')",
+          "INSERT INTO subtopics(id,topic_id,code,name,normalized_name) VALUES (:subtopic,:topic,'phase49','Phase 49','phase 49')",
+          "INSERT INTO skills(id,subtopic_id,code,name,normalized_name) VALUES (:skill,:subtopic,'SK49','Skill 49','skill 49')",
           "INSERT INTO typical_errors(id,skill_id,code,title,description,severity) VALUES (:error,:skill,'ERR49','Authored error','Technical description','high')",
           "INSERT INTO tasks(id,subject_id,grade_id,topic_id,subtopic_id,created_by) VALUES (:task1,:subject,:grade,:topic,:subtopic,:actor),(:task2,:subject,:grade,:topic,:subtopic,:actor)",
           "INSERT INTO task_versions(id,task_id,version_no,statement,task_type,answer_format,difficulty,status,created_by,approved_by,approved_at) VALUES (:version1,:task1,1,'PRIVATE TASK ONE','problem','short_text',50,'approved',:actor,:actor,clock_timestamp()),(:version2,:task2,1,'PRIVATE TASK TWO','essay','long_text',50,'approved',:actor,:actor,clock_timestamp())",
