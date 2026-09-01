@@ -134,7 +134,10 @@ class CatalogResolutionService:
         elif kind == "topic": checks += [select(Subtopic.id).where(Subtopic.topic_id == value, Subtopic.status == "provisional"), select(Task.id).where(Task.topic_id == value)]
         elif kind == "subtopic": checks += [select(Skill.id).where(Skill.subtopic_id == value, Skill.status == "provisional"), select(Task.id).where(Task.subtopic_id == value)]
         else: checks += [select(TaskSkillLink.id).where(TaskSkillLink.skill_id == value), select(TypicalError.id).where(TypicalError.skill_id == value)]
-        return any(await self.session.scalar(query.limit(1)) is not None for query in checks)
+        for query in checks:
+            if await self.session.scalar(query.limit(1)) is not None:
+                return True
+        return False
 
     @staticmethod
     def _view(kind: CatalogKind, row) -> ProposalView:

@@ -563,7 +563,15 @@ async def proposal(kind: str, parent: dict, proposer: UUID, name=None):
 
 
 async def content_row(
-    chain: dict, actor: UUID, status="draft", *, topic=None, subject=None
+    chain: dict,
+    actor: UUID,
+    status="draft",
+    *,
+    topic=None,
+    subtopic=None,
+    skill=None,
+    subject=None,
+    add_primary_skill=True,
 ):
     task = await seed(
         "tasks",
@@ -572,13 +580,13 @@ async def content_row(
         s=subject or chain["subject"],
         g=chain["grade"],
         t=topic or chain["topic"],
-        st=None if topic else chain["subtopic"],
+        st=subtopic if subtopic is not None else chain["subtopic"],
         a=actor,
     )
     version = await seed(
         "task_versions",
         "task_id,version_no,title,statement,task_type,answer_format,difficulty,status,created_by",
-        ":t,1,'Complete','Statement','problem','short_text',50,:status,:a",
+        ":t,1,'Complete','Statement','open_question','short_text',50,:status,:a",
         t=task,
         status=status,
         a=actor,
@@ -599,7 +607,19 @@ async def content_row(
         ":r,'Criterion',1,true,0",
         r=rubric,
     )
+    if add_primary_skill:
+        await skill_link(version, skill or chain["skill"])
     return task, version
+
+
+async def provisional_topic_branch(chain: dict, proposer: UUID):
+    """Create a coherent provisional Topic -> Subtopic -> Skill branch."""
+    topic = await proposal("topic", chain, proposer)
+    branch = {**chain, "topic": topic}
+    subtopic = await proposal("subtopic", branch, proposer)
+    branch["subtopic"] = subtopic
+    skill = await proposal("skill", branch, proposer)
+    return topic, subtopic, skill
 
 
 async def skill_link(version: UUID, skill: UUID, weight="1", primary=True):
@@ -740,7 +760,7 @@ async def test_reject_blocks_mutable_skill_link_reference_atomically():
     admin, teacher = await user("admin"), await user("teacher")
     chain = await active_chain()
     source = await proposal("skill", chain, teacher)
-    _, version = await content_row(chain, teacher)
+    _, version = await content_row(chain, teacher, add_primary_skill=False)
     link = await skill_link(version, source)
     override_principal(app, admin_principal(admin))
     response = await request(
@@ -856,11 +876,16 @@ async def test_approve_blocks_each_provisional_reference_atomically(reference):
     admin, teacher = await user("admin"), await user("teacher")
     chain = await active_chain()
     source = await proposal("topic" if reference == "task" else "skill", chain, teacher)
+    subtopic = skill = None
+    if reference == "task":
+        source, subtopic, skill = await provisional_topic_branch(chain, teacher)
     task, version = await content_row(
-        chain, teacher, topic=source if reference == "task" else None
+        chain,
+        teacher,
+        topic=source if reference == "task" else None,
+        subtopic=subtopic,
+        skill=source if reference == "skill" else skill,
     )
-    if reference == "skill":
-        await skill_link(version, source)
     if reference == "methodology":
         await link_error(version, await typical_error(source))
     override_principal(app, teacher_principal(teacher))
@@ -882,8 +907,10 @@ async def test_approve_blocks_each_provisional_reference_atomically(reference):
 async def test_confirm_then_approve_vertical_emits_one_audit():
     admin, teacher = await user("admin"), await user("teacher")
     chain = await active_chain()
-    source = await proposal("topic", chain, teacher)
-    task, version = await content_row(chain, teacher, topic=source)
+    source, subtopic, skill = await provisional_topic_branch(chain, teacher)
+    task, version = await content_row(
+        chain, teacher, topic=source, subtopic=subtopic, skill=skill
+    )
     override_principal(app, teacher_principal(teacher))
     assert (
         await request(
@@ -896,6 +923,14 @@ async def test_confirm_then_approve_vertical_emits_one_audit():
     ).status_code == 409
     assert (
         await request("POST", f"/api/catalog/proposals/topic/{source}/confirm", {})
+    ).status_code == 200
+    assert (
+        await request(
+            "POST", f"/api/catalog/proposals/subtopic/{subtopic}/confirm", {}
+        )
+    ).status_code == 200
+    assert (
+        await request("POST", f"/api/catalog/proposals/skill/{skill}/confirm", {})
     ).status_code == 200
     approved = await request(
         "POST", f"/api/content-bank/tasks/{task}/versions/1/approve", {}
@@ -920,8 +955,15 @@ async def test_confirm_then_approve_vertical_emits_one_audit():
 async def test_merge_then_approve_task_reference_vertical_and_lifecycle():
     admin, teacher = await user("admin"), await user("teacher")
     chain = await active_chain()
-    source = await proposal("topic", chain, teacher)
-    task, version = await content_row(chain, teacher, "review", topic=source)
+    source, subtopic, skill = await provisional_topic_branch(chain, teacher)
+    task, version = await content_row(
+        chain,
+        teacher,
+        "review",
+        topic=source,
+        subtopic=subtopic,
+        skill=skill,
+    )
     override_principal(app, admin_principal(admin))
     assert (
         await request("POST", f"/api/content-bank/tasks/{task}/versions/1/approve", {})
@@ -932,6 +974,20 @@ async def test_merge_then_approve_task_reference_vertical_and_lifecycle():
             "POST",
             f"/api/catalog/proposals/topic/{source}/merge",
             {"target_id": str(chain["topic"]), "reason": reason},
+        )
+    ).status_code == 200
+    assert (
+        await request(
+            "POST",
+            f"/api/catalog/proposals/subtopic/{subtopic}/merge",
+            {"target_id": str(chain["subtopic"]), "reason": reason},
+        )
+    ).status_code == 200
+    assert (
+        await request(
+            "POST",
+            f"/api/catalog/proposals/skill/{skill}/merge",
+            {"target_id": str(chain["skill"]), "reason": reason},
         )
     ).status_code == 200
     assert (
@@ -962,8 +1018,12 @@ async def test_merge_then_approve_skill_link_vertical():
     admin, teacher = await user("admin"), await user("teacher")
     chain = await active_chain()
     source = await proposal("skill", chain, teacher)
-    task, version = await content_row(chain, teacher, "review")
-    link = await skill_link(version, source)
+    task, version = await content_row(chain, teacher, "review", skill=source)
+    async with async_session_factory() as session:
+        link = await session.scalar(
+            text("SELECT id FROM task_skill_links WHERE task_version_id=:v"),
+            {"v": version},
+        )
     override_principal(app, admin_principal(admin))
     assert (
         await request("POST", f"/api/content-bank/tasks/{task}/versions/1/approve", {})
@@ -999,10 +1059,18 @@ async def test_merge_refuses_historical_reference_without_partial_mutation(refer
     chain = await active_chain()
     source = await proposal("topic" if reference == "task" else "skill", chain, teacher)
     task, version = await content_row(
-        chain, teacher, "approved", topic=source if reference == "task" else None
+        chain,
+        teacher,
+        "approved",
+        topic=source if reference == "task" else None,
+        skill=source if reference == "skill" else None,
     )
     if reference == "skill":
-        link = await skill_link(version, source)
+        async with async_session_factory() as session:
+            link = await session.scalar(
+                text("SELECT id FROM task_skill_links WHERE task_version_id=:v"),
+                {"v": version},
+            )
     override_principal(app, admin_principal(admin))
     response = await request(
         "POST",
@@ -1045,7 +1113,7 @@ async def test_mutable_skill_merge_conflict_preserves_both_links():
     admin, teacher = await user("admin"), await user("teacher")
     chain = await active_chain()
     source = await proposal("skill", chain, teacher)
-    _, version = await content_row(chain, teacher)
+    _, version = await content_row(chain, teacher, add_primary_skill=False)
     first, second = (
         await skill_link(version, source, ".25", False),
         await skill_link(version, chain["skill"], ".75", True),
@@ -1161,9 +1229,18 @@ async def test_deprecated_stale_content_bank_write_is_rejected(resolution):
 async def test_approval_classifies_deprecated_reference_atomically(resolution, code):
     admin, teacher = await user("admin"), await user("teacher")
     chain = await active_chain()
-    source = await proposal("topic", chain, teacher)
-    task, version = await content_row(chain, teacher, "review", topic=source)
+    source, subtopic, skill = await provisional_topic_branch(chain, teacher)
+    task, version = await content_row(
+        chain, teacher, "review", topic=source, subtopic=subtopic, skill=skill
+    )
     async with async_session_factory() as session, session.begin():
+        await session.execute(
+            text("UPDATE subtopics SET status='active' WHERE id=:id"),
+            {"id": subtopic},
+        )
+        await session.execute(
+            text("UPDATE skills SET status='active' WHERE id=:id"), {"id": skill}
+        )
         await session.execute(
             text(
                 "UPDATE topics SET status='deprecated',replacement_id=:replacement,resolved_by=:a,resolved_at=now(),resolution_reason='legacy' WHERE id=:id"
