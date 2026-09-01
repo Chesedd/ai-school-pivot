@@ -2,6 +2,7 @@
 
 USERS_MANAGE = "users.manage"
 CATALOG_MANAGE = "catalog.manage"
+CATALOG_PROPOSE = "catalog.propose"
 DIAGNOSTICS_READ = "diagnostics.read"
 CONTENT_READ = "content.read"
 CONTENT_CREATE = "content.create"
@@ -22,6 +23,7 @@ ALL_CAPABILITIES = frozenset(
     {
         USERS_MANAGE,
         CATALOG_MANAGE,
+        CATALOG_PROPOSE,
         DIAGNOSTICS_READ,
         CONTENT_READ,
         CONTENT_CREATE,
@@ -45,6 +47,7 @@ ROLE_CAPABILITIES: dict[str, frozenset[str]] = {
     "teacher": frozenset(
         {
             CONTENT_READ,
+            CATALOG_PROPOSE,
             CONTENT_CREATE,
             CONTENT_EDIT,
             CONTENT_REVIEW_SUBMIT,

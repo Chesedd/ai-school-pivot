@@ -9,6 +9,7 @@ def test_teacher_has_exact_b1_grants():
     assert ROLE_CAPABILITIES["teacher"] == {
         "content.read", "content.create", "content.edit", "content.review.submit",
         "image_solving.use", "assessment.create", "assessment.manage", "assessment.results.read",
+        "catalog.propose",
     }
     assert not {"users.manage", "catalog.manage", "content.approve", "content.archive"} & ROLE_CAPABILITIES["teacher"]
 
@@ -24,3 +25,4 @@ def test_multiple_and_no_roles():
         ROLE_CAPABILITIES["teacher"] | ROLE_CAPABILITIES["student"]
     )
     assert capabilities_for_roles(frozenset()) == frozenset()
+    assert "catalog.propose" not in capabilities_for_roles(frozenset({"unknown"}))
