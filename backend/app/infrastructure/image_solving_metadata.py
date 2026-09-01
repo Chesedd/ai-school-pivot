@@ -13,11 +13,11 @@ class MetadataCatalogConsistencyError(RuntimeError):
 class SqlAlchemyMetadataCatalogLoader:
     def __init__(self,db):self.db=db
     async def load(self):
-        subjects=(await self.db.scalars(select(Subject).order_by(Subject.name))).all()
-        grades=(await self.db.scalars(select(Grade).order_by(Grade.number))).all()
-        topics=(await self.db.scalars(select(Topic).order_by(Topic.name))).all()
-        subs=(await self.db.scalars(select(Subtopic).order_by(Subtopic.name))).all()
-        skills=(await self.db.scalars(select(Skill).order_by(Skill.name))).all()
+        subjects=(await self.db.scalars(select(Subject).where(Subject.status=="active").order_by(Subject.name))).all()
+        grades=(await self.db.scalars(select(Grade).where(Grade.status=="active").order_by(Grade.number))).all()
+        topics=(await self.db.scalars(select(Topic).where(Topic.status=="active").order_by(Topic.name))).all()
+        subs=(await self.db.scalars(select(Subtopic).where(Subtopic.status=="active").order_by(Subtopic.name))).all()
+        skills=(await self.db.scalars(select(Skill).where(Skill.status=="active").order_by(Skill.name))).all()
         folders=(await self.db.scalars(select(TaskFolder).order_by(TaskFolder.name))).all()
         categories=(await self.db.scalars(select(TagCategory.code).order_by(TagCategory.sort_order))).all()
         tags=(await self.db.scalars(select(Tag).where(Tag.status=="active").order_by(Tag.normalized_name))).all()

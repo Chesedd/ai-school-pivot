@@ -445,18 +445,18 @@ class SQLAlchemyContentBankRepository:
 
     async def catalog(self, name: str) -> list[CatalogRecord]:
         if name == "subjects":
-            rows = (await self.session.execute(select(Subject).order_by(Subject.name))).scalars()
+            rows = (await self.session.execute(select(Subject).where(Subject.status == "active").order_by(Subject.name))).scalars()
             return [CatalogRecord(x.id, x.name, code=x.code) for x in rows]
         if name == "grades":
-            rows = (await self.session.execute(select(Grade).order_by(Grade.number))).scalars()
+            rows = (await self.session.execute(select(Grade).where(Grade.status == "active").order_by(Grade.number))).scalars()
             return [CatalogRecord(x.id, x.name, number=x.number) for x in rows]
         if name == "topics":
-            rows = (await self.session.execute(select(Topic).order_by(Topic.name))).scalars()
+            rows = (await self.session.execute(select(Topic).where(Topic.status == "active").order_by(Topic.name))).scalars()
             return [CatalogRecord(x.id, x.name, subject_id=x.subject_id, grade_id=x.grade_id, code=x.code) for x in rows]
         if name == "subtopics":
-            rows = (await self.session.execute(select(Subtopic).order_by(Subtopic.name))).scalars()
+            rows = (await self.session.execute(select(Subtopic).where(Subtopic.status == "active").order_by(Subtopic.name))).scalars()
             return [CatalogRecord(x.id, x.name, topic_id=x.topic_id, code=x.code) for x in rows]
-        rows = (await self.session.execute(select(Skill).options(selectinload(Skill.subtopic)).order_by(Skill.name))).scalars()
+        rows = (await self.session.execute(select(Skill).where(Skill.status == "active").options(selectinload(Skill.subtopic)).order_by(Skill.name))).scalars()
         return [CatalogRecord(x.id, x.name, topic_id=x.subtopic.topic_id, subtopic_id=x.subtopic_id, code=x.code) for x in rows]
 
 
