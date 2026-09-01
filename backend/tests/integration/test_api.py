@@ -215,7 +215,7 @@ async def _insert_archived_task(catalog) -> str:
                     "INSERT INTO tasks(id,subject_id,grade_id,topic_id,subtopic_id,created_by,archived_at) "
                     "VALUES (:id,:subject,:grade,:topic,:subtopic,:actor,CURRENT_TIMESTAMP)"
                 ),
-                {"id": task_id, "subject": catalog["subject"], "grade": catalog["grade"], "topic": catalog["topic"], "subtopic": catalog["subtopic"], "actor": uuid4()},
+                {"id": task_id, "subject": catalog["subject"], "grade": catalog["grade"], "topic": catalog["topic"], "subtopic": catalog["subtopic"], "actor": USER_A_ID},
             )
             await session.execute(
                 text(
@@ -297,7 +297,7 @@ async def test_archived_card_remains_available_by_id(catalog):
 
 
 async def test_latest_and_historical_approved_versions(catalog):
-    task_id, v1, v2, actor = uuid4(), uuid4(), uuid4(), uuid4()
+    task_id, v1, v2, actor = uuid4(), uuid4(), uuid4(), USER_A_ID
     async with async_session_factory() as session:
         async with session.begin():
             await _assert_test_database(session)
