@@ -26,24 +26,25 @@ async def engine():
 async def api_client(engine,monkeypatch):
     os.environ["DATABASE_URL"]=URL
     from httpx import ASGITransport,AsyncClient
-    from app.application.principal import Principal
+    from tests.integration.auth_helpers import clear_principal_override, override_principal, teacher_principal
     from app.main import app
     from app.presentation.auth_dependencies import require_principal
     import app.presentation.routes as routes
     test_factory=async_sessionmaker(engine,class_=AsyncSession,expire_on_commit=False)
     monkeypatch.setattr(routes,"async_session_factory",test_factory)
-    user_id=uuid4()
-    app.dependency_overrides[require_principal] = lambda: Principal(
-        user_id,"user-a","User A",frozenset(),frozenset(),None)
+    # The seeded aggregate has a stable owner; bind that owner after seeding.
+    user_id=UUID("00000000-0000-4000-8000-000000000001")
+    override_principal(app, teacher_principal(user_id))
     try:
         async with AsyncClient(transport=ASGITransport(app=app),base_url="http://test") as client:
             yield client
     finally:
-        app.dependency_overrides.pop(require_principal,None)
+        clear_principal_override(app)
 
 @pytest_asyncio.fixture
 async def seeded(engine):
     ids={name:uuid4() for name in ("actor","subject","grade","topic","task","v1","v2")}
+    ids["actor"] = UUID("00000000-0000-4000-8000-000000000001")
     async with engine.begin() as c:
         current=await c.scalar(text("SELECT current_database()"))
         assert current.endswith("_test")

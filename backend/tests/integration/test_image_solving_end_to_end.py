@@ -20,14 +20,13 @@ from app.application.image_solving_contracts import (
     ExtractionResultV1, ImageSolvingStatus, SolutionResultV1,
 )
 from app.application.input_artifacts import ArtifactOwnershipService, ArtifactUploadService
-from app.application.principal import Principal
 from app.infrastructure.artifact_storage import FilesystemArtifactStorage
 from app.infrastructure.image_solving_repository import SqlAlchemyImageSolvingRepository
 from app.infrastructure.input_artifact_repository import SqlAlchemyArtifactRepository
 from app.main import app
 from app.presentation.image_artifact_routes import service as artifact_service
 from app.presentation.image_solving_routes import image_solving_service
-from app.presentation.auth_dependencies import require_principal
+from tests.integration.auth_helpers import clear_principal_override, override_principal, teacher_principal
 
 if URL and not URL.rsplit("/", 1)[-1].split("?", 1)[0].endswith("_test"):
     raise RuntimeError("image solving tests require *_test database")
@@ -185,8 +184,7 @@ async def test_complete_http_api_flow_uses_mocked_providers(context):
 
     app.dependency_overrides[artifact_service] = upload_dependency
     app.dependency_overrides[image_solving_service] = solving_dependency
-    app.dependency_overrides[require_principal] = lambda: Principal(
-        owner, "user-a", "User A", frozenset(), frozenset(), None)
+    override_principal(app, teacher_principal(owner))
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             uploaded = await client.post("/api/image-solving/artifacts",
@@ -202,7 +200,7 @@ async def test_complete_http_api_flow_uses_mocked_providers(context):
     finally:
         app.dependency_overrides.pop(artifact_service, None)
         app.dependency_overrides.pop(image_solving_service, None)
-        app.dependency_overrides.pop(require_principal, None)
+        clear_principal_override(app)
     assert ran.status_code == state.status_code == result.status_code == 200
     assert state.json()["status"] == "validated" and result.json()["solution"]["answer"] == "4"
     assert len(extractor.calls) == len(solver.calls) == 1

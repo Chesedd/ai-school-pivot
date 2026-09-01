@@ -26,8 +26,8 @@ from app.main import app  # noqa: E402
 from app.infrastructure.repository import SQLAlchemyContentBankRepository  # noqa: E402
 from app.infrastructure.repository import SQLAlchemyUnitOfWork  # noqa: E402
 from app.application.content_bank import ActorContext, CreateVersionCommand, CreateVersionService  # noqa: E402
-from app.application.principal import Principal  # noqa: E402
-from app.presentation.auth_dependencies import require_principal  # noqa: E402
+from tests.integration.auth_helpers import (admin_principal, clear_principal_override,
+    override_principal, teacher_principal)  # noqa: E402
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 USER_A_ID = uuid4()
@@ -35,12 +35,11 @@ USER_A_ID = uuid4()
 
 @pytest.fixture(autouse=True)
 def authenticated_user_a():
-    app.dependency_overrides[require_principal] = lambda: Principal(
-        USER_A_ID, "user-a", "User A", frozenset(), frozenset(), None)
+    override_principal(app, teacher_principal(USER_A_ID))
     try:
         yield
     finally:
-        app.dependency_overrides.pop(require_principal, None)
+        clear_principal_override(app)
 
 
 @pytest_asyncio.fixture(scope="session", autouse=True, loop_scope="session")
@@ -160,8 +159,7 @@ async def test_separate_authenticated_users_receive_separate_attribution(catalog
     user_b_id = uuid4()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         first = await client.post("/api/content-bank/tasks", json=payload(catalog))
-        app.dependency_overrides[require_principal] = lambda: Principal(
-            user_b_id, "user-b", "User B", frozenset(), frozenset(), None)
+        override_principal(app, teacher_principal(user_b_id))
         second = await client.post("/api/content-bank/tasks", json=payload(catalog))
     assert first.status_code == second.status_code == 201
     async with async_session_factory() as session:
@@ -383,6 +381,7 @@ async def test_status_cycle_warnings_reason_and_strict_rollback(catalog):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         created = await client.post("/api/content-bank/tasks", json=payload(catalog)); task_id = created.json()["id"]
         review = await client.post(f"/api/content-bank/tasks/{task_id}/versions/1/submit-review", json={})
+        override_principal(app, admin_principal(USER_A_ID))
         failed = await client.post(f"/api/content-bank/tasks/{task_id}/versions/1/approve", json={})
         missing_reason = await client.post(f"/api/content-bank/tasks/{task_id}/versions/1/return-to-draft", json={})
         blank_reason = await client.post(f"/api/content-bank/tasks/{task_id}/versions/1/return-to-draft", json={"reason":"   "})
@@ -401,6 +400,7 @@ async def test_approve_clone_archive_and_server_metadata(catalog):
         created = await client.post("/api/content-bank/tasks", json=payload(catalog)); task_id = created.json()["id"]; v1 = created.json()["initial_version"]["id"]
         assert (await client.put(f"/api/content-bank/task-versions/{v1}/methodology", json=methodology(catalog))).status_code == 200
         assert (await client.post(f"/api/content-bank/tasks/{task_id}/versions/1/submit-review", json={})).status_code == 200
+        override_principal(app, admin_principal(USER_A_ID))
         approved = await client.post(f"/api/content-bank/tasks/{task_id}/versions/1/approve", json={})
         created_v2 = await _clone_revision(task_id)
         assert (await client.post(f"/api/content-bank/tasks/{task_id}/versions/2/submit-review", json={})).status_code == 200
@@ -436,6 +436,7 @@ async def test_archive_is_idempotent_visible_and_blocks_actions(catalog, initial
                 version_id = created.json()["initial_version"]["id"]
                 await client.put(f"/api/content-bank/task-versions/{version_id}/methodology", json=methodology(catalog))
             await client.post(f"/api/content-bank/tasks/{task_id}/versions/1/submit-review", json={})
+        override_principal(app, admin_principal(USER_A_ID))
         if initial_status == "approved":
             await client.post(f"/api/content-bank/tasks/{task_id}/versions/1/approve", json={})
         first = await client.post(f"/api/content-bank/tasks/{task_id}/archive")
@@ -532,6 +533,7 @@ async def test_search_status_and_archived_semantics(catalog):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         active = await _create_search_task(client, catalog, statement="Статусный маркер")
         archived = await _create_search_task(client, catalog, statement="Статусный маркер")
+        override_principal(app, admin_principal(USER_A_ID))
         await client.post(f"/api/content-bank/tasks/{archived['id']}/archive")
         draft = await client.get("/api/content-bank/tasks", params={"q":"маркер", "status":"draft"})
         ordinary = await client.get("/api/content-bank/tasks", params={"q":"маркер"})
@@ -615,6 +617,7 @@ async def test_updated_at_lifecycle_and_read_model_consistency(catalog):
         assert after_submit["latest_version"]["updated_at"] != past
 
         await _force_display_timestamps_into_past(task_id, version_id)
+        override_principal(app, admin_principal(USER_A_ID))
         assert (await client.post(f"/api/content-bank/tasks/{task_id}/versions/1/return-to-draft", json={"reason":"Проверка timestamp"})).status_code == 200
         after_return = (await client.get(f"/api/content-bank/tasks/{task_id}")).json()
         assert after_return["updated_at"] != past
@@ -685,6 +688,8 @@ async def test_audit_read_filter_pagination_and_not_found(catalog):
 async def test_archive_reason_is_atomic_and_idempotent_in_audit(catalog):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         created = await client.post("/api/content-bank/tasks", json=payload(catalog)); task_id = created.json()["id"]
+        override_principal(app, admin_principal(USER_A_ID))
+        override_principal(app, admin_principal(USER_A_ID))
         failed = await client.post(f"/api/content-bank/tasks/{task_id}/versions/1/approve", json={})
         await client.post(f"/api/content-bank/tasks/{task_id}/archive", json={"reason": "obsolete"})
         await client.post(f"/api/content-bank/tasks/{task_id}/archive", json={"reason": "again"})
