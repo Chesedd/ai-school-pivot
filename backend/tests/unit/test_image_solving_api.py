@@ -9,7 +9,8 @@ from app.application.image_solving import ImageSolvingError
 from app.application.image_solving_api import ImageSolvingApiError, ImageSolvingApplicationService
 from app.application.image_solving_contracts import (ExtractionResultV1, ImageSolvingSession,
     ImageSolvingStatus, SolutionResultV1, ValidationResultV1)
-from app.presentation.image_solving_schemas import CreateImageSolvingSessionRequest
+from app.presentation.image_solving_schemas import (CreateImageSolvingSessionRequest,
+    PromoteImageSolvingRequest)
 
 
 def state(owner=None, status=ImageSolvingStatus.CREATED, complete=False):
@@ -51,6 +52,71 @@ def test_create_dto_is_strict_immutable_and_forbids_server_owned_fields():
     with pytest.raises(ValidationError): CreateImageSolvingSessionRequest(
         artifact_id=artifact_id, owner_id=uuid4())
     with pytest.raises(ValidationError): value.artifact_id = uuid4()
+
+
+def promotion_payload(**changes):
+    subject_id, grade_id, topic_id, skill_id = (uuid4() for _ in range(4))
+    payload = {
+        "title": "Addition",
+        "statement": "What is 2 + 2?",
+        "task_type": "calculation",
+        "answer_format": "number",
+        "difficulty": 1,
+        "subject_id": str(subject_id),
+        "grade_id": str(grade_id),
+        "topic_id": str(topic_id),
+        "subtopic_id": None,
+        "skill_ids": [str(skill_id)],
+        "tag_ids": [],
+        "solution": "Add both values.",
+        "final_answer": "4",
+        "review_confirmed": True,
+        "review_note": None,
+        "confirm_questionable": False,
+    }
+    payload.update(changes)
+    return payload, skill_id
+
+
+def test_promotion_dto_parses_json_uuid_arrays_to_uuid_tuples():
+    tag_id = uuid4()
+    payload, skill_id = promotion_payload(tag_ids=[str(tag_id)])
+
+    parsed = PromoteImageSolvingRequest.model_validate(payload)
+
+    assert parsed.skill_ids == (skill_id,)
+    assert parsed.tag_ids == (tag_id,)
+    assert isinstance(parsed.skill_ids, tuple)
+    assert isinstance(parsed.tag_ids, tuple)
+    assert all(type(value) is type(skill_id) for value in (*parsed.skill_ids, *parsed.tag_ids))
+
+
+def test_promotion_dto_parses_empty_json_tag_array_to_tuple():
+    payload, skill_id = promotion_payload()
+
+    parsed = PromoteImageSolvingRequest.model_validate(payload)
+
+    assert parsed.skill_ids == (skill_id,)
+    assert parsed.tag_ids == ()
+
+
+def test_promotion_dto_rejects_invalid_uuid_in_json_array():
+    payload, _ = promotion_payload(skill_ids=["not-a-uuid"])
+
+    with pytest.raises(ValidationError):
+        PromoteImageSolvingRequest.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("field", "error_code"),
+    (("skill_ids", "duplicate_skills"), ("tag_ids", "duplicate_tags")),
+)
+def test_promotion_dto_rejects_duplicate_uuid_in_json_arrays(field, error_code):
+    duplicate_id = uuid4()
+    payload, _ = promotion_payload(**{field: [str(duplicate_id), str(duplicate_id)]})
+
+    with pytest.raises(ValidationError, match=error_code):
+        PromoteImageSolvingRequest.model_validate(payload)
 
 
 async def test_foreign_session_is_hidden_as_not_found():
