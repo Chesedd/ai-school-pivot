@@ -3,7 +3,10 @@ from decimal import Decimal
 from uuid import uuid4
 
 from app.application.image_solving_contracts import ExtractionResultV1, ImageSolvingSession, ImageSolvingStatus
-from app.application.image_solving_metadata import CatalogItemV1, MetadataCatalogSnapshotV1, TagCandidateV1, resolve_metadata
+from app.application.image_solving_metadata import (CatalogItemV1,
+    ImageTaskMetadataRecommendationV1, MetadataCatalogSnapshotV1,
+    TagCandidateV1, resolve_metadata)
+from app.infrastructure.image_solving_repository import deserialize_json_contract
 
 
 def item(name, **values):
@@ -45,17 +48,35 @@ def test_exact_resolution_is_scoped_to_selected_hierarchy():
     assert (result.subject.id,result.grade.id,result.topic.id,result.subtopic.id)==(subject.id,grade.id,topic.id,sub.id)
     assert result.skills[0].id==skill.id and result.tags[0].id==tag.id
     assert result.folder is None
+    assert (result.subject.label, result.grade.label, result.topic.label,
+            result.subtopic.label, result.skills[0].label) == (
+        "Математика", "6", "Уравнения", "Линейные уравнения",
+        "Решать линейные уравнения")
 
 
 def test_ambiguous_subject_leaves_hierarchy_unresolved_without_fake_ids():
     result,_=resolve(duplicate_subject=True)
     assert result.subject.kind=="new" and result.subject.proposed_name=="Математика"
     assert result.topic.kind==result.subtopic.kind==result.skills[0].kind=="new"
+    assert (result.topic.proposed_name, result.subtopic.proposed_name,
+            result.skills[0].proposed_name) == (
+        "Уравнения", "Линейные уравнения", "Решать линейные уравнения")
 
 
 def test_incompatible_tag_is_an_unresolved_name():
     result,_=resolve(incompatible_tag=True)
     assert result.tags[0].kind=="new" and result.tags[0].name=="Алгебра"
+
+
+def test_mixed_recommendation_roundtrips_through_persisted_api_shape():
+    result,_=resolve(duplicate_subject=True)
+    payload=result.model_dump(mode="json")
+    restored=deserialize_json_contract(payload, ImageTaskMetadataRecommendationV1)
+
+    assert restored == result
+    assert payload["subject"]["proposed_name"] == "Математика"
+    assert payload["topic"]["proposed_name"] == "Уравнения"
+    assert payload["skills"][0]["proposed_name"] == "Решать линейные уравнения"
 
 import pytest
 from types import SimpleNamespace
