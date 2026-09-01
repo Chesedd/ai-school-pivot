@@ -42,7 +42,7 @@ export function App({principal=legacyPrincipal,onLogout}:{principal?:Principal;o
  else if(path==="/no-access")page=<section className="empty-state"><h1>Нет назначенных прав</h1><p>Для аккаунта пока не назначены права доступа.</p></section>;
  else if(capability&&!hasCapability(principal,capability))page=<AccessDenied navigate={navigate} principal={principal}/>;
  else if(path==="/image-solving/new")page=<ImageSolvingUploadPage navigate={navigate}/>;
- else if(imageSolving)page=<ImageSolvingSessionPage sessionId={decodeURIComponent(imageSolving[1])} navigate={navigate}/>;
+ else if(imageSolving)page=<ImageSolvingSessionPage sessionId={decodeURIComponent(imageSolving[1])} navigate={navigate} canProposeCatalog={hasCapability(principal,"catalog.propose")}/>;
  else if(path==="/student"||path==="/student/assignments")page=<StudentAssignmentListPage navigate={navigate}/>;
  else if(studentAttempt)page=<StudentAttemptPage assignmentId={studentAttempt[1]} submissionId={studentAttempt[2]} navigate={navigate} onDirtyChange={setDirty}/>;
  else if(studentAssignment)page=<StudentAssignmentDetailPage assignmentId={studentAssignment[1]} navigate={navigate}/>;
