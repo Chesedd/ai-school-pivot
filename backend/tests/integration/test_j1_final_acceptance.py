@@ -221,8 +221,8 @@ async def test_image_solving_proposals_content_bank_resolution_and_approval_vert
         for table, value in zip(("subjects","grades","topics","subtopics","skills"), proposal_ids):
             row = (await db.execute(text(f"SELECT status,proposed_by,resolved_by,resolved_at,replacement_id FROM {table} WHERE id=:id"), {"id":value})).one()
             assert row.status == "active" and row.proposed_by == teacher and row.resolved_by == admin and row.resolved_at and row.replacement_id is None
-        audit = (await db.execute(text("SELECT created_by,details FROM audit_log WHERE task_id=:id AND action='task_created'"), {"id":task_id})).one()
-        assert audit.created_by == teacher and audit.details["image_solving_session_id"] == str(session_id)
+        audit = (await db.execute(text("SELECT actor_id,details FROM audit_log WHERE task_id=:id AND action='task_created'"), {"id":task_id})).one()
+        assert audit.actor_id == teacher and audit.details["image_solving_session_id"] == str(session_id)
         assert audit.details["input_artifact_id"] == uploaded.json()["artifact_id"] and audit.details["human_review_confirmed"] is True
         assert await db.scalar(text("SELECT count(*) FROM audit_log WHERE task_version_id=:id AND action='version_approved'"), {"id":version_id}) == 1
         assert await db.scalar(text("SELECT count(*) FROM image_solving_recommendations WHERE session_id=:id"), {"id":session_id}) == 1
