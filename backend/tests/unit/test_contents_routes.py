@@ -8,6 +8,9 @@ import httpx
 import pytest
 
 from app.main import app
+from app.application.capabilities import capabilities_for_roles
+from app.application.principal import Principal
+from app.presentation.auth_dependencies import require_principal
 from app.presentation import routes
 
 
@@ -15,6 +18,18 @@ class SessionFactory:
     def __call__(self): return self
     async def __aenter__(self): return object()
     async def __aexit__(self, *args): return None
+
+
+@pytest.fixture
+def authenticated_teacher():
+    roles = frozenset({"teacher"})
+    principal = Principal(uuid4(), "teacher", "Teacher", roles,
+                          capabilities_for_roles(roles), None)
+    app.dependency_overrides[require_principal] = lambda: principal
+    try:
+        yield principal
+    finally:
+        app.dependency_overrides.pop(require_principal, None)
 
 
 @pytest.mark.asyncio
@@ -33,7 +48,7 @@ async def test_content_bank_mutation_requires_authentication():
             base_url="http://test") as client:
         response = await client.post("/api/content-bank/tasks", json=payload)
     assert response.status_code == 401
-    assert response.json()["detail"] == "authentication_required"
+    assert response.json()["error"]["code"] == "authentication_required"
 
 
 @pytest.mark.asyncio
@@ -44,7 +59,7 @@ async def test_content_bank_mutation_requires_authentication():
     ({"offset": 0, "limit": 20, "difficulty_min": 1, "difficulty_max": 100}, "created_at", None),
     ({"offset": 3, "limit": 10, "grade_id": str(uuid4()), "topic_id": str(uuid4()), "subtopic_id": str(uuid4()), "skill_id": str(uuid4()), "task_type": "calculation", "status": "approved", "sort_by": "difficulty", "sort_order": "asc"}, "difficulty", None),
 ])
-async def test_contents_routes_construct_valid_default_sort(monkeypatch, kind, params, expected_sort, expected_q):
+async def test_contents_routes_construct_valid_default_sort(monkeypatch, authenticated_teacher, kind, params, expected_sort, expected_q):
     subject_id, folder_id, captured = uuid4(), uuid4(), []
     payload = {"subject": {"id": str(subject_id), "name": "Математика"}, "folder": None,
                "breadcrumb": [], "folders": [],
@@ -82,13 +97,13 @@ async def test_contents_routes_construct_valid_default_sort(monkeypatch, kind, p
     {"sort_by": "made_up"}, {"sort_order": "sideways"},
     {"difficulty_min": 0}, {"difficulty_max": 101},
 ])
-async def test_contents_reject_invalid_public_query_values(params):
+async def test_contents_reject_invalid_public_query_values(authenticated_teacher, params):
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get(f"/api/content-bank/subjects/{uuid4()}/contents", params=params)
     assert response.status_code == 422
 
 @pytest.mark.asyncio
-async def test_subject_path_cannot_be_overridden(monkeypatch):
+async def test_subject_path_cannot_be_overridden(monkeypatch, authenticated_teacher):
     path_subject, attempted_subject, captured = uuid4(), uuid4(), []
     class Repo:
         def __init__(self, _session): pass

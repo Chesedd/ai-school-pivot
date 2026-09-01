@@ -121,6 +121,7 @@ async def test_teacher_read_catalogues_are_ordered_scoped_and_private(client, da
 
 async def content_version(engine, status="approved", archived=False):
     values = {key: uuid4() for key in ("actor", "subject", "grade", "topic", "task", "version")}
+    values["actor"] = TEACHER_ID
     async with engine.begin() as connection:
         catalog = (await connection.execute(text("SELECT s.id,g.id,t.id FROM topics t JOIN subjects s ON s.id=t.subject_id JOIN grades g ON g.id=t.grade_id LIMIT 1"))).one_or_none()
         if catalog is None:
@@ -363,7 +364,7 @@ class PausingPublicationUnitOfWork(SQLAlchemyAssessmentUnitOfWork):
 
 
 async def publication_fixture(engine, factory, *, students=2):
-    actor = ActorContext(uuid4()); content = await content_version(engine)
+    actor = ActorContext(TEACHER_ID); content = await content_version(engine)
     async with factory() as session:
         assessment = Assessment(title="Controlled publication", created_by=actor.actor_id)
         session.add(assessment); await session.flush()
@@ -582,7 +583,7 @@ async def test_patch_atomic_cas_loser_has_no_audit(client, database):
 
 async def test_concurrent_variant_creation_serializes_positions_and_audit(database):
     engine, factory = database
-    actor = ActorContext(uuid4())
+    actor = ActorContext(TEACHER_ID)
     async with factory() as session:
         row = Assessment(title="Concurrent", created_by=actor.actor_id)
         session.add(row); await session.commit(); await session.refresh(row)
@@ -669,7 +670,7 @@ async def test_composition_api_validation_reorder_points_delete_and_history(clie
 
 async def test_concurrent_item_adds_serialize_and_duplicate_is_normative(database):
     engine, factory = database
-    actor = ActorContext(uuid4())
+    actor = ActorContext(TEACHER_ID)
     left_version = await content_version(engine)
     right_version = await content_version(engine)
     async with factory() as session:
@@ -703,7 +704,7 @@ async def test_concurrent_item_adds_serialize_and_duplicate_is_normative(databas
 
 async def test_archive_wins_add_waits_then_revalidates_without_partial_state(database):
     engine, factory = database
-    actor = ActorContext(uuid4()); content = await content_version(engine)
+    actor = ActorContext(TEACHER_ID); content = await content_version(engine)
     async with factory() as session:
         assessment = Assessment(title="Archive wins", created_by=actor.actor_id)
         session.add(assessment); await session.flush()
@@ -737,7 +738,7 @@ async def test_archive_wins_add_waits_then_revalidates_without_partial_state(dat
 
 async def test_add_wins_archive_waits_then_historical_item_survives(client, database):
     engine, factory = database
-    actor = ActorContext(uuid4()); content = await content_version(engine)
+    actor = ActorContext(TEACHER_ID); content = await content_version(engine)
     assessment = await create(client, "Add wins")
     variant = (await client.post(f"/api/assessment-core/assessments/{assessment['id']}/variants", json={"name": "A"})).json()
 
