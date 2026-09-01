@@ -44,6 +44,14 @@ class CatalogLifecycleMixin:
     @declared_attr
     def proposed_by(cls) -> Mapped[UUID | None]:
         return mapped_column(ForeignKey("users.id", ondelete="RESTRICT", onupdate="RESTRICT", name=f"fk_{cls.__tablename__}_proposed_by_users"), nullable=True)
+    @declared_attr
+    def resolved_by(cls) -> Mapped[UUID | None]:
+        return mapped_column(ForeignKey("users.id", ondelete="RESTRICT", onupdate="RESTRICT", name=f"fk_{cls.__tablename__}_resolved_by_users"), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolution_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    @declared_attr
+    def replacement_id(cls) -> Mapped[UUID | None]:
+        return mapped_column(ForeignKey(f"{cls.__tablename__}.id", ondelete="RESTRICT", name=f"fk_{cls.__tablename__}_replacement_id_{cls.__tablename__}"), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("clock_timestamp()"))
 
 

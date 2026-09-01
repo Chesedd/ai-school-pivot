@@ -77,6 +77,15 @@ class CatalogProposalService:
             row = await self._find(command, lifecycle)
             if row is not None:
                 return self._result(command.kind, row, outcome)
+        alias_lookup = getattr(self.repository, "find_merged_alias", None)
+        alias = None if alias_lookup is None else await alias_lookup(
+            command.kind, command.name, number=command.number, subject_id=command.subject_id,
+            grade_id=command.grade_id, topic_id=command.topic_id, subtopic_id=command.subtopic_id,
+        )
+        if alias is not None:
+            target = await self.repository.get(command.kind, alias.replacement_id)
+            if target is not None and target.status == CatalogLifecycle.ACTIVE.value:
+                return self._result(command.kind, target, "existing_active")
 
         try:
             async with self.repository.session.begin_nested():

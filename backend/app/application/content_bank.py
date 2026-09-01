@@ -701,6 +701,7 @@ class ContentBankRepository(Protocol):
     async def append_audit(self, event: AuditEventRecord) -> None: ...
     async def list_audit(self, task_id: UUID, offset: int, limit: int, action: str | None) -> AuditPage | None: ...
     async def find_duplicate_candidates(self, query: DuplicateQuery) -> tuple[DuplicateCandidateRecord, ...]: ...
+    async def ensure_active_catalog_references(self, task_id: UUID, task_version_id: UUID) -> None: ...
 
 
 class UnitOfWork(Protocol):
@@ -1114,6 +1115,7 @@ class StatusCycleService:
                     issues.append(ValidationDetail("methodology.rubric.max_score", "rubric_score_mismatch", "Максимальный балл должен совпадать с суммой баллов критериев."))
             if issues:
                 raise IssuesError("approval_requirements_not_met", "Версия не соответствует требованиям утверждения.", issues)
+            await self.uow.repository.ensure_active_catalog_references(task_id, version.task_version_id)
             now = datetime.now(timezone.utc)
             await self.uow.repository.archive_other_approved(task_id, version.task_version_id)
             await self.uow.repository.set_version_status(version.task_version_id, "approved", now, actor.actor_id)
