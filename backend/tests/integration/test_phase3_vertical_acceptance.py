@@ -59,11 +59,11 @@ async def approved_number_versions(engine, actor_id):
     subject, grade, topic = uuid4(), uuid4(), uuid4()
     tasks = [(uuid4(), uuid4()), (uuid4(), uuid4())]
     async with engine.begin() as connection:
-        await connection.execute(text("INSERT INTO subjects(id,code,name) VALUES (:id,:code,'Vertical subject')"),
+        await connection.execute(text("INSERT INTO subjects(id,code,name,normalized_name) VALUES (:id,:code,'Vertical subject','vertical subject')"),
                                  {"id": subject, "code": f"vertical-{subject}"})
-        await connection.execute(text("INSERT INTO grades(id,number,name) VALUES (:id,9,'9')"), {"id": grade})
-        await connection.execute(text("INSERT INTO topics(id,subject_id,grade_id,code,name) "
-            "VALUES (:id,:subject,:grade,:code,'Vertical topic')"),
+        await connection.execute(text("INSERT INTO grades(id,number,name,normalized_name) VALUES (:id,9,'9','9')"), {"id": grade})
+        await connection.execute(text("INSERT INTO topics(id,subject_id,grade_id,code,name,normalized_name) "
+            "VALUES (:id,:subject,:grade,:code,'Vertical topic','vertical topic')"),
             {"id": topic, "subject": subject, "grade": grade, "code": f"vertical-{topic}"})
         for index, (task_id, version_id) in enumerate(tasks, 1):
             await connection.execute(text("INSERT INTO tasks(id,subject_id,grade_id,topic_id,created_by) "

@@ -79,11 +79,11 @@ async def catalog():
         async with session.begin():
             await _assert_test_database(session)
             await session.execute(text("TRUNCATE audit_log, task_skill_links, task_versions, tasks, skills, subtopics, topics, grades, subjects CASCADE"))
-            await session.execute(text("INSERT INTO subjects(id,code,name) VALUES (:id,'s','Subject')"), {"id": ids["subject"]})
-            await session.execute(text("INSERT INTO grades(id,number,name) VALUES (:id,7,'Grade')"), {"id": ids["grade"]})
-            await session.execute(text("INSERT INTO topics(id,subject_id,grade_id,code,name) VALUES (:id,:s,:g,'t','Topic'),(:other,:s,:g,'o','Other')"), {"id": ids["topic"], "other": ids["other_topic"], "s": ids["subject"], "g": ids["grade"]})
-            await session.execute(text("INSERT INTO subtopics(id,topic_id,code,name) VALUES (:id,:t,'st','Subtopic'),(:other,:ot,'ost','Other')"), {"id": ids["subtopic"], "t": ids["topic"], "other": ids["other_subtopic"], "ot": ids["other_topic"]})
-            await session.execute(text("INSERT INTO skills(id,subtopic_id,code,name) VALUES (:id,:st,'sk','Skill'),(:other,:ost,'osk','Other')"), {"id": ids["skill"], "st": ids["subtopic"], "other": ids["other_skill"], "ost": ids["other_subtopic"]})
+            await session.execute(text("INSERT INTO subjects(id,code,name,normalized_name) VALUES (:id,'s','Subject','subject')"), {"id": ids["subject"]})
+            await session.execute(text("INSERT INTO grades(id,number,name,normalized_name) VALUES (:id,7,'Grade','grade')"), {"id": ids["grade"]})
+            await session.execute(text("INSERT INTO topics(id,subject_id,grade_id,code,name,normalized_name) VALUES (:id,:s,:g,'t','Topic','topic'),(:other,:s,:g,'o','Other','other')"), {"id": ids["topic"], "other": ids["other_topic"], "s": ids["subject"], "g": ids["grade"]})
+            await session.execute(text("INSERT INTO subtopics(id,topic_id,code,name,normalized_name) VALUES (:id,:t,'st','Subtopic','subtopic'),(:other,:ot,'ost','Other','other')"), {"id": ids["subtopic"], "t": ids["topic"], "other": ids["other_subtopic"], "ot": ids["other_topic"]})
+            await session.execute(text("INSERT INTO skills(id,subtopic_id,code,name,normalized_name) VALUES (:id,:st,'sk','Skill','skill'),(:other,:ost,'osk','Other','other')"), {"id": ids["skill"], "st": ids["subtopic"], "other": ids["other_skill"], "ost": ids["other_subtopic"]})
     try:
         yield ids
     finally:
