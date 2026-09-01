@@ -23,6 +23,8 @@ from app.presentation.image_artifact_routes import router as image_artifact_rout
 from app.presentation.auth_routes import router as auth_router
 from app.presentation.admin_user_routes import router as admin_user_router
 from app.application.user_administration import AdministrationError
+from app.application.catalog_proposals import CatalogProposalError
+from app.presentation.catalog_proposal_routes import router as catalog_proposal_router
 
 
 app = FastAPI()
@@ -38,6 +40,11 @@ app.include_router(attachment_router)
 app.include_router(authoring_router)
 app.include_router(image_solving_router)
 app.include_router(image_artifact_router)
+app.include_router(catalog_proposal_router)
+
+@app.exception_handler(CatalogProposalError)
+async def catalog_proposal_error(_: Request, exc: CatalogProposalError) -> JSONResponse:
+    return error_response(exc.code, str(exc), [], exc.status)
 
 @app.exception_handler(AdministrationError)
 async def administration_error(_: Request, exc: AdministrationError) -> JSONResponse:

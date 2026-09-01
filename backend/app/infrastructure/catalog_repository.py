@@ -45,12 +45,11 @@ class SQLAlchemyCatalogRepository:
         grade_id: UUID | None = None,
         topic_id: UUID | None = None,
         subtopic_id: UUID | None = None,
+        number: int | None = None,
     ):
         model = MODELS[kind]
-        query = select(model).where(
-            model.normalized_name == normalize_catalog_name(name),
-            model.status == status.value,
-        )
+        identity = model.number == number if model is Grade else model.normalized_name == normalize_catalog_name(name)
+        query = select(model).where(identity, model.status == status.value)
         for key, value in (
             ("subject_id", subject_id),
             ("grade_id", grade_id),
