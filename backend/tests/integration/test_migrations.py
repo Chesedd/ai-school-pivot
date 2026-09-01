@@ -47,14 +47,15 @@ async def assert_database_at_repository_head(engine) -> None:
 def alembic(*arguments: str) -> str:
     environment = os.environ.copy()
     environment["DATABASE_URL"] = URL
-    completed = subprocess.run(
-        ["alembic", *arguments],
-        cwd=BACKEND,
-        env=environment,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    command = ["alembic", *arguments]
+    try:
+        completed = subprocess.run(command, cwd=BACKEND, env=environment,
+            check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        raise AssertionError(
+            f"Alembic command failed: {' '.join(command)}\n"
+            f"stdout:\n{exc.stdout}\n\nstderr:\n{exc.stderr}"
+        ) from exc
     return completed.stdout
 
 
@@ -126,6 +127,11 @@ async def test_clean_database_upgrades_to_head_with_observability_columns():
 def supported_baseline_metadata() -> sa.MetaData:
     """Return the affected portion of the schema as it was at 20260823_02."""
     metadata = sa.MetaData()
+    # These tables already existed at the supported revision and are required
+    # by the later account migration's student_user_links foreign key.
+    from app.infrastructure.assessment_models import ClassGroup, Student
+    ClassGroup.__table__.to_metadata(metadata)
+    Student.__table__.to_metadata(metadata)
     session_status = postgresql.ENUM(
         "draft", "generating", "ready", "confirmed", "rejected", "expired",
         name="authoring_session_status",

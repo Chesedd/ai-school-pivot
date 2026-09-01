@@ -30,7 +30,7 @@ from tests.integration.auth_helpers import (admin_principal, clear_principal_ove
     override_principal, teacher_principal)  # noqa: E402
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
-USER_A_ID = uuid4()
+USER_A_ID = UUID("00000000-0000-4000-8000-000000000001")
 
 
 @pytest.fixture(autouse=True)

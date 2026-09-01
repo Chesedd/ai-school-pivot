@@ -189,9 +189,11 @@ async def test_phase3_teacher_student_historical_handoff_vertical(vertical_clien
     archived_handoff = await AssessmentCheckingHandoffService(factory).get(UUID(submission_id))
     assert archived_handoff == handoff
 
+    override_principal(app, teacher_principal(actor_id))
     closed = await client.post(f"/api/assessment-core/assignments/{assignment_id}/close", json={})
     assert closed.status_code == 200 and closed.json()["status"] == "closed"
     assert (await client.get(f"/api/assessment-core/assignments/{assignment_id}")).json()["status"] == "closed"
+    override_principal(app, student_principal(account_id, student_id))
     assert (await client.get(f"/api/assessment-core/student/attempts/{submission_id}")).status_code == 200
     assert await AssessmentCheckingHandoffService(factory).get(UUID(submission_id)) == handoff
     blocked = await client.post(f"/api/assessment-core/student/assignments/{assignment_id}/attempts/start",

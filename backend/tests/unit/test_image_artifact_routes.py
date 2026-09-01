@@ -9,6 +9,7 @@ import pytest
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://unit:unit@localhost/unit")
 
 from app.application.input_artifacts import ArtifactUploadService, InputArtifactRecord
+from app.application.capabilities import capabilities_for_roles
 from app.application.principal import Principal
 from app.main import app
 from app.presentation.auth_dependencies import require_principal
@@ -21,7 +22,9 @@ USER_A = uuid4()
 
 
 def user_a():
-    return Principal(USER_A, "user-a", "User A", frozenset(), frozenset(), None)
+    roles = frozenset({"teacher"})
+    return Principal(USER_A, "user-a", "User A", roles,
+                     capabilities_for_roles(roles), None)
 
 
 class Repository:
@@ -131,9 +134,9 @@ async def test_image_solving_routes_require_authentication():
             json={"artifact_id": str(uuid4())})
 
     assert upload_response.status_code == 401
-    assert upload_response.json()["detail"] == "authentication_required"
+    assert upload_response.json()["error"]["code"] == "authentication_required"
     assert session_response.status_code == 401
-    assert session_response.json()["detail"] == "authentication_required"
+    assert session_response.json()["error"]["code"] == "authentication_required"
 
 
 @pytest.mark.asyncio
