@@ -45,25 +45,48 @@ class SQLAlchemyContentBankRepository:
 
     async def get_subject(self, value: UUID) -> CatalogRecord | None:
         row = await self.session.get(Subject, value)
-        return CatalogRecord(row.id, row.name) if row else None
+        return CatalogRecord(row.id, row.name) if row and row.status != "deprecated" else None
 
     async def get_grade(self, value: UUID) -> CatalogRecord | None:
         row = await self.session.get(Grade, value)
-        return CatalogRecord(row.id, row.name) if row else None
+        return CatalogRecord(row.id, row.name) if row and row.status != "deprecated" else None
 
     async def get_topic(self, value: UUID) -> CatalogRecord | None:
         row = await self.session.get(Topic, value)
-        return CatalogRecord(row.id, row.name, subject_id=row.subject_id, grade_id=row.grade_id) if row else None
+        return CatalogRecord(row.id, row.name, subject_id=row.subject_id, grade_id=row.grade_id) if row and row.status != "deprecated" else None
 
     async def get_subtopic(self, value: UUID) -> CatalogRecord | None:
         row = await self.session.get(Subtopic, value)
-        return CatalogRecord(row.id, row.name, topic_id=row.topic_id) if row else None
+        return CatalogRecord(row.id, row.name, topic_id=row.topic_id) if row and row.status != "deprecated" else None
 
     async def get_skills(self, values: set[UUID]) -> dict[UUID, CatalogRecord]:
         if not values:
             return {}
-        result = await self.session.execute(select(Skill).options(selectinload(Skill.subtopic)).where(Skill.id.in_(values)))
+        result = await self.session.execute(select(Skill).options(selectinload(Skill.subtopic)).where(Skill.id.in_(values), Skill.status != "deprecated"))
         return {row.id: CatalogRecord(row.id, row.name, topic_id=row.subtopic.topic_id, subtopic_id=row.subtopic_id) for row in result.scalars()}
+
+    async def ensure_active_catalog_references(self, task_id: UUID, task_version_id: UUID) -> None:
+        task = await self.session.get(Task, task_id)
+        assert task is not None
+        refs = (("subject", Subject, task.subject_id), ("grade", Grade, task.grade_id),
+                ("topic", Topic, task.topic_id), ("subtopic", Subtopic, task.subtopic_id))
+        rows = []
+        for kind, model, value in refs:
+            if value is not None:
+                row = await self.session.get(model, value)
+                if row is not None: rows.append((kind, row))
+        skills = (await self.session.execute(select(Skill).join(TaskSkillLink).where(TaskSkillLink.task_version_id == task_version_id))).scalars().all()
+        rows.extend(("skill", row) for row in skills)
+        methodology_skills = (await self.session.execute(select(Skill).join(TypicalError).join(TaskErrorLink).where(TaskErrorLink.task_version_id == task_version_id))).scalars().all()
+        rows.extend(("skill", row) for row in methodology_skills)
+        provisional = [(kind, row) for kind, row in rows if row.status == "provisional"]
+        if provisional:
+            raise ConflictError("Catalog references are still provisional.", "catalog_references_provisional")
+        merged = [(kind, row) for kind, row in rows if row.status == "deprecated" and row.replacement_id is not None]
+        if merged:
+            raise ConflictError("Catalog reference requires canonicalization.", "catalog_reference_requires_canonicalization")
+        if any(row.status == "deprecated" for _, row in rows):
+            raise ConflictError("Catalog reference was rejected.", "catalog_reference_rejected")
 
     async def create_task_with_initial_version(self, command: CreateTaskCommand, actor: ActorContext) -> TaskDTO:
         task = Task(subject_id=command.subject_id, folder_id=command.folder_id, grade_id=command.grade_id, topic_id=command.topic_id, subtopic_id=command.subtopic_id, created_by=actor.actor_id)

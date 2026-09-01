@@ -1,11 +1,13 @@
 """Version-one strict HTTP contracts for explicit catalog proposals."""
 
+from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200, strict=True)]
+Reason = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500, strict=True)]
 
 
 class ProposalRequest(BaseModel):
@@ -55,6 +57,31 @@ class CatalogProposalResponse(BaseModel):
     name: str
     status: Literal["active", "provisional"]
     outcome: Literal["existing_active", "existing_provisional", "created_provisional"]
+    number: int | None = None
+    subject_id: UUID | None = None
+    grade_id: UUID | None = None
+    topic_id: UUID | None = None
+    subtopic_id: UUID | None = None
+
+
+class MergeProposalRequest(ProposalRequest):
+    target_id: UUID
+    reason: Reason
+
+
+class RejectProposalRequest(ProposalRequest):
+    reason: Reason
+
+
+class AdminProposalResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, from_attributes=True)
+    kind: Literal["subject", "grade", "topic", "subtopic", "skill"]
+    id: UUID
+    name: str
+    status: Literal["active", "provisional", "deprecated"]
+    proposed_by: UUID
+    created_at: datetime
+    updated_at: datetime
     number: int | None = None
     subject_id: UUID | None = None
     grade_id: UUID | None = None
