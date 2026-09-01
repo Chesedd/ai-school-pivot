@@ -469,3 +469,55 @@ async def test_account_revision_upgrades_downgrades_and_preserves_schema():
         await assert_database_at_repository_head(engine)
     finally:
         await engine.dispose()
+
+
+async def test_j1f_resolution_revision_constraints_and_foreign_keys():
+    """20260901_02 owns the five-table resolution shape and rejects invalid states."""
+    engine = create_async_engine(URL)
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(sa.text("DROP SCHEMA public CASCADE"))
+            await connection.execute(sa.text("CREATE SCHEMA public"))
+        alembic("upgrade", "20260901_01")
+        alembic("upgrade", "20260901_02")
+        async with engine.connect() as connection:
+            columns = (await connection.execute(sa.text("""
+                SELECT table_name,column_name FROM information_schema.columns
+                WHERE table_schema='public'
+                  AND table_name IN ('subjects','grades','topics','subtopics','skills')
+                  AND column_name IN ('resolved_by','resolved_at','resolution_reason','replacement_id')
+            """))).all()
+            assert len(columns) == 20
+            foreign_keys = (await connection.execute(sa.text("""
+                SELECT tc.table_name, kcu.column_name, ccu.table_name, rc.delete_rule
+                FROM information_schema.table_constraints tc
+                JOIN information_schema.key_column_usage kcu ON tc.constraint_name=kcu.constraint_name
+                JOIN information_schema.constraint_column_usage ccu ON tc.constraint_name=ccu.constraint_name
+                JOIN information_schema.referential_constraints rc ON tc.constraint_name=rc.constraint_name
+                WHERE tc.constraint_type='FOREIGN KEY'
+                  AND tc.table_name IN ('subjects','grades','topics','subtopics','skills')
+                  AND kcu.column_name IN ('resolved_by','replacement_id')
+            """))).all()
+            assert len(foreign_keys) == 10
+            assert all(row.delete_rule == "RESTRICT" for row in foreign_keys)
+            assert all(row[2] == ("users" if row.column_name == "resolved_by" else row.table_name) for row in foreign_keys)
+        async with engine.begin() as connection:
+            actor = await connection.scalar(sa.text("INSERT INTO users(login,normalized_login,display_name,password_hash) VALUES ('a','a','A','h') RETURNING id"))
+            source = await connection.scalar(sa.text("INSERT INTO subjects(code,name,normalized_name,status,proposed_by) VALUES ('s','S','s','provisional',:a) RETURNING id"), {"a": actor})
+        invalid = [
+            ("UPDATE subjects SET resolved_by=:a,resolved_at=now() WHERE id=:s", {"a": actor, "s": source}),
+            ("UPDATE subjects SET replacement_id=:s WHERE id=:s", {"s": source}),
+            ("UPDATE subjects SET status='deprecated',resolved_by=:a,resolved_at=now(),replacement_id=:s WHERE id=:s", {"a": actor, "s": source}),
+            ("UPDATE subjects SET status='deprecated',resolved_by=:a,resolved_at=now(),resolution_reason=:r WHERE id=:s", {"a": actor, "s": source, "r": "x" * 501}),
+        ]
+        for statement, params in invalid:
+            with pytest.raises(sa.exc.IntegrityError):
+                async with engine.begin() as connection:
+                    await connection.execute(sa.text(statement), params)
+        alembic("downgrade", "20260901_01")
+        async with engine.connect() as connection:
+            assert await connection.scalar(sa.text("SELECT count(*) FROM information_schema.columns WHERE table_name='subjects' AND column_name='resolved_by'")) == 0
+        alembic("upgrade", "head")
+        await assert_database_at_repository_head(engine)
+    finally:
+        await engine.dispose()
