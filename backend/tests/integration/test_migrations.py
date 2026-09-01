@@ -127,6 +127,131 @@ async def test_clean_database_upgrades_to_head_with_observability_columns():
 def supported_baseline_metadata() -> sa.MetaData:
     """Return the affected portion of the schema as it was at 20260823_02."""
     metadata = sa.MetaData()
+    # Canonical curriculum tables existed at this baseline.  Keep their
+    # historical shape here so forward migrations, rather than the synthetic
+    # fixture, remain the sole owner of later lifecycle columns.
+    subjects = sa.Table(
+        "subjects",
+        metadata,
+        sa.Column(
+            "id",
+            sa.Uuid(),
+            server_default=sa.text("gen_random_uuid()"),
+            primary_key=True,
+        ),
+        sa.Column("code", sa.String(64), nullable=False),
+        sa.Column("name", sa.Text(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+            nullable=False,
+        ),
+        sa.UniqueConstraint("code", name="uq_subjects_code"),
+    )
+    grades = sa.Table(
+        "grades",
+        metadata,
+        sa.Column(
+            "id",
+            sa.Uuid(),
+            server_default=sa.text("gen_random_uuid()"),
+            primary_key=True,
+        ),
+        sa.Column("number", sa.SmallInteger(), nullable=False),
+        sa.Column("name", sa.Text(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+            nullable=False,
+        ),
+        sa.UniqueConstraint("number", name="uq_grades_number"),
+        sa.CheckConstraint("number BETWEEN 1 AND 11", name="ck_grades_number_range"),
+    )
+    topics = sa.Table(
+        "topics",
+        metadata,
+        sa.Column(
+            "id",
+            sa.Uuid(),
+            server_default=sa.text("gen_random_uuid()"),
+            primary_key=True,
+        ),
+        sa.Column(
+            "subject_id",
+            sa.Uuid(),
+            sa.ForeignKey(subjects.c.id, ondelete="RESTRICT"),
+            nullable=False,
+        ),
+        sa.Column(
+            "grade_id",
+            sa.Uuid(),
+            sa.ForeignKey(grades.c.id, ondelete="RESTRICT"),
+            nullable=False,
+        ),
+        sa.Column("code", sa.String(64), nullable=False),
+        sa.Column("name", sa.Text(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+            nullable=False,
+        ),
+        sa.UniqueConstraint(
+            "subject_id", "grade_id", "code", name="uq_topics_subject_grade_code"
+        ),
+    )
+    subtopics = sa.Table(
+        "subtopics",
+        metadata,
+        sa.Column(
+            "id",
+            sa.Uuid(),
+            server_default=sa.text("gen_random_uuid()"),
+            primary_key=True,
+        ),
+        sa.Column(
+            "topic_id",
+            sa.Uuid(),
+            sa.ForeignKey(topics.c.id, ondelete="RESTRICT"),
+            nullable=False,
+        ),
+        sa.Column("code", sa.String(64), nullable=False),
+        sa.Column("name", sa.Text(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+            nullable=False,
+        ),
+        sa.UniqueConstraint("topic_id", "code", name="uq_subtopics_topic_code"),
+    )
+    sa.Table(
+        "skills",
+        metadata,
+        sa.Column(
+            "id",
+            sa.Uuid(),
+            server_default=sa.text("gen_random_uuid()"),
+            primary_key=True,
+        ),
+        sa.Column(
+            "subtopic_id",
+            sa.Uuid(),
+            sa.ForeignKey(subtopics.c.id, ondelete="RESTRICT"),
+            nullable=False,
+        ),
+        sa.Column("code", sa.String(64), nullable=False),
+        sa.Column("name", sa.Text(), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("CURRENT_TIMESTAMP"),
+            nullable=False,
+        ),
+        sa.UniqueConstraint("subtopic_id", "code", name="uq_skills_subtopic_code"),
+    )
     # These tables already existed at the supported revision and are required
     # by the later account migration's student_user_links foreign key.
     from app.infrastructure.assessment_models import ClassGroup, Student
