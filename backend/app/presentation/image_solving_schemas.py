@@ -1,10 +1,12 @@
 """Public, disclosure-safe DTOs for the image-solving HTTP boundary."""
 from datetime import datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, field_validator
+
+HttpUuid = Annotated[UUID, Field(strict=False)]
 
 
 class ImageSolvingDto(BaseModel):
@@ -94,8 +96,8 @@ class PromoteImageSolvingRequest(ImageSolvingDto):
     grade_id: UUID = Field(strict=False)
     topic_id: UUID = Field(strict=False)
     subtopic_id: UUID | None = Field(default=None, strict=False)
-    skill_ids: tuple[UUID, ...] = Field(min_length=1, max_length=20)
-    tag_ids: tuple[UUID, ...] = Field(default=(), max_length=8)
+    skill_ids: tuple[HttpUuid, ...] = Field(strict=False, min_length=1, max_length=20)
+    tag_ids: tuple[HttpUuid, ...] = Field(strict=False, default=(), max_length=8)
     solution: StrictStr = Field(min_length=1, max_length=30_000)
     final_answer: StrictStr | None = Field(default=None, max_length=4_000)
     review_confirmed: StrictBool
