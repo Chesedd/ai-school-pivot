@@ -11,6 +11,7 @@ from app.application.image_solving_contracts import (
     ExtractionResultV1, ImageSolvingStatus, SolutionResultV1, ValidationResultV1,
 )
 from app.infrastructure.image_solving_repository import SqlAlchemyImageSolvingRepository
+from app.infrastructure.image_solving_metadata import SqlAlchemyMetadataCatalogLoader
 
 URL = os.environ.get("TEST_DATABASE_URL", "")
 if URL and not URL.rsplit("/", 1)[-1].split("?", 1)[0].endswith("_test"):
@@ -20,7 +21,7 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.skipif(not URL, reason="TEST_DATA
 @pytest_asyncio.fixture
 async def context():
     engine=create_async_engine(URL); factory=async_sessionmaker(engine, expire_on_commit=False)
-    async with engine.begin() as connection: await connection.execute(text("TRUNCATE image_solving_sessions, input_artifacts CASCADE"))
+    async with engine.begin() as connection: await connection.execute(text("TRUNCATE users CASCADE"))
     yield engine,factory
     await engine.dispose()
 
@@ -77,3 +78,54 @@ async def test_checkpoint_jsonb_roundtrip_for_every_stage(context):
             ImageSolvingStatus.VALIDATED)
         assert state.lifecycle_status is ImageSolvingStatus.VALIDATED
         assert state.validation_checkpoint == validation
+
+
+async def test_metadata_catalog_loader_includes_live_curriculum_with_status(context):
+    _, factory = context
+    ids = {name: uuid4() for name in (
+        "user", "active_subject", "provisional_subject", "deprecated_subject",
+        "active_grade", "provisional_grade", "deprecated_grade", "active_topic",
+        "provisional_topic", "deprecated_topic", "active_subtopic",
+        "provisional_subtopic", "deprecated_subtopic", "active_skill",
+        "provisional_skill", "deprecated_skill")}
+    async with factory() as db, db.begin():
+        await db.execute(text("INSERT INTO users(id,login,normalized_login,display_name,password_hash) VALUES (:user,'loader-user','loader-user','Loader','hash')"), ids)
+        for lifecycle in ("active", "provisional", "deprecated"):
+            await db.execute(text("""INSERT INTO subjects(id,code,name,normalized_name,status,proposed_by)
+                VALUES (:id,:code,:name,:normalized,CAST(:status AS catalog_lifecycle),:proposer)"""),
+                {"id":ids[f"{lifecycle}_subject"], "code":f"loader-{lifecycle}",
+                 "name":f"{lifecycle} Subject", "normalized":f"{lifecycle} subject",
+                 "status":lifecycle, "proposer":ids["user"] if lifecycle == "provisional" else None})
+            await db.execute(text("""INSERT INTO grades(id,number,name,normalized_name,status,proposed_by)
+                VALUES (:id,:number,:name,:normalized,CAST(:status AS catalog_lifecycle),:proposer)"""),
+                {"id":ids[f"{lifecycle}_grade"], "number":{"active":1,"provisional":2,"deprecated":3}[lifecycle],
+                 "name":f"{lifecycle} Grade", "normalized":f"{lifecycle} grade", "status":lifecycle,
+                 "proposer":ids["user"] if lifecycle == "provisional" else None})
+            await db.execute(text("""INSERT INTO topics(id,subject_id,grade_id,code,name,normalized_name,status,proposed_by)
+                VALUES (:id,:subject,:grade,:code,:name,:normalized,CAST(:status AS catalog_lifecycle),:proposer)"""),
+                {"id":ids[f"{lifecycle}_topic"], "subject":ids[f"{lifecycle}_subject"],
+                 "grade":ids[f"{lifecycle}_grade"], "code":f"loader-{lifecycle}",
+                 "name":f"{lifecycle} Topic", "normalized":f"{lifecycle} topic", "status":lifecycle,
+                 "proposer":ids["user"] if lifecycle == "provisional" else None})
+            await db.execute(text("""INSERT INTO subtopics(id,topic_id,code,name,normalized_name,status,proposed_by)
+                VALUES (:id,:topic,:code,:name,:normalized,CAST(:status AS catalog_lifecycle),:proposer)"""),
+                {"id":ids[f"{lifecycle}_subtopic"], "topic":ids[f"{lifecycle}_topic"],
+                 "code":f"loader-{lifecycle}", "name":f"{lifecycle} Subtopic",
+                 "normalized":f"{lifecycle} subtopic", "status":lifecycle,
+                 "proposer":ids["user"] if lifecycle == "provisional" else None})
+            await db.execute(text("""INSERT INTO skills(id,subtopic_id,code,name,normalized_name,status,proposed_by)
+                VALUES (:id,:subtopic,:code,:name,:normalized,CAST(:status AS catalog_lifecycle),:proposer)"""),
+                {"id":ids[f"{lifecycle}_skill"], "subtopic":ids[f"{lifecycle}_subtopic"],
+                 "code":f"loader-{lifecycle}", "name":f"{lifecycle} Skill",
+                 "normalized":f"{lifecycle} skill", "status":lifecycle,
+                 "proposer":ids["user"] if lifecycle == "provisional" else None})
+    async with factory() as db:
+        snapshot = await SqlAlchemyMetadataCatalogLoader(db).load()
+    for collection, entity in ((snapshot.subjects,"subject"),(snapshot.grades,"grade"),
+            (snapshot.topics,"topic"),(snapshot.subtopics,"subtopic"),(snapshot.skills,"skill")):
+        assert {row.id for row in collection} == {
+            ids[f"active_{entity}"], ids[f"provisional_{entity}"]}
+        assert {row.catalog_status for row in collection} == {"active", "provisional"}
+    assert snapshot.topics[0].subject_id in {ids["active_subject"], ids["provisional_subject"]}
+    assert snapshot.subtopics[0].topic_id in {ids["active_topic"], ids["provisional_topic"]}
+    assert snapshot.skills[0].subtopic_id in {ids["active_subtopic"], ids["provisional_subtopic"]}

@@ -10,18 +10,19 @@ from app.infrastructure.image_solving_repository import deserialize_json_contrac
 
 
 def item(name, **values):
-    return CatalogItemV1(id=uuid4(), name=name, **values)
+    return CatalogItemV1(id=uuid4(), name=name,
+        catalog_status=values.pop("catalog_status", "active"), **values)
 
 
 def resolve(*, duplicate_subject=False, incompatible_tag=False,
-            extracted_subject="Математика", include_subject=True):
-    subject=item("Математика"); other=item("Физика")
-    grade=item("6 класс", grade_number=6)
-    topic=item("Уравнения", subject_id=subject.id, grade_id=grade.id)
+            extracted_subject="Математика", include_subject=True, status="active"):
+    subject=item("Математика", catalog_status=status); other=item("Физика")
+    grade=item("6 класс", grade_number=6, catalog_status=status)
+    topic=item("Уравнения", subject_id=subject.id, grade_id=grade.id, catalog_status=status)
     wrong_topic=item("Уравнения", subject_id=other.id, grade_id=grade.id)
-    sub=item("Линейные уравнения", topic_id=topic.id)
+    sub=item("Линейные уравнения", topic_id=topic.id, catalog_status=status)
     wrong_sub=item("Линейные уравнения", topic_id=wrong_topic.id)
-    skill=item("Решать линейные уравнения", topic_id=topic.id, subtopic_id=sub.id)
+    skill=item("Решать линейные уравнения", topic_id=topic.id, subtopic_id=sub.id, catalog_status=status)
     wrong_skill=item("Решать линейные уравнения", topic_id=wrong_topic.id, subtopic_id=wrong_sub.id)
     tag=TagCandidateV1(id=uuid4(), name="Алгебра", category_code="method",
         subject_id=other.id if incompatible_tag else subject.id)
@@ -63,9 +64,19 @@ def test_subject_exact_matching_is_normalized_across_capitalization():
     assert result.subject.id == expected[0].id
 
 
-def test_subject_absent_from_active_snapshot_does_not_resolve_as_existing():
-    # The catalog loader excludes inactive entities; the resolver must not infer
-    # that an absent (and therefore potentially inactive) subject is selectable.
+def test_provisional_exact_matches_retain_status_through_the_hierarchy():
+    result, expected = resolve(extracted_subject="МАТЕМАТИКА", status="provisional")
+    subject, grade, topic, subtopic, skill, _ = expected
+    assert (result.subject.id, result.grade.id, result.topic.id, result.subtopic.id,
+        result.skills[0].id) == (subject.id, grade.id, topic.id, subtopic.id, skill.id)
+    assert {result.subject.catalog_status, result.grade.catalog_status,
+        result.topic.catalog_status, result.subtopic.catalog_status,
+        result.skills[0].catalog_status} == {"provisional"}
+
+
+def test_subject_absent_from_live_snapshot_does_not_resolve_as_existing():
+    # The catalog loader excludes deprecated entities; the resolver must not infer
+    # that an absent subject is selectable.
     result, _ = resolve(include_subject=False)
 
     assert result.subject.kind == "new"
@@ -96,6 +107,29 @@ def test_mixed_recommendation_roundtrips_through_persisted_api_shape():
     assert payload["subject"]["proposed_name"] == "Математика"
     assert payload["topic"]["proposed_name"] == "Уравнения"
     assert payload["skills"][0]["proposed_name"] == "Решать линейные уравнения"
+
+
+def test_old_existing_recommendation_without_catalog_status_still_deserializes():
+    result, _ = resolve()
+    payload = result.model_dump(mode="json")
+    for key in ("subject", "grade", "topic", "subtopic"):
+        payload[key].pop("catalog_status", None)
+    payload["skills"][0].pop("catalog_status", None)
+    restored = deserialize_json_contract(payload, ImageTaskMetadataRecommendationV1)
+    assert restored.subject.catalog_status is None
+
+
+def test_catalog_fingerprint_observes_provisional_creation_and_confirmation():
+    active = item("Физика")
+    provisional = item("Математика", catalog_status="provisional")
+    def snapshot(subjects):
+        return MetadataCatalogSnapshotV1(subjects=subjects, grades=(), topics=(), subtopics=(),
+            skills=(), tag_categories=(), tags=())
+    before = snapshot((active,))
+    created = snapshot((active, provisional))
+    confirmed = snapshot((active, provisional.model_copy(update={"catalog_status": "active"})))
+    assert before.fingerprint != created.fingerprint
+    assert created.fingerprint != confirmed.fingerprint
 
 import pytest
 from types import SimpleNamespace
