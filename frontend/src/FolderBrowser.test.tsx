@@ -12,3 +12,23 @@ describe("Content Bank folder cleanup",()=>{
  it("opens a folder and preserves the existing route",async()=>{vi.stubGlobal("fetch",api());const navigate=vi.fn();render(<FolderBrowser subjectId="s1" navigate={navigate}/>);const link=await screen.findByRole("link",{name:/Алгебра/});expect(link.getAttribute("href")).toContain("/content-bank/subjects/s1/folders/f1");await userEvent.click(link);expect(navigate).toHaveBeenCalledWith("/content-bank/subjects/s1/folders/f1")});
  it("does not render the legacy folder action menu",async()=>{vi.stubGlobal("fetch",api());render(<FolderBrowser subjectId="s1" navigate={vi.fn()}/>);await screen.findByRole("link",{name:/Алгебра/});expect(screen.queryByRole("button",{name:"Переименовать"})).toBeNull();expect(screen.queryByRole("button",{name:"Удалить"})).toBeNull();expect(screen.queryByRole("button",{name:"Переместить папку"})).toBeNull();expect(screen.getByRole("button",{name:"Новая папка"})).toBeTruthy()});
 });
+
+describe("Content Bank subject roots",()=>{
+ it("renders active subjects without a provisional badge",async()=>{
+  vi.stubGlobal("fetch",vi.fn(()=>response({items:[{id:"active-id",name:"Физика",status:"active"}]})));
+  render(<FolderBrowser navigate={vi.fn()}/>);
+  const link=await screen.findByRole("link",{name:/Физика/});
+  expect(link.getAttribute("href")).toBe("/content-bank/subjects/active-id");
+  expect(screen.queryByText("ПРЕДЛОЖЕНО")).toBeNull();
+ });
+ it("marks a provisional subject and keeps its subject route clickable",async()=>{
+  vi.stubGlobal("fetch",vi.fn(()=>response({items:[{id:"provisional-id",name:"Математика",status:"provisional"}]})));
+  const navigate=vi.fn();
+  render(<FolderBrowser navigate={navigate}/>);
+  const link=await screen.findByRole("link",{name:/Математика/});
+  expect(screen.getByText("ПРЕДЛОЖЕНО")).toBeTruthy();
+  expect(link.getAttribute("href")).toBe("/content-bank/subjects/provisional-id");
+  await userEvent.click(link);
+  expect(navigate).toHaveBeenCalledWith("/content-bank/subjects/provisional-id");
+ });
+});

@@ -11,7 +11,7 @@ const proposal={id:"proposal-1",kind:"subject" as const,name:"Алгебра",st
 const principal=(capabilities:string[])=>({user_id:"admin",login:"admin",display_name:"Admin",roles:[],student_id:null,capabilities});
 const list=()=>mocked.request.mockResolvedValueOnce([proposal]);
 
-beforeEach(()=>{vi.resetAllMocks();list();mocked.getSubjectRoots.mockResolvedValue({items:[{id:"canonical-1",name:"Математика"}]});});
+beforeEach(()=>{vi.resetAllMocks();list();mocked.getCatalog.mockResolvedValue({items:[{id:"canonical-1",name:"Математика"}]});});
 afterEach(()=>{cleanup();history.replaceState({},"","/")});
 
 describe("AdminCatalogProposalsPage",()=>{

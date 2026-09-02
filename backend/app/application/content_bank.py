@@ -112,6 +112,13 @@ class CatalogRecord:
     code: str | None = None
     number: int | None = None
 
+
+@dataclass(frozen=True)
+class SubjectNavigationRecord:
+    id: UUID
+    name: str
+    status: Literal["active", "provisional"]
+
 @dataclass(frozen=True)
 class SkillLinkDTO:
     id: UUID
@@ -702,6 +709,7 @@ class ContentBankRepository(Protocol):
     async def list_audit(self, task_id: UUID, offset: int, limit: int, action: str | None) -> AuditPage | None: ...
     async def find_duplicate_candidates(self, query: DuplicateQuery) -> tuple[DuplicateCandidateRecord, ...]: ...
     async def ensure_active_catalog_references(self, task_id: UUID, task_version_id: UUID) -> None: ...
+    async def list_navigation_subjects(self, access: ObjectAccessScope) -> tuple[SubjectNavigationRecord, ...]: ...
 
 
 class UnitOfWork(Protocol):

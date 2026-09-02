@@ -12,7 +12,7 @@ from sqlalchemy import String, and_, bindparam, delete, func, select, update, te
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
-from app.application.content_bank import AcceptedAnswerDTO, ChoiceOptionDTO, ChoiceOptionRuleDTO, ChoiceScoringPolicyDTO, ActorContext, assess_automation_readiness, ArchiveResult, AuditEventDTO, AuditEventRecord, AuditPage, CatalogRecord, CatalogRef, ConflictError, CreateTaskCommand, DUPLICATE_CANDIDATE_THRESHOLD, DuplicateCandidate, DuplicateCandidateRecord, DuplicateQuery, EMPTY_METHODOLOGY, ExpectedSolutionDTO, HintDTO, LockedVersion, MethodologyDTO, RubricDTO, RubricItemDTO, SaveMethodologyCommand, SkillLinkDTO, TagRefDTO, TaskCard, TaskCardVersion, TaskDTO, TaskListItem, TaskListPage, TaskListQuery, TaskVersionDTO, TaskVersionSummary, TypicalErrorDTO, VersionState
+from app.application.content_bank import AcceptedAnswerDTO, ChoiceOptionDTO, ChoiceOptionRuleDTO, ChoiceScoringPolicyDTO, ActorContext, assess_automation_readiness, ArchiveResult, AuditEventDTO, AuditEventRecord, AuditPage, CatalogRecord, CatalogRef, ConflictError, CreateTaskCommand, DUPLICATE_CANDIDATE_THRESHOLD, DuplicateCandidate, DuplicateCandidateRecord, DuplicateQuery, EMPTY_METHODOLOGY, ExpectedSolutionDTO, HintDTO, LockedVersion, MethodologyDTO, RubricDTO, RubricItemDTO, SaveMethodologyCommand, SkillLinkDTO, SubjectNavigationRecord, TagRefDTO, TaskCard, TaskCardVersion, TaskDTO, TaskListItem, TaskListPage, TaskListQuery, TaskVersionDTO, TaskVersionSummary, TypicalErrorDTO, VersionState
 from app.infrastructure.models import AcceptedAnswer, AcceptedAnswerOption, ChoiceOption, ChoiceOptionRule, ChoiceScoringPolicy, AuditLog, FolderAuditLog, TaskFolder, ExpectedSolution, Grade, Hint, Rubric, RubricItem, Skill, Subject, Subtopic, Tag, TagCategory, Task, TaskErrorLink, TaskSkillLink, TaskVersion, TaskVersionAttachment, TaskVersionTag, Topic, TypicalError
 from app.application.folders import FolderSummaryDTO, FolderTreeNodeDTO, TaskLocationDTO
 
@@ -46,6 +46,30 @@ class SQLAlchemyContentBankRepository:
     async def get_subject(self, value: UUID) -> CatalogRecord | None:
         row = await self.session.get(Subject, value)
         return CatalogRecord(row.id, row.name) if row and row.status != "deprecated" else None
+
+    @staticmethod
+    def _task_access_predicate(access, latest):
+        if access is None or access.unrestricted:
+            return True
+        return ((Task.created_by == access.actor_id) |
+                ((latest.c.status == "approved") & Task.archived_at.is_(None)))
+
+    async def list_navigation_subjects(self, access) -> tuple[SubjectNavigationRecord, ...]:
+        latest_numbers = (select(TaskVersion.task_id, func.max(TaskVersion.version_no).label("version_no"))
+                          .group_by(TaskVersion.task_id).subquery())
+        latest = TaskVersion.__table__.alias("navigation_latest_version")
+        visible_task = (select(Task.id).join(latest_numbers, latest_numbers.c.task_id == Task.id)
+                        .join(latest, and_(latest.c.task_id == Task.id,
+                                          latest.c.version_no == latest_numbers.c.version_no))
+                        .where(Task.subject_id == Subject.id,
+                               self._task_access_predicate(access, latest)).exists())
+        rows = (await self.session.execute(
+            select(Subject.id, Subject.name, Subject.status)
+            .where((Subject.status == "active") |
+                   ((Subject.status == "provisional") & visible_task))
+            .order_by(Subject.name, Subject.id)
+        )).all()
+        return tuple(SubjectNavigationRecord(*row) for row in rows)
 
     async def get_grade(self, value: UUID) -> CatalogRecord | None:
         row = await self.session.get(Grade, value)
@@ -153,8 +177,7 @@ class SQLAlchemyContentBankRepository:
         if query.access is not None and not query.access.unrestricted:
             # Archived is an administrative/private state.  Approved content is
             # shared only while its aggregate is active.
-            base = base.where((Task.created_by == query.access.actor_id) |
-                              ((latest.c.status == "approved") & Task.archived_at.is_(None)))
+            base = base.where(self._task_access_predicate(query.access, latest))
         if query.root_only:
             base=base.where(Task.folder_id.is_(None))
         if query.folder_id is not None:
