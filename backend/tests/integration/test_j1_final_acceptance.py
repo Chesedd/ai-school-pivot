@@ -225,7 +225,7 @@ async def test_image_solving_proposals_content_bank_resolution_and_approval_vert
         assert audit.actor_id == teacher and audit.details["image_solving_session_id"] == str(session_id)
         assert audit.details["input_artifact_id"] == uploaded.json()["artifact_id"] and audit.details["human_review_confirmed"] is True
         assert await db.scalar(text("SELECT count(*) FROM audit_log WHERE task_version_id=:id AND action='version_approved'"), {"id":version_id}) == 1
-        assert await db.scalar(text("SELECT count(*) FROM image_solving_recommendations WHERE session_id=:id"), {"id":session_id}) == 1
+        assert await db.scalar(text("SELECT count(*) FROM image_solving_metadata_recommendations WHERE session_id=:id"), {"id":session_id}) == 1
     assert len(extractor.calls) + len(solver.calls) == 2
 
 async def test_merged_proposal_canonicalizes_review_and_allows_approval():
