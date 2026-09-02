@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import unicodedata
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Annotated, Literal, Protocol
 from uuid import UUID
@@ -157,8 +158,16 @@ class MetadataCatalogSnapshotV1(_Strict):
         return hashlib.sha256(raw.encode()).hexdigest()
 
 
+@dataclass(frozen=True)
+class CachedMetadataRecommendation:
+    """Persistence-only cache metadata; the fingerprint is not part of the API payload."""
+
+    value: ImageTaskMetadataRecommendationV1
+    catalog_fingerprint: str
+
+
 class MetadataRecommendationRepository(Protocol):
-    async def get_recommendation(self, session_id: UUID): ...
+    async def get_recommendation(self, session_id: UUID) -> CachedMetadataRecommendation | None: ...
     async def save_recommendation(self, session_id: UUID, value: ImageTaskMetadataRecommendationV1,
                                   catalog_fingerprint: str): ...
 
@@ -232,7 +241,8 @@ class MetadataRecommendationService:
         session=await self.sessions.get_state(session_id=session_id,owner_id=owner_id)
         if session.lifecycle_status is not ImageSolvingStatus.VALIDATED or not session.validation_checkpoint:
             raise ImageSolvingError("recommendation_session_incomplete")
-        return await self.repository.get_recommendation(session_id)
+        cached = await self.repository.get_recommendation(session_id)
+        return None if cached is None else cached.value
 
     async def generate(self, session_id: UUID, owner_id: UUID):
         stage = "session_load"
@@ -242,17 +252,18 @@ class MetadataRecommendationService:
             self._failed(session_id, stage, exc)
         if session.lifecycle_status is not ImageSolvingStatus.VALIDATED or not session.validation_checkpoint:
             raise ImageSolvingError("recommendation_session_incomplete")
-        stage = "cached_load"
-        try:
-            cached=await self.repository.get_recommendation(session_id)
-        except Exception as exc:
-            self._failed(session_id, stage, exc)
-        if cached is not None: return cached
         stage = "catalog_load"
         try:
             catalog=await self.catalog_loader.load()
         except Exception as exc:
             self._failed(session_id, stage, exc)
+        stage = "cached_load"
+        try:
+            cached=await self.repository.get_recommendation(session_id)
+        except Exception as exc:
+            self._failed(session_id, stage, exc)
+        if cached is not None and cached.catalog_fingerprint == catalog.fingerprint:
+            return cached.value
         stage = "resolve"
         try:
             result=resolve_metadata(session,catalog)

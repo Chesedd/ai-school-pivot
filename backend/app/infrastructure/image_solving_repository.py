@@ -5,9 +5,11 @@ from uuid import UUID
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.dialects.postgresql import insert
 from app.application.image_solving_contracts import ExtractionResultV1, ImageSolvingSession, ImageSolvingStatus, SolutionResultV1, ValidationResultV1
 from app.infrastructure.image_solving_models import ImageSolvingCheckpointRow, ImageSolvingSessionRow, ImageSolvingMetadataRecommendationRow
-from app.application.image_solving_metadata import ImageTaskMetadataRecommendationV1
+from app.application.image_solving_metadata import (CachedMetadataRecommendation,
+    ImageTaskMetadataRecommendationV1)
 from app.application.image_solving_api import ImageSolvingAttempt
 CONTRACTS = {"extraction": ExtractionResultV1, "solver": SolutionResultV1, "validation": ValidationResultV1}
 Contract = TypeVar("Contract", bound=BaseModel)
@@ -94,15 +96,21 @@ class SqlAlchemyImageSolvingRepository:
     async def get_recommendation(self, session_id: UUID):
         row=await self.db.scalar(select(ImageSolvingMetadataRecommendationRow).where(
             ImageSolvingMetadataRecommendationRow.session_id==session_id))
-        return None if row is None else deserialize_json_contract(row.payload,ImageTaskMetadataRecommendationV1)
+        return None if row is None else CachedMetadataRecommendation(
+            value=deserialize_json_contract(row.payload,ImageTaskMetadataRecommendationV1),
+            catalog_fingerprint=row.catalog_fingerprint)
 
     async def save_recommendation(self, session_id, value, catalog_fingerprint):
-        self.db.add(ImageSolvingMetadataRecommendationRow(session_id=session_id,
-            payload=value.model_dump(mode="json"),catalog_fingerprint=catalog_fingerprint))
-        try: await self.db.commit()
-        except Exception:
-            await self.db.rollback()
-            cached=await self.get_recommendation(session_id)
-            if cached is not None:return cached
-            raise
+        # A recommendation is unique per session.  Updating it atomically makes
+        # concurrent refreshes for the same catalog converge without allowing a
+        # uniqueness race to return the stale row.
+        statement = insert(ImageSolvingMetadataRecommendationRow).values(
+            session_id=session_id, payload=value.model_dump(mode="json"),
+            catalog_fingerprint=catalog_fingerprint).on_conflict_do_update(
+                constraint="uq_image_solving_metadata_session",
+                set_={"payload": value.model_dump(mode="json"),
+                    "catalog_fingerprint": catalog_fingerprint,
+                    "created_at": func.clock_timestamp()})
+        await self.db.execute(statement)
+        await self.db.commit()
         return value

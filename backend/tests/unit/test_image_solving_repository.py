@@ -13,6 +13,7 @@ from app.application.image_solving_contracts import (
 from app.infrastructure.image_solving_repository import (
     SqlAlchemyImageSolvingRepository, _deserialize_checkpoint,
 )
+from app.application.image_solving_metadata import CachedMetadataRecommendation
 from app.application.image_solving_promotion import validate_persisted_checkpoints
 
 EXTRACTION = ExtractionResultV1(
@@ -86,3 +87,30 @@ async def test_changed_payload_with_old_fingerprint_fails_closed():
 
     with pytest.raises(ValueError, match="invalid_checkpoint"):
         await SqlAlchemyImageSolvingRepository(db).get(session_id)
+
+
+async def test_metadata_recommendation_read_retains_catalog_fingerprint():
+    recommendation = __import__(
+        "tests.unit.test_image_solving_metadata", fromlist=["resolve"]).resolve()[0]
+    row = SimpleNamespace(payload=recommendation.model_dump(mode="json"),
+        catalog_fingerprint="catalog-v2")
+    db = SimpleNamespace(scalar=AsyncMock(return_value=row))
+
+    cached = await SqlAlchemyImageSolvingRepository(db).get_recommendation(uuid4())
+
+    assert cached == CachedMetadataRecommendation(recommendation, "catalog-v2")
+
+
+async def test_metadata_recommendation_save_uses_atomic_upsert():
+    recommendation = __import__(
+        "tests.unit.test_image_solving_metadata", fromlist=["resolve"]).resolve()[0]
+    db = SimpleNamespace(execute=AsyncMock(), commit=AsyncMock())
+
+    result = await SqlAlchemyImageSolvingRepository(db).save_recommendation(
+        uuid4(), recommendation, "catalog-v2")
+
+    statement = db.execute.await_args.args[0]
+    sql = str(statement.compile()).upper()
+    assert "ON CONFLICT" in sql and "DO UPDATE" in sql
+    db.commit.assert_awaited_once()
+    assert result == recommendation

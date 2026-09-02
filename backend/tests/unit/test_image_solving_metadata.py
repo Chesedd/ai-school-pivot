@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from app.application.image_solving_contracts import ExtractionResultV1, ImageSolvingSession, ImageSolvingStatus
 from app.application.image_solving_metadata import (CatalogItemV1,
-    ImageTaskMetadataRecommendationV1, MetadataCatalogSnapshotV1,
+    CachedMetadataRecommendation, ImageTaskMetadataRecommendationV1, MetadataCatalogSnapshotV1,
     TagCandidateV1, resolve_metadata)
 from app.infrastructure.image_solving_repository import deserialize_json_contract
 
@@ -13,7 +13,8 @@ def item(name, **values):
     return CatalogItemV1(id=uuid4(), name=name, **values)
 
 
-def resolve(*, duplicate_subject=False, incompatible_tag=False):
+def resolve(*, duplicate_subject=False, incompatible_tag=False,
+            extracted_subject="Математика", include_subject=True):
     subject=item("Математика"); other=item("Физика")
     grade=item("6 класс", grade_number=6)
     topic=item("Уравнения", subject_id=subject.id, grade_id=grade.id)
@@ -24,14 +25,15 @@ def resolve(*, duplicate_subject=False, incompatible_tag=False):
     wrong_skill=item("Решать линейные уравнения", topic_id=wrong_topic.id, subtopic_id=wrong_sub.id)
     tag=TagCandidateV1(id=uuid4(), name="Алгебра", category_code="method",
         subject_id=other.id if incompatible_tag else subject.id)
-    catalog=MetadataCatalogSnapshotV1(subjects=(subject,) + ((item(" математика "),) if duplicate_subject else ()),
+    catalog=MetadataCatalogSnapshotV1(subjects=((subject,) if include_subject else ()) +
+        ((item(" математика "),) if duplicate_subject else ()),
         grades=(grade,), topics=(topic,wrong_topic), subtopics=(sub,wrong_sub),
         skills=(skill,wrong_skill), tag_categories=("method",), tags=(tag,))
     extraction=ExtractionResultV1(extracted_text="7 · (X - 3) = 21",
         structured_statement="Решить уравнение 7 · (X - 3) = 21.",
         detected_task_type="calculation",detected_answer_format="number",choices=None,
         extraction_confidence=Decimal(".99"),ocr_issues=(),metadata={
-            "title":"Решение линейного уравнения","subject":"Математика","grade":6,
+            "title":"Решение линейного уравнения","subject":extracted_subject,"grade":6,
             "topic":"Уравнения","subtopic":"Линейные уравнения",
             "skills":("Решать линейные уравнения",),"task_type":"calculation",
             "answer_format":"number","difficulty":2,"tags":("Алгебра",)})
@@ -52,6 +54,23 @@ def test_exact_resolution_is_scoped_to_selected_hierarchy():
             result.subtopic.label, result.skills[0].label) == (
         "Математика", "6", "Уравнения", "Линейные уравнения",
         "Решать линейные уравнения")
+
+
+def test_subject_exact_matching_is_normalized_across_capitalization():
+    result, expected = resolve(extracted_subject="математика")
+
+    assert result.subject.kind == "existing"
+    assert result.subject.id == expected[0].id
+
+
+def test_subject_absent_from_active_snapshot_does_not_resolve_as_existing():
+    # The catalog loader excludes inactive entities; the resolver must not infer
+    # that an absent (and therefore potentially inactive) subject is selectable.
+    result, _ = resolve(include_subject=False)
+
+    assert result.subject.kind == "new"
+    assert result.subject.proposed_name == "Математика"
+    assert result.topic.kind == "new"
 
 
 def test_ambiguous_subject_leaves_hierarchy_unresolved_without_fake_ids():
@@ -86,23 +105,63 @@ class _Sessions:
     async def get_state(self, **_):
         return SimpleNamespace(lifecycle_status=ImageSolvingStatus.VALIDATED, validation_checkpoint=object())
 class _Repository:
-    def __init__(self, *, cached=None, save_error=None): self.cached,self.save_error=cached,save_error
+    def __init__(self, *, cached=None, save_error=None):
+        self.cached,self.save_error=cached,save_error
+        self.saved=[]
     async def get_recommendation(self, _): return self.cached
-    async def save_recommendation(self, *_):
+    async def save_recommendation(self, *args):
         if self.save_error: raise self.save_error
-        return "saved"
+        self.saved.append(args)
+        return args[1]
 class _Catalog:
-    fingerprint="fingerprint"
+    def __init__(self, fingerprint="fingerprint"): self.fingerprint=fingerprint
 class _Loader:
-    def __init__(self, error=None): self.error=error
+    def __init__(self, error=None, catalog=None): self.error,self.catalog=error,catalog or _Catalog()
     async def load(self):
         if self.error: raise self.error
-        return _Catalog()
+        return self.catalog
 
 @pytest.mark.asyncio
-async def test_cached_recommendation_returns_without_catalog_or_provider():
-    cached=object(); loader=_Loader(AssertionError("catalog must not load"))
-    assert await MetadataRecommendationService(_Sessions(),_Repository(cached=cached),loader).generate(uuid4(),uuid4()) is cached
+async def test_unchanged_catalog_fingerprint_reuses_cached_recommendation(monkeypatch):
+    cached=object(); loader=_Loader()
+    repository=_Repository(cached=CachedMetadataRecommendation(cached,"fingerprint"))
+    monkeypatch.setattr("app.application.image_solving_metadata.resolve_metadata",
+        lambda *_: (_ for _ in ()).throw(AssertionError("resolver must not run")))
+    assert await MetadataRecommendationService(_Sessions(),repository,loader).generate(uuid4(),uuid4()) is cached
+    assert repository.saved == []
+
+@pytest.mark.asyncio
+async def test_changed_catalog_fingerprint_refreshes_and_replaces_cache(monkeypatch):
+    stale=object(); refreshed=object()
+    repository=_Repository(cached=CachedMetadataRecommendation(stale,"old"))
+    monkeypatch.setattr("app.application.image_solving_metadata.resolve_metadata",
+        lambda *_: refreshed)
+    result=await MetadataRecommendationService(_Sessions(),repository,
+        _Loader(catalog=_Catalog("current"))).generate(uuid4(),uuid4())
+    assert result is refreshed
+    assert repository.saved[0][1:] == (refreshed,"current")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("catalog_change", ["subject_added", "subject_activated"])
+async def test_stale_cache_refresh_resolves_newly_active_subject(monkeypatch, catalog_change):
+    stale, _ = resolve(include_subject=False)
+    refreshed, expected = resolve(extracted_subject="математика")
+    repository = _Repository(cached=CachedMetadataRecommendation(stale, "before"))
+    calls = []
+
+    def local_resolver(*_):
+        calls.append(catalog_change)
+        return refreshed
+
+    monkeypatch.setattr("app.application.image_solving_metadata.resolve_metadata", local_resolver)
+    result = await MetadataRecommendationService(
+        _Sessions(), repository, _Loader(catalog=_Catalog("after"))).generate(uuid4(), uuid4())
+
+    assert result.subject.kind == "existing"
+    assert result.subject.id == expected[0].id
+    assert calls == [catalog_change]
+    assert repository.saved[0][2] == "after"
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("failure","stage"),[("catalog","catalog_load"),("resolve","resolve"),("persistence","persistence")])
