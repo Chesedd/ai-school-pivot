@@ -13,11 +13,12 @@ class MetadataCatalogConsistencyError(RuntimeError):
 class SqlAlchemyMetadataCatalogLoader:
     def __init__(self,db):self.db=db
     async def load(self):
-        subjects=(await self.db.scalars(select(Subject).where(Subject.status=="active").order_by(Subject.name))).all()
-        grades=(await self.db.scalars(select(Grade).where(Grade.status=="active").order_by(Grade.number))).all()
-        topics=(await self.db.scalars(select(Topic).where(Topic.status=="active").order_by(Topic.name))).all()
-        subs=(await self.db.scalars(select(Subtopic).where(Subtopic.status=="active").order_by(Subtopic.name))).all()
-        skills=(await self.db.scalars(select(Skill).where(Skill.status=="active").order_by(Skill.name))).all()
+        live=("active","provisional")
+        subjects=(await self.db.scalars(select(Subject).where(Subject.status.in_(live)).order_by(Subject.name))).all()
+        grades=(await self.db.scalars(select(Grade).where(Grade.status.in_(live)).order_by(Grade.number))).all()
+        topics=(await self.db.scalars(select(Topic).where(Topic.status.in_(live)).order_by(Topic.name))).all()
+        subs=(await self.db.scalars(select(Subtopic).where(Subtopic.status.in_(live)).order_by(Subtopic.name))).all()
+        skills=(await self.db.scalars(select(Skill).where(Skill.status.in_(live)).order_by(Skill.name))).all()
         folders=(await self.db.scalars(select(TaskFolder).order_by(TaskFolder.name))).all()
         categories=(await self.db.scalars(select(TagCategory.code).order_by(TagCategory.sort_order))).all()
         tags=(await self.db.scalars(select(Tag).where(Tag.status=="active").order_by(Tag.normalized_name))).all()
@@ -41,13 +42,13 @@ class SqlAlchemyMetadataCatalogLoader:
             require("tag",x.id,"category",x.category_code in category_codes)
             require("tag",x.id,"subject",x.subject_id is None or x.subject_id in subject_ids)
         return MetadataCatalogSnapshotV1(
-            subjects=tuple(CatalogItemV1(id=x.id,name=x.name) for x in subjects),
-            grades=tuple(CatalogItemV1(id=x.id,name=x.name,grade_number=x.number) for x in grades),
-            topics=tuple(CatalogItemV1(id=x.id,name=x.name,subject_id=x.subject_id,grade_id=x.grade_id) for x in topics),
+            subjects=tuple(CatalogItemV1(id=x.id,name=x.name,catalog_status=x.status) for x in subjects),
+            grades=tuple(CatalogItemV1(id=x.id,name=x.name,grade_number=x.number,catalog_status=x.status) for x in grades),
+            topics=tuple(CatalogItemV1(id=x.id,name=x.name,subject_id=x.subject_id,grade_id=x.grade_id,catalog_status=x.status) for x in topics),
             subtopics=tuple(CatalogItemV1(id=x.id,name=x.name,topic_id=x.topic_id,
-                subject_id=topic_by[x.topic_id].subject_id,grade_id=topic_by[x.topic_id].grade_id) for x in subs),
+                subject_id=topic_by[x.topic_id].subject_id,grade_id=topic_by[x.topic_id].grade_id,catalog_status=x.status) for x in subs),
             skills=tuple(CatalogItemV1(id=x.id,name=x.name,subtopic_id=x.subtopic_id,
-                topic_id=sub_by[x.subtopic_id].topic_id) for x in skills),
+                topic_id=sub_by[x.subtopic_id].topic_id,catalog_status=x.status) for x in skills),
             folders=tuple(CatalogItemV1(id=x.id,name=x.name,subject_id=x.subject_id,parent_id=x.parent_id) for x in folders),
             tag_categories=tuple(categories),tags=tuple(TagCandidateV1(id=x.id,name=x.name,
                 category_code=x.category_code,subject_id=x.subject_id) for x in tags))
