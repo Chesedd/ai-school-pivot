@@ -417,6 +417,16 @@ class CatalogResponse(BaseModel):
     items: list[CatalogItemResponse]
 
 
+class SubjectNavigationItemResponse(BaseModel):
+    id: UUID
+    name: str
+    status: Literal["active", "provisional"]
+
+
+class SubjectNavigationResponse(BaseModel):
+    items: list[SubjectNavigationItemResponse]
+
+
 class EmptyRequest(StrictRequest):
     pass
 

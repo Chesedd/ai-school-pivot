@@ -15,7 +15,7 @@ from app.application.capabilities import (CATALOG_MANAGE, CONTENT_APPROVE, CONTE
 from app.db.session import async_session_factory
 from app.infrastructure.repository import SQLAlchemyContentBankRepository, SQLAlchemyUnitOfWork
 from app.presentation.schemas import FolderCreateRequest, FolderRenameRequest, FolderMoveRequest, TaskLocationRequest, FolderSummaryResponse, FolderTreeResponse, TaskLocationResponse
-from app.presentation.schemas import AuditPageResponse, ArchiveRequest, ArchiveResponse, CatalogResponse, DuplicateCheckRequest, DuplicateCheckResponse, EmptyRequest, MethodologyPutRequest, MethodologyResponse, ReturnToDraftRequest, StatusCommandResponse, TaskCardResponse, TaskCreateRequest, TaskListPageResponse, TaskResponse
+from app.presentation.schemas import AuditPageResponse, ArchiveRequest, ArchiveResponse, CatalogResponse, DuplicateCheckRequest, DuplicateCheckResponse, EmptyRequest, MethodologyPutRequest, MethodologyResponse, ReturnToDraftRequest, StatusCommandResponse, SubjectNavigationResponse, TaskCardResponse, TaskCreateRequest, TaskListPageResponse, TaskResponse
 from app.presentation.schemas import TagCreateRequest, TagPatchRequest, TagDeprecateRequest, TagResponse, VersionTagsPutRequest, VersionTagsResponse
 from app.application.managed_tags import ManagedTagService
 from app.presentation.auth_dependencies import require_capability, require_trusted_origin
@@ -169,6 +169,15 @@ async def get_catalog(catalog_name: str) -> object:
     async with async_session_factory() as session:
         items = await SQLAlchemyContentBankRepository(session).catalog(catalog_name)
     return {"catalog": catalog_name, "items": items}
+
+
+@router.get("/navigation/subjects", response_model=SubjectNavigationResponse)
+async def navigation_subjects(principal: Principal = Depends(require_capability(CONTENT_READ))) -> object:
+    async with async_session_factory() as session:
+        items = await SQLAlchemyContentBankRepository(session).list_navigation_subjects(
+            object_access_scope(principal)
+        )
+    return {"items": items}
 
 
 @router.get("/subjects/{subject_id}/folders/tree", response_model=FolderTreeResponse, dependencies=[Depends(require_capability(CONTENT_READ))])
