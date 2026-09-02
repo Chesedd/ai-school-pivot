@@ -20,13 +20,17 @@ describe("Content Bank subject roots",()=>{
   const link=await screen.findByRole("link",{name:/Физика/});
   expect(link.getAttribute("href")).toBe("/content-bank/subjects/active-id");
   expect(screen.queryByText("ПРЕДЛОЖЕНО")).toBeNull();
+  expect(link.querySelector(".file-icon")).toBeTruthy();
  });
  it("marks a provisional subject and keeps its subject route clickable",async()=>{
   vi.stubGlobal("fetch",vi.fn(()=>response({items:[{id:"provisional-id",name:"Математика",status:"provisional"}]})));
   const navigate=vi.fn();
   render(<FolderBrowser navigate={navigate}/>);
   const link=await screen.findByRole("link",{name:/Математика/});
-  expect(screen.getByText("ПРЕДЛОЖЕНО")).toBeTruthy();
+  const badge=screen.getByText("ПРЕДЛОЖЕНО");
+  expect(badge.classList.contains("badge")).toBe(true);
+  expect(badge.classList.contains("provisional-badge")).toBe(true);
+  expect(link.querySelector(".file-icon")).toBeTruthy();
   expect(link.getAttribute("href")).toBe("/content-bank/subjects/provisional-id");
   await userEvent.click(link);
   expect(navigate).toHaveBeenCalledWith("/content-bank/subjects/provisional-id");
