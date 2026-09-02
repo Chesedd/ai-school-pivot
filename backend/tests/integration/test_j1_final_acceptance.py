@@ -56,6 +56,9 @@ class Integrity:
 
 @pytest_asyncio.fixture(autouse=True)
 async def isolated_database(tmp_path):
+    # Do not let this function-scoped loop check out a pooled asyncpg connection
+    # that an earlier test created on a different loop.
+    await engine.dispose()
     async with async_session_factory() as db, db.begin():
         assert (await db.scalar(text("select current_database()"))).endswith("_test")
         await db.execute(text("TRUNCATE users CASCADE"))

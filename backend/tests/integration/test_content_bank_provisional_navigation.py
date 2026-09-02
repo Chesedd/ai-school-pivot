@@ -34,6 +34,10 @@ async def clean():
 
 @pytest_asyncio.fixture(autouse=True)
 async def boundary():
+    # The process-global AsyncEngine may still own an asyncpg connection created
+    # by an earlier test's event loop.  Replace that pool before this function's
+    # loop performs its first checkout.
+    await engine.dispose()
     await clean()
     clear_principal_override(app)
     yield
