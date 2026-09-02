@@ -28,7 +28,7 @@ from app.presentation.image_solving_routes import image_solving_service  # noqa:
 from tests.integration.auth_helpers import (admin_principal, clear_principal_override,  # noqa: E402
     override_principal, teacher_principal)
 
-pytestmark = [pytest.mark.asyncio(loop_scope="session"),
+pytestmark = [pytest.mark.asyncio,
     pytest.mark.skipif(not URL, reason="TEST_DATABASE_URL is required")]
 
 EXTRACTION = ExtractionResultV1(extracted_text="v = s / t", structured_statement="Найдите скорость: 100 м за 20 с.",
@@ -54,7 +54,7 @@ class Integrity:
     async def sha256(self, artifact):
         return hashlib.sha256(await self.storage.read(artifact.storage_reference)).hexdigest()
 
-@pytest_asyncio.fixture(autouse=True, loop_scope="session")
+@pytest_asyncio.fixture(autouse=True)
 async def isolated_database(tmp_path):
     async with async_session_factory() as db, db.begin():
         assert (await db.scalar(text("select current_database()"))).endswith("_test")
@@ -62,13 +62,11 @@ async def isolated_database(tmp_path):
     storage = FilesystemArtifactStorage(str(tmp_path))
     yield storage
     clear_principal_override(app); app.dependency_overrides.clear()
-    async with async_session_factory() as db, db.begin():
-        await db.execute(text("TRUNCATE users CASCADE"))
-
-@pytest_asyncio.fixture(scope="session", autouse=True, loop_scope="session")
-async def dispose_engine():
-    yield
-    await engine.dispose()
+    try:
+        async with async_session_factory() as db, db.begin():
+            await db.execute(text("TRUNCATE users CASCADE"))
+    finally:
+        await engine.dispose()
 
 async def user(label):
     async with async_session_factory() as db, db.begin():

@@ -21,7 +21,7 @@ from tests.integration.auth_helpers import (  # noqa: E402
     admin_principal, clear_principal_override, override_principal, teacher_principal,
 )
 
-pytestmark = pytest.mark.asyncio(loop_scope="session")
+pytestmark = pytest.mark.asyncio
 
 
 async def clean():
@@ -32,19 +32,16 @@ async def clean():
         await session.execute(text("TRUNCATE subjects, grades, topics, subtopics, tasks, users CASCADE"))
 
 
-@pytest_asyncio.fixture(autouse=True, loop_scope="session")
+@pytest_asyncio.fixture(autouse=True)
 async def boundary():
     await clean()
     clear_principal_override(app)
     yield
     clear_principal_override(app)
-    await clean()
-
-
-@pytest_asyncio.fixture(scope="session", autouse=True, loop_scope="session")
-async def dispose():
-    yield
-    await engine.dispose()
+    try:
+        await clean()
+    finally:
+        await engine.dispose()
 
 
 async def seed():
@@ -56,7 +53,7 @@ async def seed():
             await session.execute(text("INSERT INTO users(id,login,normalized_login,display_name,password_hash) VALUES (:id,:x,:x,:x,'hash')"), {"id": actor, "x": f"{label}-{actor}"})
         await session.execute(text("INSERT INTO subjects(id,code,name,normalized_name,status,proposed_by) VALUES (:active,'physics','Физика','физика','active',NULL),(:provisional,'math','Математика','математика','provisional',:teacher)"), {"active": active, "provisional": provisional, "teacher": teacher_a})
         await session.execute(text("INSERT INTO grades(id,number,name,normalized_name) VALUES (:id,7,'7 класс','7 класс')"), {"id": grade})
-        await session.execute(text("INSERT INTO topics(id,subject_id,grade_id,code,name,normalized_name,status) VALUES (:id,:subject,:grade,'equations','Уравнения','уравнения','provisional')"), {"id": topic, "subject": provisional, "grade": grade})
+        await session.execute(text("INSERT INTO topics(id,subject_id,grade_id,code,name,normalized_name,status,proposed_by) VALUES (:id,:subject,:grade,'equations','Уравнения','уравнения','provisional',:teacher)"), {"id": topic, "subject": provisional, "grade": grade, "teacher": teacher_a})
         await session.execute(text("INSERT INTO tasks(id,subject_id,grade_id,topic_id,created_by) VALUES (:id,:subject,:grade,:topic,:actor)"), {"id": task, "subject": provisional, "grade": grade, "topic": topic, "actor": teacher_a})
         await session.execute(text("INSERT INTO task_versions(id,task_id,version_no,title,statement,task_type,answer_format,difficulty,status,created_by) VALUES (:id,:task,1,'Линейное уравнение','7(X - 3) = 21','calculation','number',25,'draft',:actor)"), {"id": version, "task": task, "actor": teacher_a})
     return teacher_a, teacher_b, admin, active, provisional, task
