@@ -109,8 +109,13 @@ async def test_image_solving_proposals_content_bank_resolution_and_approval_vert
         retrieved = await client.get(f"/api/image-solving/sessions/{session_id}/recommendations")
     assert generated.status_code == retrieved.status_code == 200 and generated.json() == retrieved.json()
     recommendation = generated.json()
-    assert recommendation["subject"] == {"kind":"new", "proposed_name":"Физика J1G", "parent_id":None,
-        "confidence":"0", "reason":"Безопасное совпадение в текущем каталоге не найдено."}
+    subject = recommendation["subject"]
+    assert subject["kind"] == "new"
+    assert subject["proposed_name"] == "Физика J1G"
+    assert subject["parent_id"] is None
+    assert subject["confidence"] == "0"
+    assert subject["reason"] == "Безопасное совпадение в текущем каталоге не найдено."
+    assert subject["candidates"] == []
     assert recommendation["grade"]["kind"] == recommendation["topic"]["kind"] == "new"
     assert recommendation["subtopic"]["kind"] == recommendation["skills"][0]["kind"] == "new"
     assert len(extractor.calls) + len(solver.calls) == 2
