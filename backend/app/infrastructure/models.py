@@ -141,6 +141,33 @@ class Skill(CatalogLifecycleMixin, IdMixin, Base):
     typical_errors: Mapped[list[TypicalError]] = relationship(back_populates="skill")
 
 
+class CurriculumCatalogAlias(IdMixin, Base):
+    """Human-confirmed external wording, deliberately separate from MERGE history."""
+    __tablename__ = "curriculum_catalog_aliases"
+    __table_args__ = (
+        CheckConstraint("kind IN ('subject','topic','subtopic','skill')", name="ck_catalog_aliases_kind"),
+        CheckConstraint("char_length(normalized_alias) BETWEEN 1 AND 200 AND alias_name = btrim(alias_name) AND char_length(alias_name) BETWEEN 1 AND 200", name="ck_catalog_aliases_names"),
+        CheckConstraint("num_nonnulls(subject_target_id, topic_target_id, subtopic_target_id, skill_target_id) = 1", name="ck_catalog_aliases_one_target"),
+        CheckConstraint("(kind='subject' AND subject_target_id IS NOT NULL AND subject_id IS NULL AND grade_id IS NULL AND topic_id IS NULL AND subtopic_id IS NULL) OR (kind='topic' AND topic_target_id IS NOT NULL AND subject_id IS NOT NULL AND grade_id IS NOT NULL AND topic_id IS NULL AND subtopic_id IS NULL) OR (kind='subtopic' AND subtopic_target_id IS NOT NULL AND topic_id IS NOT NULL AND subject_id IS NULL AND grade_id IS NULL AND subtopic_id IS NULL) OR (kind='skill' AND skill_target_id IS NOT NULL AND subtopic_id IS NOT NULL AND subject_id IS NULL AND grade_id IS NULL AND topic_id IS NULL)", name="ck_catalog_aliases_scope"),
+        Index("uq_catalog_alias_subject", "normalized_alias", unique=True, postgresql_where=text("kind='subject'")),
+        Index("uq_catalog_alias_topic", "normalized_alias", "subject_id", "grade_id", unique=True, postgresql_where=text("kind='topic'")),
+        Index("uq_catalog_alias_subtopic", "normalized_alias", "topic_id", unique=True, postgresql_where=text("kind='subtopic'")),
+        Index("uq_catalog_alias_skill", "normalized_alias", "subtopic_id", unique=True, postgresql_where=text("kind='skill'")),)
+    kind: Mapped[str] = mapped_column(String(16))
+    alias_name: Mapped[str] = mapped_column(Text)
+    normalized_alias: Mapped[str] = mapped_column(Text)
+    subject_target_id: Mapped[UUID | None] = mapped_column(ForeignKey("subjects.id", ondelete="RESTRICT"), nullable=True)
+    topic_target_id: Mapped[UUID | None] = mapped_column(ForeignKey("topics.id", ondelete="RESTRICT"), nullable=True)
+    subtopic_target_id: Mapped[UUID | None] = mapped_column(ForeignKey("subtopics.id", ondelete="RESTRICT"), nullable=True)
+    skill_target_id: Mapped[UUID | None] = mapped_column(ForeignKey("skills.id", ondelete="RESTRICT"), nullable=True)
+    subject_id: Mapped[UUID | None] = mapped_column(ForeignKey("subjects.id", ondelete="RESTRICT"), nullable=True)
+    grade_id: Mapped[UUID | None] = mapped_column(ForeignKey("grades.id", ondelete="RESTRICT"), nullable=True)
+    topic_id: Mapped[UUID | None] = mapped_column(ForeignKey("topics.id", ondelete="RESTRICT"), nullable=True)
+    subtopic_id: Mapped[UUID | None] = mapped_column(ForeignKey("subtopics.id", ondelete="RESTRICT"), nullable=True)
+    created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("clock_timestamp()"))
+
+
 class Task(IdMixin, Base):
     __tablename__ = "tasks"
     __table_args__ = (ForeignKeyConstraint(["folder_id", "subject_id"], ["task_folders.id", "task_folders.subject_id"], name="fk_tasks_folder_subject", ondelete="RESTRICT"), Index("ix_tasks_subject_folder", "subject_id", "folder_id"), Index("ix_tasks_subject_id", "subject_id"), Index("ix_tasks_grade_id", "grade_id"), Index("ix_tasks_topic_id", "topic_id"), Index("ix_tasks_subtopic_id", "subtopic_id"), Index("ix_tasks_subject_grade_topic_subtopic", "subject_id", "grade_id", "topic_id", "subtopic_id"), Index("ix_tasks_created_at", "created_at"), Index("ix_tasks_updated_at", "updated_at"), Index("ix_tasks_archived_at", "archived_at"))

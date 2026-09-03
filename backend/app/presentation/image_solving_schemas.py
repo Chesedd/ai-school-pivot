@@ -103,6 +103,7 @@ class PromoteImageSolvingRequest(ImageSolvingDto):
     review_confirmed: StrictBool
     review_note: StrictStr | None = Field(default=None, max_length=4_000)
     confirm_questionable: StrictBool = False
+    alias_confirmations: tuple["CatalogAliasConfirmation", ...] = Field(default=(), max_length=8)
 
     @field_validator("title", "statement", "solution", "final_answer", "review_note")
     @classmethod
@@ -131,6 +132,12 @@ class PromoteImageSolvingResponse(ImageSolvingDto):
     task_version_id: UUID
     status: Literal["draft"]
     already_existing: StrictBool
+
+
+class CatalogAliasConfirmation(ImageSolvingDto):
+    kind: Literal["subject", "topic", "subtopic", "skill"]
+    recognized_label: StrictStr = Field(min_length=1, max_length=200)
+    target_id: UUID = Field(strict=False)
 
 
 class AttemptUsageResponse(ImageSolvingDto):

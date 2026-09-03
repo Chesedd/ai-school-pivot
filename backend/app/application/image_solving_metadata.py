@@ -44,6 +44,7 @@ class ExistingCatalogSelectionV1(_Strict):
     catalog_status: Literal["active", "provisional"] | None = None
     confidence: Confidence
     reason: StrictStr = Field(min_length=1, max_length=500)
+    resolution_source: Literal["exact", "alias"] | None = None
 
 
 class NewCatalogSelectionV1(_Strict):
@@ -52,6 +53,7 @@ class NewCatalogSelectionV1(_Strict):
     parent_id: UUID | None = None
     confidence: Confidence
     reason: StrictStr = Field(min_length=1, max_length=500)
+    candidates: tuple[ExistingCatalogSelectionV1, ...] = Field(default=(), max_length=3)
 
 
 CatalogSelectionV1 = Annotated[
@@ -148,6 +150,16 @@ class TagCandidateV1(_Strict):
     subject_id: UUID | None = None
 
 
+class CatalogAliasV1(_Strict):
+    kind: Literal["subject", "topic", "subtopic", "skill"]
+    normalized_alias: StrictStr
+    target: CatalogItemV1
+    subject_id: UUID | None = None
+    grade_id: UUID | None = None
+    topic_id: UUID | None = None
+    subtopic_id: UUID | None = None
+
+
 class MetadataCatalogSnapshotV1(_Strict):
     subjects: tuple[CatalogItemV1, ...]
     grades: tuple[CatalogItemV1, ...]
@@ -157,6 +169,7 @@ class MetadataCatalogSnapshotV1(_Strict):
     folders: tuple[CatalogItemV1, ...] = ()
     tag_categories: tuple[StrictStr, ...]
     tags: tuple[TagCandidateV1, ...]
+    aliases: tuple[CatalogAliasV1, ...] = ()
 
     @property
     def fingerprint(self) -> str:
@@ -178,14 +191,32 @@ class MetadataRecommendationRepository(Protocol):
                                   catalog_fingerprint: str): ...
 
 
-def _normalized(name: str) -> str:
+def normalize_curriculum_name(name: str) -> str:
     return re.sub(r"[^\w]+", " ", unicodedata.normalize("NFKC", name)
         .casefold().replace("ё", "е")).strip()
 
 
 def _unique_match(name, rows):
-    matches = [row for row in rows if _normalized(row.name) == _normalized(name)]
+    matches = [row for row in rows if normalize_curriculum_name(row.name) == normalize_curriculum_name(name)]
     return matches[0] if len(matches) == 1 else None
+
+
+def _alias_match(name, kind, aliases, **scope):
+    matches=[x.target for x in aliases if x.kind==kind and x.normalized_alias==normalize_curriculum_name(name)
+        and all(getattr(x,key)==value for key,value in scope.items())]
+    return matches[0] if len(matches)==1 else None
+
+
+def _candidates(name, rows):
+    """Conservative lexical candidates; they never auto-resolve."""
+    query=set(normalize_curriculum_name(name).split())
+    ranked=[]
+    for row in rows:
+        words=set(normalize_curriculum_name(row.name).split())
+        overlap=len(query & words)/max(1,len(query | words))
+        if overlap >= .5:
+            ranked.append((overlap,normalize_curriculum_name(row.name),row))
+    return [x[2] for x in sorted(ranked,key=lambda x:(-x[0],x[1],str(x[2].id)))[:3]]
 
 
 def resolve_metadata(session: ImageSolvingSession,
@@ -193,27 +224,43 @@ def resolve_metadata(session: ImageSolvingSession,
     """Resolve only unique canonical textual matches inside the chosen hierarchy."""
     semantic = session.extraction_checkpoint.metadata
     one, none = Decimal("1"), Decimal("0")
-    def selection(name, row, parent_id=None):
+    def selection(name, row, parent_id=None, *, source="exact", candidates=()):
         if row is not None:
-            return ExistingCatalogSelectionV1(kind="existing", id=row.id, label=name, confidence=one,
+            return ExistingCatalogSelectionV1(kind="existing", id=row.id, label=row.name, confidence=one,
                 catalog_status=row.catalog_status,
-                reason="Точное совпадение с текущим каталогом.")
+                resolution_source=source,
+                reason="Подтвержденный синоним каталога." if source=="alias" else "Точное совпадение с текущим каталогом.")
         return NewCatalogSelectionV1(kind="new", proposed_name=name, parent_id=parent_id,
-            confidence=none, reason="Безопасное совпадение в текущем каталоге не найдено.")
+            confidence=none, reason="Безопасное совпадение в текущем каталоге не найдено.",
+            candidates=tuple(ExistingCatalogSelectionV1(kind="existing",id=x.id,label=x.name,
+                catalog_status=x.catalog_status,confidence=none,reason="Возможное совпадение; требуется выбор человека.") for x in candidates))
 
     subject = _unique_match(semantic.subject, catalog.subjects)
+    subject_source="exact"
+    if subject is None:
+        subject=_alias_match(semantic.subject,"subject",catalog.aliases); subject_source="alias"
     grades = [row for row in catalog.grades if row.grade_number == semantic.grade]
     grade = grades[0] if len(grades) == 1 else None
     topics = [row for row in catalog.topics if subject and grade and
         row.subject_id == subject.id and row.grade_id == grade.id]
     topic = _unique_match(semantic.topic, topics)
+    topic_source="exact"
+    if topic is None and subject and grade:
+        topic=_alias_match(semantic.topic,"topic",catalog.aliases,subject_id=subject.id,grade_id=grade.id); topic_source="alias"
     subs = [row for row in catalog.subtopics if topic and row.topic_id == topic.id]
     subtopic = _unique_match(semantic.subtopic, subs) if semantic.subtopic else None
+    subtopic_source="exact"
+    if subtopic is None and semantic.subtopic and topic:
+        subtopic=_alias_match(semantic.subtopic,"subtopic",catalog.aliases,topic_id=topic.id); subtopic_source="alias"
     skill_rows = [row for row in catalog.skills if
         (subtopic and row.subtopic_id == subtopic.id) or
         (not semantic.subtopic and topic and row.topic_id == topic.id)]
-    skills = tuple(selection(name, _unique_match(name, skill_rows),
-        subtopic.id if subtopic else None) for name in semantic.skills)
+    skills=[]
+    for name in semantic.skills:
+        row=_unique_match(name,skill_rows); source="exact"
+        if row is None and subtopic:
+            row=_alias_match(name,"skill",catalog.aliases,subtopic_id=subtopic.id); source="alias"
+        skills.append(selection(name,row,subtopic.id if subtopic else None,source=source,candidates=_candidates(name,skill_rows) if row is None else ()))
     tags = []
     for name in semantic.tags:
         compatible = [row for row in catalog.tags if subject and row.subject_id in (None, subject.id)]
@@ -234,10 +281,10 @@ def resolve_metadata(session: ImageSolvingSession,
             reason="Предложено при анализе изображения."),
         difficulty=DifficultyRecommendationV1(value=semantic.difficulty, confidence=one,
             reason="Предложено при анализе изображения."),
-        subject=selection(semantic.subject, subject), grade=grade_selection,
-        topic=selection(semantic.topic, topic, subject.id if subject else None),
-        subtopic=(selection(semantic.subtopic, subtopic, topic.id if topic else None)
-            if semantic.subtopic else None), skills=skills, tags=tuple(tags), folder=None)
+        subject=selection(semantic.subject,subject,source=subject_source,candidates=_candidates(semantic.subject,catalog.subjects) if subject is None else ()), grade=grade_selection,
+        topic=selection(semantic.topic,topic,subject.id if subject else None,source=topic_source,candidates=_candidates(semantic.topic,topics) if topic is None else ()),
+        subtopic=(selection(semantic.subtopic,subtopic,topic.id if topic else None,source=subtopic_source,candidates=_candidates(semantic.subtopic,subs) if subtopic is None else ())
+            if semantic.subtopic else None), skills=tuple(skills), tags=tuple(tags), folder=None)
 
 
 class MetadataRecommendationService:

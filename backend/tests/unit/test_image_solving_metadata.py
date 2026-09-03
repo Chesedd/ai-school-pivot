@@ -3,7 +3,7 @@ from decimal import Decimal
 from uuid import uuid4
 
 from app.application.image_solving_contracts import ExtractionResultV1, ImageSolvingSession, ImageSolvingStatus
-from app.application.image_solving_metadata import (CatalogItemV1,
+from app.application.image_solving_metadata import (CatalogAliasV1, CatalogItemV1,
     CachedMetadataRecommendation, ImageTaskMetadataRecommendationV1, MetadataCatalogSnapshotV1,
     TagCandidateV1, resolve_metadata)
 from app.infrastructure.image_solving_repository import deserialize_json_contract
@@ -130,6 +130,49 @@ def test_catalog_fingerprint_observes_provisional_creation_and_confirmation():
     confirmed = snapshot((active, provisional.model_copy(update={"catalog_status": "active"})))
     assert before.fingerprint != created.fingerprint
     assert created.fingerprint != confirmed.fingerprint
+
+
+def test_alias_resolution_is_scoped_and_exact_still_wins():
+    result, rows = resolve()
+    subject, grade, topic, subtopic, skill, _ = rows
+    alias_topic = item("Решение линейных уравнений", subject_id=subject.id, grade_id=grade.id)
+    aliases=(CatalogAliasV1(kind="topic",normalized_alias="уравнения",target=alias_topic,
+        subject_id=subject.id,grade_id=grade.id),)
+    # The exact Topic row must win even when the same source wording has an alias.
+    catalog = MetadataCatalogSnapshotV1(subjects=(subject,),grades=(grade,),topics=(topic,alias_topic),
+        subtopics=(subtopic,),skills=(skill,),tag_categories=(),tags=(),aliases=aliases)
+    assert resolve_metadata(_session_for(rows, "Уравнения"), catalog).topic.id == topic.id
+    alias_only=catalog.model_copy(update={"topics":(alias_topic,)})
+    resolved=resolve_metadata(_session_for(rows, "Уравнения"),alias_only)
+    assert resolved.topic.id==alias_topic.id
+    assert resolved.topic.label=="Решение линейных уравнений"
+    assert resolved.topic.resolution_source=="alias"
+
+    wrong_scope=alias_only.model_copy(update={"aliases":(aliases[0].model_copy(
+        update={"grade_id":uuid4()}),)})
+    assert resolve_metadata(_session_for(rows,"Уравнения"),wrong_scope).topic.kind=="new"
+
+
+def _session_for(rows, topic_name):
+    subject, grade, _, _, _, _=rows
+    extraction=ExtractionResultV1(extracted_text="x",structured_statement="x",
+        detected_task_type="calculation",detected_answer_format="number",choices=None,
+        extraction_confidence=Decimal(".9"),ocr_issues=(),metadata={"title":"x",
+        "subject":subject.name,"grade":grade.grade_number,"topic":topic_name,
+        "subtopic":None,"skills":("unknown",),"task_type":"calculation",
+        "answer_format":"number","difficulty":2,"tags":()})
+    now=datetime.now(UTC)
+    return ImageSolvingSession(session_id=uuid4(),owner_id=uuid4(),input_artifact_id=uuid4(),
+        extraction_checkpoint=extraction,lifecycle_status=ImageSolvingStatus.VALIDATED,
+        created_at=now,updated_at=now)
+
+
+def test_alias_changes_catalog_fingerprint_deterministically():
+    target=item("Решение линейных уравнений")
+    base=MetadataCatalogSnapshotV1(subjects=(target,),grades=(),topics=(),subtopics=(),
+        skills=(),tag_categories=(),tags=())
+    alias=CatalogAliasV1(kind="subject",normalized_alias="линейные уравнения",target=target)
+    assert base.fingerprint != base.model_copy(update={"aliases":(alias,)}).fingerprint
 
 import pytest
 from types import SimpleNamespace

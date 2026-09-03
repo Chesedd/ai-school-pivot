@@ -4,6 +4,7 @@ import logging
 from uuid import UUID
 
 from sqlalchemy import select, update
+from sqlalchemy.dialects.postgresql import insert
 
 from app.application.content_bank import (AcceptedAnswerInput, ActorContext,
     CreateTaskCommand, CreateTaskOperation, ExpectedSolutionInput,
@@ -12,9 +13,11 @@ from app.application.image_solving_api import ImageSolvingApiError
 from app.application.image_solving_contracts import (ExtractionResultV1,
     SolverResultV1, ValidationResultV1)
 from app.infrastructure.image_solving_models import (ImageSolvingCheckpointRow,
-    ImageSolvingSessionRow)
+    ImageSolvingMetadataRecommendationRow, ImageSolvingSessionRow)
 from app.infrastructure.image_solving_repository import deserialize_json_contract
 from app.infrastructure.models import AuditLog, TaskVersion
+from app.infrastructure.models import (CurriculumCatalogAlias, Skill, Subject, Subtopic, Topic,
+    normalize_catalog_name)
 from app.infrastructure.repository import SQLAlchemyContentBankRepository
 from app.presentation.image_solving_schemas import (PromoteImageSolvingRequest,
     PromoteImageSolvingResponse)
@@ -96,6 +99,8 @@ class PromoteImageSolvingService:
             "validation_status": validation.validation_status,
             "validation_findings": list(validation.findings),
             "human_review_confirmed": True}
+        details["catalog_alias_conflicts"] = await self._learn_aliases(
+            session_id, reviewed, checkpoints["extraction"].payload, actor_id)
         if reviewed.review_note:
             details["review_note"] = reviewed.review_note
         try:
@@ -112,6 +117,58 @@ class PromoteImageSolvingService:
         return PromoteImageSolvingResponse(session_id=session_id, task_id=created.id,
             task_version_id=created.initial_version.id, status="draft",
             already_existing=False)
+
+    async def _learn_aliases(self, session_id, reviewed, extraction_payload, actor_id):
+        """Persist only final candidate-derived confirmations in the promotion transaction."""
+        recommendation=await self.db.scalar(select(ImageSolvingMetadataRecommendationRow).where(
+            ImageSolvingMetadataRecommendationRow.session_id==session_id))
+        payload=recommendation.payload if recommendation else {}
+        offered=set()
+        for kind in ("subject","topic","subtopic"):
+            value=payload.get(kind) or {}
+            for candidate in value.get("candidates",[]): offered.add((kind,value.get("proposed_name"),candidate.get("id")))
+        for value in payload.get("skills",[]):
+            for candidate in value.get("candidates",[]): offered.add(("skill",value.get("proposed_name"),candidate.get("id")))
+        metadata=extraction_payload.get("metadata") or {}
+        chosen={"subject":reviewed.subject_id,"topic":reviewed.topic_id,
+            "subtopic":reviewed.subtopic_id,"skill":set(reviewed.skill_ids)}
+        expected={"subject":{metadata.get("subject")},"topic":{metadata.get("topic")},
+            "subtopic":{metadata.get("subtopic")},"skill":set(metadata.get("skills") or ())}
+        models={"subject":Subject,"topic":Topic,"subtopic":Subtopic,"skill":Skill}
+        target_columns={"subject":"subject_target_id","topic":"topic_target_id",
+            "subtopic":"subtopic_target_id","skill":"skill_target_id"}
+        conflicts=[]
+        for item in reviewed.alias_confirmations:
+            if (item.kind,item.recognized_label,str(item.target_id)) not in offered: continue
+            if item.recognized_label not in expected[item.kind]: continue
+            if (item.kind=="skill" and item.target_id not in chosen[item.kind]) or (item.kind!="skill" and item.target_id!=chosen[item.kind]): continue
+            target=await self.db.get(models[item.kind],item.target_id)
+            if target is None or target.status not in ("active","provisional"): continue
+            valid=(item.kind=="subject" or
+                item.kind=="topic" and target.subject_id==reviewed.subject_id and target.grade_id==reviewed.grade_id or
+                item.kind=="subtopic" and target.topic_id==reviewed.topic_id or
+                item.kind=="skill" and target.subtopic_id==reviewed.subtopic_id)
+            if not valid: continue
+            normalized=normalize_catalog_name(item.recognized_label)
+            values={"kind":item.kind,"alias_name":item.recognized_label,
+                "normalized_alias":normalized,target_columns[item.kind]:item.target_id,"created_by":actor_id}
+            if item.kind=="topic": values.update(subject_id=reviewed.subject_id,grade_id=reviewed.grade_id)
+            elif item.kind=="subtopic": values["topic_id"]=reviewed.topic_id
+            elif item.kind=="skill": values["subtopic_id"]=reviewed.subtopic_id
+            elements={"subject":["normalized_alias"],"topic":["normalized_alias","subject_id","grade_id"],
+                "subtopic":["normalized_alias","topic_id"],"skill":["normalized_alias","subtopic_id"]}[item.kind]
+            result=await self.db.execute(insert(CurriculumCatalogAlias).values(**values)
+                .on_conflict_do_nothing(index_elements=elements,
+                    index_where=CurriculumCatalogAlias.kind==item.kind).returning(CurriculumCatalogAlias.id))
+            if result.scalar_one_or_none() is None:
+                conditions=[CurriculumCatalogAlias.kind==item.kind,
+                    CurriculumCatalogAlias.normalized_alias==normalized]
+                for field in ("subject_id","grade_id","topic_id","subtopic_id"):
+                    if field in values: conditions.append(getattr(CurriculumCatalogAlias,field)==values[field])
+                existing=await self.db.scalar(select(CurriculumCatalogAlias).where(*conditions))
+                if existing and getattr(existing,target_columns[item.kind]) != item.target_id:
+                    conflicts.append({"kind":item.kind,"normalized_alias":normalized})
+        return conflicts
 
     @staticmethod
     def _weights(count: int) -> tuple[Decimal, ...]:
