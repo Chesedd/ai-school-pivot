@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
@@ -98,6 +99,62 @@ def test_promotion_dto_parses_empty_json_tag_array_to_tuple():
 
     assert parsed.skill_ids == (skill_id,)
     assert parsed.tag_ids == ()
+
+
+def test_promotion_dto_parses_empty_json_alias_array_to_tuple():
+    payload, _ = promotion_payload(alias_confirmations=[])
+
+    parsed = PromoteImageSolvingRequest.model_validate_json(json.dumps(payload))
+
+    assert parsed.alias_confirmations == ()
+
+
+def test_promotion_dto_parses_non_empty_json_alias_array():
+    target_id = uuid4()
+    payload, _ = promotion_payload(alias_confirmations=[{
+        "kind": "topic",
+        "recognized_label": "Линейные уравнения",
+        "target_id": str(target_id),
+    }])
+
+    parsed = PromoteImageSolvingRequest.model_validate_json(json.dumps(payload))
+
+    assert len(parsed.alias_confirmations) == 1
+    assert parsed.alias_confirmations[0].kind == "topic"
+    assert parsed.alias_confirmations[0].target_id == target_id
+
+
+def test_promotion_dto_rejects_more_than_eight_json_aliases():
+    target_id = uuid4()
+    alias = {
+        "kind": "topic",
+        "recognized_label": "Линейные уравнения",
+        "target_id": str(target_id),
+    }
+    payload, _ = promotion_payload(alias_confirmations=[alias] * 9)
+
+    with pytest.raises(ValidationError):
+        PromoteImageSolvingRequest.model_validate_json(json.dumps(payload))
+
+
+@pytest.mark.parametrize(
+    "invalid_alias",
+    (
+        {"kind": "folder", "recognized_label": "Label", "target_id": str(uuid4())},
+        {"kind": "topic", "recognized_label": "Label", "target_id": "not-a-uuid"},
+        {
+            "kind": "topic",
+            "recognized_label": "Label",
+            "target_id": str(uuid4()),
+            "unknown": "field",
+        },
+    ),
+)
+def test_promotion_dto_rejects_invalid_nested_json_alias(invalid_alias):
+    payload, _ = promotion_payload(alias_confirmations=[invalid_alias])
+
+    with pytest.raises(ValidationError):
+        PromoteImageSolvingRequest.model_validate_json(json.dumps(payload))
 
 
 def test_promotion_dto_rejects_invalid_uuid_in_json_array():
