@@ -20,20 +20,22 @@ from httpx import ASGITransport, AsyncClient  # noqa: E402
 from tests.integration.auth_helpers import (clear_principal_override, override_principal,
     teacher_principal)  # noqa: E402
 
-pytestmark = pytest.mark.asyncio(loop_scope="session")
+pytestmark = pytest.mark.asyncio
 
 
-@pytest_asyncio.fixture(autouse=True, loop_scope="session")
+@pytest_asyncio.fixture(autouse=True)
 async def clean():
+    await engine.dispose()
     async with async_session_factory() as db, db.begin():
         await db.execute(text("TRUNCATE curriculum_catalog_aliases, skills, subtopics, topics, grades, subjects, users CASCADE"))
     yield
-
-
-@pytest_asyncio.fixture(scope="session", autouse=True, loop_scope="session")
-async def dispose():
-    yield
-    await engine.dispose()
+    clear_principal_override(app)
+    app.dependency_overrides.clear()
+    try:
+        async with async_session_factory() as db, db.begin():
+            await db.execute(text("TRUNCATE curriculum_catalog_aliases, skills, subtopics, topics, grades, subjects, users CASCADE"))
+    finally:
+        await engine.dispose()
 
 
 async def _id(db, sql, **values):

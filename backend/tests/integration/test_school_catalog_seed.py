@@ -16,20 +16,20 @@ os.environ["DATABASE_URL"] = database_url
 from app.db.session import async_session_factory, engine  # noqa: E402
 from app.tools.seed_school_catalog import DATA, seed_catalog  # noqa: E402
 
-pytestmark = pytest.mark.asyncio(loop_scope="session")
+pytestmark = pytest.mark.asyncio
 
 
-@pytest_asyncio.fixture(autouse=True, loop_scope="session")
+@pytest_asyncio.fixture(autouse=True)
 async def clean():
+    await engine.dispose()
     async with async_session_factory() as db, db.begin():
         await db.execute(text("TRUNCATE skills, subtopics, topics, grades, subjects, users CASCADE"))
     yield
-
-
-@pytest_asyncio.fixture(scope="session", autouse=True, loop_scope="session")
-async def dispose():
-    yield
-    await engine.dispose()
+    try:
+        async with async_session_factory() as db, db.begin():
+            await db.execute(text("TRUNCATE skills, subtopics, topics, grades, subjects, users CASCADE"))
+    finally:
+        await engine.dispose()
 
 
 async def test_full_seed_first_run_and_second_run_are_complete_and_idempotent():
