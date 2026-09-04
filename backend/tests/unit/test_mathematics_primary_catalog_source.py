@@ -64,4 +64,8 @@ def test_mathematics_grade_7_starter_taxonomy_is_unchanged():
     grade_7 = next(grade for grade in mathematics["grades"] if grade["number"] == 7)
     actual = {topic["name"]: {subtopic["name"]: subtopic["skills"]
         for subtopic in topic["subtopics"]} for topic in grade_7["topics"]}
-    assert actual == GRADE_7_STARTER
+    for topic_name, subtopics in GRADE_7_STARTER.items():
+        for subtopic_name, skills in subtopics.items():
+            assert set(skills) <= set(actual[topic_name][subtopic_name])
+    assert actual["Уравнения"]["Квадратные уравнения"] == [
+        "Решать квадратные уравнения", "Применять дискриминант"]

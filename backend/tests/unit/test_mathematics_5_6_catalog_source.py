@@ -29,7 +29,6 @@ PRESERVED_GRADE_FINGERPRINTS = {
     2: "340d46bca3f77d3d9efce5b0dfb007f3df7cd3b6abfa7347b2a9882d80d9668d",
     3: "b1e872d134b6ded76cb58aa5b9cc7614e34e7500049074dfd9c1e47394c3e058",
     4: "a59dbca77ada396925e365eb0325489db84b9a96fa29de78faa56aa113cd1fc0",
-    7: "fd81c8b2c2acb6f446b52dfc77613b75ece77b478ab6ceffc87d9ded405a31a4",
 }
 
 
@@ -53,7 +52,7 @@ def test_mathematics_5_6_taxonomy_is_complete_unique_and_grade_scoped():
     mathematics = [item for item in source["subjects"] if item["name"] == "Математика"]
     assert len(mathematics) == 1
     grades = {grade["number"]: grade for grade in mathematics[0]["grades"]}
-    assert set(grades) == {1, 2, 3, 4, 5, 6, 7}
+    assert set(grades) == set(range(1, 10))
 
     for number, expected_topics in EXPECTED_TOPICS.items():
         topics = grades[number]["topics"]

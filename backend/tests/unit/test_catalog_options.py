@@ -64,3 +64,7 @@ async def test_effective_target_live_dead_missing_loop_and_depth_bound():
             replacement_id=UUID(int=value + 1))
     chain[UUID(int=100 + MAX_CATALOG_REPLACEMENT_DEPTH + 1)] = active
     assert await resolve_effective_catalog_target(_Db(chain), object, UUID(int=100)) is None
+
+
+def test_catalog_normalization_preserves_mathematical_function_identity():
+    assert normalize_catalog_name("Функция y = √x") != normalize_catalog_name("Функция y = |x|")

@@ -154,10 +154,13 @@ async def test_mathematics_hierarchy_search_and_metadata_resolution():
             FROM subjects s JOIN topics t ON t.subject_id=s.id
             JOIN grades g ON g.id=t.grade_id
             JOIN subtopics st ON st.topic_id=t.id JOIN skills sk ON sk.subtopic_id=st.id
-            WHERE s.normalized_name='математика' AND g.number IN (5, 6)
+            WHERE s.normalized_name='математика' AND g.number BETWEEN 5 AND 9
             GROUP BY g.number ORDER BY g.number
         """))).all()
-        assert expanded_rows == [(5, 4, 29, 116), (6, 6, 36, 135)]
+        assert expanded_rows == [
+            (5, 4, 29, 116), (6, 6, 36, 135), (7, 6, 49, 134),
+            (8, 6, 57, 126), (9, 6, 71, 144),
+        ]
         assert await db.scalar(text("""
             SELECT count(*) FROM topics t JOIN subjects s ON s.id=t.subject_id
             JOIN grades g ON g.id=t.grade_id WHERE s.normalized_name='математика'
@@ -171,7 +174,7 @@ async def test_mathematics_hierarchy_search_and_metadata_resolution():
         """)) == 0
 
         subject_id = await db.scalar(text("SELECT id FROM subjects WHERE normalized_name='математика'"))
-        grade_ids = dict((await db.execute(text("SELECT number,id FROM grades WHERE number BETWEEN 1 AND 7"))).all())
+        grade_ids = dict((await db.execute(text("SELECT number,id FROM grades WHERE number BETWEEN 1 AND 9"))).all())
         service = CatalogOptionService(db)
         expected = {1: ("ариф", "Арифметические действия"),
                     2: ("умнож", "Умножение и деление"),
@@ -216,6 +219,44 @@ async def test_mathematics_hierarchy_search_and_metadata_resolution():
             result = await service.search(CatalogOptionQuery(
                 "subtopics", query, 20, topic_id=topic_id))
             assert expected_name in {item["name"] for item in result["items"]}
+
+        secondary_searches = [
+            (7, "Алгебраические выражения", "subtopics", "многочлен", "Многочлены"),
+            (7, "Геометрия", "subtopics", "треуг", "Треугольники"),
+            (7, "Вероятность и статистика", "skills", "медиан", "Находить медиану"),
+            (8, "Уравнения и неравенства", "skills", "дискрим", "Вычислять дискриминант"),
+            (8, "Геометрия", "subtopics", "пифаг", "Теорема Пифагора"),
+            (8, "Вероятность и статистика", "subtopics", "условн", "Условная вероятность"),
+            (9, "Числовые последовательности и прогрессии", "subtopics", "прогресс", "Арифметическая прогрессия"),
+            (9, "Геометрия", "subtopics", "косинус", "Теорема косинусов"),
+            (9, "Вероятность и статистика", "subtopics", "бернул", "Испытания Бернулли"),
+        ]
+        for number, topic_name, kind, query, expected_name in secondary_searches:
+            topic_id = await db.scalar(text("""
+                SELECT id FROM topics WHERE subject_id=:subject AND grade_id=:grade AND name=:name
+            """), {"subject": subject_id, "grade": grade_ids[number], "name": topic_name})
+            kwargs = {"topic_id": topic_id}
+            if kind == "skills":
+                subtopic_id = await db.scalar(text("""
+                    SELECT st.id FROM subtopics st JOIN skills sk ON sk.subtopic_id=st.id
+                    WHERE st.topic_id=:topic AND sk.normalized_name LIKE :query
+                    ORDER BY st.normalized_name LIMIT 1
+                """), {"topic": topic_id, "query": f"%{query}%"})
+                kwargs = {"subtopic_id": subtopic_id}
+            result = await service.search(CatalogOptionQuery(kind, query, 20, **kwargs))
+            assert expected_name in {item["name"] for item in result["items"]}
+
+        grade_7_equations = await db.scalar(text("""
+            SELECT id FROM topics WHERE subject_id=:subject AND grade_id=:grade
+            AND name='Уравнения'
+        """), {"subject": subject_id, "grade": grade_ids[7]})
+        legacy_quadratics = await db.scalar(text("""
+            SELECT id FROM subtopics WHERE topic_id=:topic AND name='Квадратные уравнения'
+        """), {"topic": grade_7_equations})
+        grade_7_discriminant = await service.search(CatalogOptionQuery(
+            "skills", "дискрим", 20, subtopic_id=legacy_quadratics))
+        assert {item["name"] for item in grade_7_discriminant["items"]} == {
+            "Применять дискриминант"}
 
         grade_5_topics = await service.search(CatalogOptionQuery(
             "topics", "отрицатель", 20, subject_id, grade_ids[5]))

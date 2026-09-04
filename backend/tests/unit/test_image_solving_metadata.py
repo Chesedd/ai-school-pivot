@@ -95,6 +95,47 @@ def test_mathematics_5_6_catalog_metadata_resolves_locally(
                 subject.id, grade.id, topic.id, subtopic.id, skill.id)
 
 
+@pytest.mark.parametrize(("grade_number", "topic_name", "subtopic_name", "skill_name"), [
+    (7, "Функции", "Линейная функция", "Строить график линейной функции"),
+    (8, "Уравнения и неравенства", "Квадратные уравнения", "Вычислять дискриминант"),
+    (9, "Числовые последовательности и прогрессии", "Арифметическая прогрессия", "Находить n-й член арифметической прогрессии"),
+    (9, "Вероятность и статистика", "Испытания Бернулли", "Применять формулу Бернулли"),
+])
+def test_mathematics_7_9_catalog_metadata_resolves_locally(
+        grade_number, topic_name, subtopic_name, skill_name):
+    subject = item("Математика")
+    grade = item(str(grade_number), grade_number=grade_number)
+    topic = item(topic_name, subject_id=subject.id, grade_id=grade.id)
+    subtopic = item(subtopic_name, topic_id=topic.id)
+    skills = (() if skill_name is None else
+              (item(skill_name, topic_id=topic.id, subtopic_id=subtopic.id),))
+    catalog = MetadataCatalogSnapshotV1(
+        subjects=(subject,), grades=(grade,), topics=(topic,), subtopics=(subtopic,),
+        skills=skills, tag_categories=(), tags=())
+    extraction = ExtractionResultV1(
+        extracted_text="Задание", structured_statement="Выполнить задание.",
+        detected_task_type="calculation", detected_answer_format="number", choices=None,
+        extraction_confidence=Decimal(".99"), ocr_issues=(), metadata={
+            "title": "Задание", "subject": "Математика", "grade": grade_number,
+            "topic": topic_name, "subtopic": subtopic_name,
+            "skills": (() if skill_name is None else (skill_name,)),
+            "task_type": "calculation", "answer_format": "number", "difficulty": 2,
+            "tags": (),
+        })
+    now = datetime.now(UTC)
+    session = ImageSolvingSession(
+        session_id=uuid4(), owner_id=uuid4(), input_artifact_id=uuid4(),
+        extraction_checkpoint=extraction, lifecycle_status=ImageSolvingStatus.VALIDATED,
+        created_at=now, updated_at=now)
+
+    result = resolve_metadata(session, catalog)
+
+    assert (result.subject.id, result.grade.id, result.topic.id, result.subtopic.id) == (
+        subject.id, grade.id, topic.id, subtopic.id)
+    if skill_name is not None:
+        assert result.skills[0].id == skills[0].id
+
+
 def test_subject_exact_matching_is_normalized_across_capitalization():
     result, expected = resolve(extracted_subject="математика")
 
