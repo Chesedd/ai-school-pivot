@@ -40,6 +40,23 @@ async def _id(db, sql, **values):
     return await db.scalar(text(sql + " RETURNING id"), values)
 
 
+async def _set_replacement(db, *, source_id, target_id, resolver_id):
+    await db.execute(
+        text(
+            """
+            UPDATE topics
+            SET status='deprecated',
+                replacement_id=:target,
+                resolved_by=:resolver,
+                resolved_at=clock_timestamp(),
+                resolution_reason='integration fixture merge'
+            WHERE id=:source
+            """
+        ),
+        {"source": source_id, "target": target_id, "resolver": resolver_id},
+    )
+
+
 async def test_live_statuses_hierarchy_and_alias_replacement_lifecycle():
     async with async_session_factory() as db, db.begin():
         user = await _id(db, "INSERT INTO users(login,normalized_login,display_name,password_hash) VALUES ('u','u','u','x')")
@@ -52,16 +69,16 @@ async def test_live_statuses_hierarchy_and_alias_replacement_lifecycle():
         a = await _id(db, "INSERT INTO topics(subject_id,grade_id,code,name,normalized_name,status) VALUES (:s,:g,'a','A','a','deprecated')", s=math, g=grade7)
         b = await _id(db, "INSERT INTO topics(subject_id,grade_id,code,name,normalized_name,status) VALUES (:s,:g,'b','B','b','deprecated')", s=math, g=grade7)
         c = await _id(db, "INSERT INTO topics(subject_id,grade_id,code,name,normalized_name,status) VALUES (:s,:g,'c','Canonical','canonical','active')", s=math, g=grade7)
-        await db.execute(text("UPDATE topics SET replacement_id=:b WHERE id=:a"), {"a": a, "b": b})
-        await db.execute(text("UPDATE topics SET replacement_id=:c WHERE id=:b"), {"b": b, "c": c})
+        await _set_replacement(db, source_id=a, target_id=b, resolver_id=user)
+        await _set_replacement(db, source_id=b, target_id=c, resolver_id=user)
         wrong_grade = await _id(db, "INSERT INTO topics(subject_id,grade_id,code,name,normalized_name,status) VALUES (:s,:g,'wg','Canonical','canonical','active')", s=math, g=grade8)
         cross_old = await _id(db, "INSERT INTO topics(subject_id,grade_id,code,name,normalized_name,status) VALUES (:s,:g,'co','Cross old','cross old','deprecated')", s=math, g=grade7)
         cross_new = await _id(db, "INSERT INTO topics(subject_id,grade_id,code,name,normalized_name,status) VALUES (:s,:g,'cn','Cross new','cross new','active')", s=physics, g=grade7)
-        await db.execute(text("UPDATE topics SET replacement_id=:new WHERE id=:old"), {"new": cross_new, "old": cross_old})
+        await _set_replacement(db, source_id=cross_old, target_id=cross_new, resolver_id=user)
         loop1 = await _id(db, "INSERT INTO topics(subject_id,grade_id,code,name,normalized_name,status) VALUES (:s,:g,'l1','L1','l1','deprecated')", s=math, g=grade7)
         loop2 = await _id(db, "INSERT INTO topics(subject_id,grade_id,code,name,normalized_name,status) VALUES (:s,:g,'l2','L2','l2','deprecated')", s=math, g=grade7)
-        await db.execute(text("UPDATE topics SET replacement_id=:l2 WHERE id=:l1"), {"l1": loop1, "l2": loop2})
-        await db.execute(text("UPDATE topics SET replacement_id=:l1 WHERE id=:l2"), {"l1": loop1, "l2": loop2})
+        await _set_replacement(db, source_id=loop1, target_id=loop2, resolver_id=user)
+        await _set_replacement(db, source_id=loop2, target_id=loop1, resolver_id=user)
         alias_sql = "INSERT INTO curriculum_catalog_aliases(kind,alias_name,normalized_alias,topic_target_id,subject_id,grade_id,created_by) VALUES ('topic',:name,:name,:target,:s,:g,:u)"
         for name, target in (("merged", a), ("cross", cross_old), ("loop", loop1)):
             await db.execute(text(alias_sql), {"name": name, "target": target, "s": math, "g": grade7, "u": user})
