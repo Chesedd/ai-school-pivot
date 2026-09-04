@@ -17,12 +17,21 @@ class CreateImageSolvingSessionRequest(ImageSolvingDto):
     # JSON has no UUID scalar, so permit Pydantic to parse this HTTP-boundary
     # field while retaining strict validation for every other DTO field.
     artifact_id: UUID = Field(strict=False)
+    solution_instruction: StrictStr | None = Field(default=None, min_length=1, max_length=4000)
+
+    @field_validator("solution_instruction")
+    @classmethod
+    def normalized_instruction(cls, value: str | None) -> str | None:
+        if value is not None and value != value.strip():
+            raise ValueError("whitespace_not_normalized")
+        return value
 
 
 class ImageSolvingSessionResponse(ImageSolvingDto):
     session_id: UUID
     artifact_id: UUID
     status: StrictStr
+    solution_instruction: StrictStr | None = None
     failure_code: StrictStr | None = None
     failure_stage: StrictStr | None = None
 

@@ -1,18 +1,19 @@
 """Persistence mappings dedicated to image solving (not authoring)."""
 from datetime import datetime
 from uuid import UUID
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, String, UniqueConstraint, text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from app.infrastructure.models import Base, IdMixin, uuid_type
 
 class ImageSolvingSessionRow(IdMixin, Base):
     __tablename__ = "image_solving_sessions"
-    __table_args__ = (CheckConstraint("status IN ('created','extracting','extracted','solving','solved','validated','failed')", name="ck_image_solving_sessions_status"), Index("ix_image_solving_sessions_owner_created", "owner_id", "created_at"))
+    __table_args__ = (CheckConstraint("status IN ('created','extracting','extracted','solving','solved','validated','failed')", name="ck_image_solving_sessions_status"), CheckConstraint("solution_instruction IS NULL OR (solution_instruction = btrim(solution_instruction) AND char_length(solution_instruction) BETWEEN 1 AND 4000)", name="ck_image_solving_sessions_solution_instruction"), Index("ix_image_solving_sessions_owner_created", "owner_id", "created_at"))
     owner_id: Mapped[UUID] = mapped_column(uuid_type)
     input_artifact_id: Mapped[UUID] = mapped_column(ForeignKey("input_artifacts.id", ondelete="RESTRICT"))
     status: Mapped[str] = mapped_column(String(16), server_default="created")
     failure_code: Mapped[str | None] = mapped_column(String(64))
+    solution_instruction: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("clock_timestamp()"))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("clock_timestamp()"))
 
