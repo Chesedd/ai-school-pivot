@@ -47,7 +47,7 @@ def test_mathematics_7_9_source_contract_and_normalized_uniqueness():
     mathematics = [subject for subject in source["subjects"] if subject["name"] == "Математика"]
     assert len(mathematics) == 1
     grades = {grade["number"]: grade for grade in mathematics[0]["grades"]}
-    assert set(grades) == set(range(1, 10))
+    assert set(grades) == set(range(1, 12))
     for number, names in EXPECTED_TOPICS.items():
         topics = grades[number]["topics"]
         assert {topic["name"] for topic in topics} == names
