@@ -60,7 +60,8 @@ async def test_full_seed_first_run_and_second_run_are_complete_and_idempotent():
     async with async_session_factory() as db:
         before = {table: await db.scalar(text(f"SELECT count(*) FROM {table}"))
                   for table in ("grades", "subjects", "topics", "subtopics", "skills")}
-        ids = (await db.execute(text("SELECT id FROM subjects ORDER BY id"))).scalars().all()
+        ids = {table: (await db.execute(text(f"SELECT id FROM {table} ORDER BY id"))).scalars().all()
+               for table in ("grades", "subjects", "topics", "subtopics", "skills")}
         live_subjects = (await db.execute(text(
             "SELECT name FROM subjects WHERE status IN ('active', 'provisional')"
         ))).scalars().all()
@@ -84,7 +85,8 @@ async def test_full_seed_first_run_and_second_run_are_complete_and_idempotent():
     assert all(second[kind]["created"] == 0 for kind in second)
     async with async_session_factory() as db:
         after = {table: await db.scalar(text(f"SELECT count(*) FROM {table}")) for table in before}
-        assert (await db.execute(text("SELECT id FROM subjects ORDER BY id"))).scalars().all() == ids
+        assert {table: (await db.execute(text(f"SELECT id FROM {table} ORDER BY id"))).scalars().all()
+                for table in ids} == ids
         assert await db.scalar(text("SELECT count(*) FROM topics t JOIN subjects s ON s.id=t.subject_id JOIN grades g ON g.id=t.grade_id")) == after["topics"]
         assert await db.scalar(text("SELECT count(*) FROM skills s JOIN subtopics st ON st.id=s.subtopic_id")) == after["skills"]
         assert await db.scalar(text("SELECT count(*) FROM grades WHERE number BETWEEN 1 AND 11")) == 11
@@ -125,7 +127,7 @@ async def test_partial_active_and_provisional_identities_are_reused(tmp_path):
         assert await db.scalar(text("SELECT id FROM subjects WHERE normalized_name='proposed'")) == provisional
 
 
-async def test_mathematics_primary_hierarchy_search_and_metadata_resolution():
+async def test_mathematics_hierarchy_search_and_metadata_resolution():
     """The seeded taxonomy stays grade-scoped and resolves without a provider."""
     from datetime import UTC, datetime
     from decimal import Decimal
@@ -147,6 +149,15 @@ async def test_mathematics_primary_hierarchy_search_and_metadata_resolution():
             GROUP BY g.number ORDER BY g.number
         """))).all()
         assert rows == [(1, 5, 11, 38), (2, 5, 14, 58), (3, 5, 18, 61), (4, 5, 23, 81)]
+        expanded_rows = (await db.execute(text("""
+            SELECT g.number, count(DISTINCT t.id), count(DISTINCT st.id), count(DISTINCT sk.id)
+            FROM subjects s JOIN topics t ON t.subject_id=s.id
+            JOIN grades g ON g.id=t.grade_id
+            JOIN subtopics st ON st.topic_id=t.id JOIN skills sk ON sk.subtopic_id=st.id
+            WHERE s.normalized_name='математика' AND g.number IN (5, 6)
+            GROUP BY g.number ORDER BY g.number
+        """))).all()
+        assert expanded_rows == [(5, 4, 29, 116), (6, 6, 36, 135)]
         assert await db.scalar(text("""
             SELECT count(*) FROM topics t JOIN subjects s ON s.id=t.subject_id
             JOIN grades g ON g.id=t.grade_id WHERE s.normalized_name='математика'
@@ -160,7 +171,7 @@ async def test_mathematics_primary_hierarchy_search_and_metadata_resolution():
         """)) == 0
 
         subject_id = await db.scalar(text("SELECT id FROM subjects WHERE normalized_name='математика'"))
-        grade_ids = dict((await db.execute(text("SELECT number,id FROM grades WHERE number BETWEEN 1 AND 4"))).all())
+        grade_ids = dict((await db.execute(text("SELECT number,id FROM grades WHERE number BETWEEN 1 AND 7"))).all())
         service = CatalogOptionService(db)
         expected = {1: ("ариф", "Арифметические действия"),
                     2: ("умнож", "Умножение и деление"),
@@ -190,6 +201,27 @@ async def test_mathematics_primary_hierarchy_search_and_metadata_resolution():
             "subtopics", "движ", 20, topic_id=grade_3_text_topic))
         assert "Задачи на движение" not in {item["name"] for item in wrong_grade["items"]}
 
+        searches = [
+            (5, "Натуральные числа и нуль", "делител", "Делители и кратные"),
+            (5, "Дроби", "десятич", "Десятичные дроби"),
+            (5, "Наглядная геометрия", "объём", "Объём"),
+            (6, "Дроби", "процент", "Проценты"),
+            (6, "Положительные и отрицательные числа", "координат", "Координатная плоскость"),
+            (6, "Наглядная геометрия", "симмет", "Симметрия"),
+        ]
+        for number, topic_name, query, expected_name in searches:
+            topic_id = await db.scalar(text("""
+                SELECT id FROM topics WHERE subject_id=:subject AND grade_id=:grade AND name=:name
+            """), {"subject": subject_id, "grade": grade_ids[number], "name": topic_name})
+            result = await service.search(CatalogOptionQuery(
+                "subtopics", query, 20, topic_id=topic_id))
+            assert expected_name in {item["name"] for item in result["items"]}
+
+        grade_5_topics = await service.search(CatalogOptionQuery(
+            "topics", "отрицатель", 20, subject_id, grade_ids[5]))
+        assert "Положительные и отрицательные числа" not in {
+            item["name"] for item in grade_5_topics["items"]}
+
         snapshot = await SqlAlchemyMetadataCatalogLoader(db).load()
         extraction = ExtractionResultV1(extracted_text="Автомобиль проехал 120 км",
             structured_statement="Найти скорость автомобиля.", detected_task_type="problem",
@@ -208,3 +240,17 @@ async def test_mathematics_primary_hierarchy_search_and_metadata_resolution():
         assert recommendation.topic.label == "Текстовые задачи"
         assert recommendation.subtopic.label == "Задачи на движение"
         assert recommendation.skills[0].label == "Находить скорость"
+
+        for number, topic, subtopic, skill in (
+            (5, "Дроби", "Десятичные дроби", "Сравнивать десятичные дроби"),
+            (6, "Дроби", "Проценты", "Находить процент от величины"),
+        ):
+            extraction_5_6 = extraction.model_copy(update={"metadata": {
+                **extraction.metadata, "grade": number, "topic": topic,
+                "subtopic": subtopic, "skills": (skill,),
+            }})
+            resolved = resolve_metadata(session.model_copy(
+                update={"extraction_checkpoint": extraction_5_6}), snapshot)
+            assert (resolved.grade.label, resolved.topic.label,
+                    resolved.subtopic.label, resolved.skills[0].label) == (
+                        str(number), topic, subtopic, skill)

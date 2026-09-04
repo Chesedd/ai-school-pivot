@@ -2,6 +2,8 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import uuid4
 
+import pytest
+
 from app.application.image_solving_contracts import ExtractionResultV1, ImageSolvingSession, ImageSolvingStatus
 from app.application.image_solving_metadata import (CatalogAliasV1, CatalogItemV1,
     CachedMetadataRecommendation, ImageTaskMetadataRecommendationV1, MetadataCatalogSnapshotV1,
@@ -55,6 +57,42 @@ def test_exact_resolution_is_scoped_to_selected_hierarchy():
             result.subtopic.label, result.skills[0].label) == (
         "Математика", "6", "Уравнения", "Линейные уравнения",
         "Решать линейные уравнения")
+
+
+@pytest.mark.parametrize(("grade_number", "topic_name", "subtopic_name", "skill_name"), [
+    (5, "Дроби", "Десятичные дроби", "Сравнивать десятичные дроби"),
+    (6, "Дроби", "Проценты", "Находить процент от величины"),
+])
+def test_mathematics_5_6_catalog_metadata_resolves_locally(
+        grade_number, topic_name, subtopic_name, skill_name):
+    subject = item("Математика")
+    grade = item(str(grade_number), grade_number=grade_number)
+    topic = item(topic_name, subject_id=subject.id, grade_id=grade.id)
+    subtopic = item(subtopic_name, topic_id=topic.id)
+    skill = item(skill_name, topic_id=topic.id, subtopic_id=subtopic.id)
+    catalog = MetadataCatalogSnapshotV1(
+        subjects=(subject,), grades=(grade,), topics=(topic,), subtopics=(subtopic,),
+        skills=(skill,), tag_categories=(), tags=())
+    extraction = ExtractionResultV1(
+        extracted_text="Задание", structured_statement="Выполнить задание.",
+        detected_task_type="calculation", detected_answer_format="number", choices=None,
+        extraction_confidence=Decimal(".99"), ocr_issues=(), metadata={
+            "title": "Задание", "subject": "Математика", "grade": grade_number,
+            "topic": topic_name, "subtopic": subtopic_name, "skills": (skill_name,),
+            "task_type": "calculation", "answer_format": "number", "difficulty": 2,
+            "tags": (),
+        })
+    now = datetime.now(UTC)
+    session = ImageSolvingSession(
+        session_id=uuid4(), owner_id=uuid4(), input_artifact_id=uuid4(),
+        extraction_checkpoint=extraction, lifecycle_status=ImageSolvingStatus.VALIDATED,
+        created_at=now, updated_at=now)
+
+    result = resolve_metadata(session, catalog)
+
+    assert (result.subject.id, result.grade.id, result.topic.id, result.subtopic.id,
+            result.skills[0].id) == (
+                subject.id, grade.id, topic.id, subtopic.id, skill.id)
 
 
 def test_subject_exact_matching_is_normalized_across_capitalization():
@@ -174,7 +212,6 @@ def test_alias_changes_catalog_fingerprint_deterministically():
     alias=CatalogAliasV1(kind="subject",normalized_alias="линейные уравнения",target=target)
     assert base.fingerprint != base.model_copy(update={"aliases":(alias,)}).fingerprint
 
-import pytest
 from types import SimpleNamespace
 from app.application.image_solving_metadata import MetadataRecommendationService, MetadataResolutionError
 
