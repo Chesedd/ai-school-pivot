@@ -103,7 +103,8 @@ class PromoteImageSolvingRequest(ImageSolvingDto):
     review_confirmed: StrictBool
     review_note: StrictStr | None = Field(default=None, max_length=4_000)
     confirm_questionable: StrictBool = False
-    alias_confirmations: tuple["CatalogAliasConfirmation", ...] = Field(default=(), max_length=8)
+    alias_confirmations: tuple["CatalogAliasConfirmation", ...] = Field(
+        strict=False, default=(), max_length=8)
 
     @field_validator("title", "statement", "solution", "final_answer", "review_note")
     @classmethod
