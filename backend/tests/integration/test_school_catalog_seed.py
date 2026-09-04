@@ -190,6 +190,70 @@ async def test_russian_primary_hierarchy_and_grade_scoped_search():
             assert forbidden not in {item["name"] for item in result["items"]}
 
 
+async def test_russian_5_6_hierarchy_and_grade_scoped_search():
+    await seed_catalog(session_factory=async_session_factory)
+    async with async_session_factory() as db:
+        rows = (await db.execute(text("""
+            SELECT g.number, count(DISTINCT t.id), count(DISTINCT st.id),
+                   count(DISTINCT sk.id)
+            FROM subjects s JOIN topics t ON t.subject_id=s.id
+            JOIN grades g ON g.id=t.grade_id
+            JOIN subtopics st ON st.topic_id=t.id
+            JOIN skills sk ON sk.subtopic_id=st.id
+            WHERE s.normalized_name='русский язык' AND g.number IN (5,6)
+            GROUP BY g.number ORDER BY g.number
+        """))).all()
+        assert rows == [(5, 10, 176, 217), (6, 8, 132, 149)]
+        subject_id = await db.scalar(text(
+            "SELECT id FROM subjects WHERE normalized_name='русский язык'"))
+        grade_ids = dict((await db.execute(text(
+            "SELECT number,id FROM grades WHERE number IN (5,6)"))).all())
+        service = CatalogOptionService(db)
+        searches = [
+            (5, "Фонетика, графика и орфоэпия", "фонетическ", "Фонетический анализ слова"),
+            (5, "Лексикология", "пароним", "Паронимы"),
+            (5, "Морфемика", "морфемн", "Морфемный анализ слова"),
+            (5, "Синтаксис", "тире", "Тире между подлежащим и сказуемым"),
+            (5, "Орфография и пунктуация", "тся", "-ТСЯ и -ТЬСЯ"),
+            (6, "Лексикология", "фразеолог", "Фразеологизмы"),
+            (6, "Словообразование", "словообразоват", "Словообразовательный анализ"),
+            (6, "Морфология", "числитель", "Имя числительное"),
+            (6, "Морфология", "местоимен", "Местоимение"),
+            (6, "Орфография и пунктуация", "пре", "ПРЕ- и ПРИ-"),
+        ]
+        topic_ids = {}
+        for number, topic_name, query, expected in searches:
+            key = (number, topic_name)
+            if key not in topic_ids:
+                topic_ids[key] = await db.scalar(text("""
+                    SELECT id FROM topics WHERE subject_id=:subject
+                    AND grade_id=:grade AND name=:name
+                """), {"subject": subject_id, "grade": grade_ids[number],
+                        "name": topic_name})
+            result = await service.search(CatalogOptionQuery(
+                "subtopics", query, 20, topic_id=topic_ids[key]))
+            assert expected in {item["name"] for item in result["items"]}
+
+        for number, topic_name, query, forbidden in [
+            (5, "Морфология", "числитель", "Имя числительное"),
+            (6, "Морфология", "тире подлежащ", "Тире между подлежащим и сказуемым"),
+            (5, "Морфология", "причаст", "Причастие"),
+        ]:
+            topic_id = topic_ids.get((number, topic_name)) or await db.scalar(text("""
+                SELECT id FROM topics WHERE subject_id=:subject
+                AND grade_id=:grade AND name=:name
+            """), {"subject": subject_id, "grade": grade_ids[number], "name": topic_name})
+            result = await service.search(CatalogOptionQuery(
+                "subtopics", query, 20, topic_id=topic_id))
+            assert forbidden not in {item["name"] for item in result["items"]}
+
+        assert await db.scalar(text("""
+            SELECT count(*) FROM topics t JOIN subjects s ON s.id=t.subject_id
+            JOIN grades g ON g.id=t.grade_id
+            WHERE s.normalized_name='русский язык' AND g.number IN (8,9,10,11)
+        """)) == 0
+
+
 async def test_mathematics_hierarchy_search_and_metadata_resolution():
     """The seeded taxonomy stays grade-scoped and resolves without a provider."""
     from datetime import UTC, datetime

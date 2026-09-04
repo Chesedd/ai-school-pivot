@@ -38,7 +38,7 @@ def test_russian_primary_source_contract_and_normalized_uniqueness():
                 if subject["name"] == "Русский язык"]
     assert len(subjects) == 1
     grades = {grade["number"]: grade for grade in subjects[0]["grades"]}
-    assert set(grades) == {1, 2, 3, 4, 7}
+    assert set(grades) == {1, 2, 3, 4, 5, 6, 7}
 
     for number in range(1, 5):
         topics = grades[number]["topics"]
