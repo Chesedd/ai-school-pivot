@@ -13,10 +13,26 @@ if not database_url.rsplit("/", 1)[-1].split("?", 1)[0].endswith("_test"):
     raise RuntimeError("Integration cleanup is allowed only for a database ending in _test")
 os.environ["DATABASE_URL"] = database_url
 
+from app.application.catalog_options import CatalogOptionQuery, CatalogOptionService  # noqa: E402
 from app.db.session import async_session_factory, engine  # noqa: E402
 from app.tools.seed_school_catalog import DATA, seed_catalog  # noqa: E402
 
 pytestmark = pytest.mark.asyncio
+
+CANONICAL_SUBJECTS = {
+    "Русский язык", "Литературное чтение", "Литература", "Математика",
+    "Окружающий мир", "Информатика", "Физика", "Химия", "Биология",
+    "История", "Обществознание", "География", "Английский язык",
+}
+
+NON_CANONICAL_TOP_LEVEL_NAMES = {
+    "Алгебра", "Геометрия", "Вероятность и статистика", "История России",
+    "Всеобщая история", "Иностранный язык", "Изобразительное искусство",
+    "Музыка", "Труд (технология)", "Физическая культура",
+    "Основы безопасности и защиты Родины",
+    "Основы религиозных культур и светской этики", "Родной язык",
+    "Родная литература",
+}
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -33,13 +49,37 @@ async def clean():
 
 
 async def test_full_seed_first_run_and_second_run_are_complete_and_idempotent():
+    source_subjects = {item["name"] for item in json.loads(DATA.read_text())["subjects"]}
+    assert source_subjects == CANONICAL_SUBJECTS
+    assert source_subjects.isdisjoint(NON_CANONICAL_TOP_LEVEL_NAMES)
+
     first = await seed_catalog(session_factory=async_session_factory)
     assert first["grades"]["created"] == 11
+    assert first["subjects"] == {"created": 13, "reused": 0, "conflicts": 0}
     assert all(first[kind]["created"] > 0 for kind in ("subjects", "topics", "subtopics", "skills"))
     async with async_session_factory() as db:
         before = {table: await db.scalar(text(f"SELECT count(*) FROM {table}"))
                   for table in ("grades", "subjects", "topics", "subtopics", "skills")}
         ids = (await db.execute(text("SELECT id FROM subjects ORDER BY id"))).scalars().all()
+        live_subjects = (await db.execute(text(
+            "SELECT name FROM subjects WHERE status IN ('active', 'provisional')"
+        ))).scalars().all()
+        assert set(live_subjects) == CANONICAL_SUBJECTS
+        assert len(live_subjects) == len(CANONICAL_SUBJECTS)
+        for query, expected in {
+            "матем": {"Математика"},
+            "русск": {"Русский язык"},
+            "литератур": {"Литература", "Литературное чтение"},
+            "окруж": {"Окружающий мир"},
+            "информ": {"Информатика"},
+            "физ": {"Физика"},
+            "обществ": {"Обществознание"},
+            "англ": {"Английский язык"},
+        }.items():
+            result = await CatalogOptionService(db).search(
+                CatalogOptionQuery("subjects", query, 20)
+            )
+            assert expected.intersection(item["name"] for item in result["items"])
     second = await seed_catalog(session_factory=async_session_factory)
     assert all(second[kind]["created"] == 0 for kind in second)
     async with async_session_factory() as db:
