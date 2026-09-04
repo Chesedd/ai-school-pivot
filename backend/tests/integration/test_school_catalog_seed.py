@@ -127,6 +127,69 @@ async def test_partial_active_and_provisional_identities_are_reused(tmp_path):
         assert await db.scalar(text("SELECT id FROM subjects WHERE normalized_name='proposed'")) == provisional
 
 
+async def test_russian_primary_hierarchy_and_grade_scoped_search():
+    await seed_catalog(session_factory=async_session_factory)
+    async with async_session_factory() as db:
+        rows = (await db.execute(text("""
+            SELECT g.number, count(DISTINCT t.id), count(DISTINCT st.id),
+                   count(DISTINCT sk.id)
+            FROM subjects s JOIN topics t ON t.subject_id=s.id
+            JOIN grades g ON g.id=t.grade_id
+            JOIN subtopics st ON st.topic_id=t.id
+            JOIN skills sk ON sk.subtopic_id=st.id
+            WHERE s.normalized_name='русский язык' AND g.number BETWEEN 1 AND 4
+            GROUP BY g.number ORDER BY g.number
+        """))).all()
+        assert rows == [(1, 7, 46, 72), (2, 8, 55, 80),
+                        (3, 8, 65, 82), (4, 8, 74, 94)]
+        assert await db.scalar(text("""
+            SELECT count(*) FROM topics t JOIN subjects s ON s.id=t.subject_id
+            JOIN grades g ON g.id=t.grade_id
+            WHERE s.normalized_name='русский язык' AND g.number IN (5,6,8,9,10,11)
+        """)) == 0
+        assert await db.scalar(text("""
+            SELECT count(*) FROM skills sk JOIN subtopics st ON st.id=sk.subtopic_id
+            JOIN topics t ON t.id=st.topic_id JOIN grades g ON g.id=t.grade_id
+            WHERE t.grade_id != g.id
+        """)) == 0
+
+        subject_id = await db.scalar(text(
+            "SELECT id FROM subjects WHERE normalized_name='русский язык'"))
+        grade_ids = dict((await db.execute(text(
+            "SELECT number,id FROM grades WHERE number BETWEEN 1 AND 4"))).all())
+        service = CatalogOptionService(db)
+        searches = [
+            (1, "Орфография и пунктуация", "жи", "ЖИ–ШИ"),
+            (2, "Орфография и пунктуация", "безударн", "Безударные гласные в корне слова"),
+            (2, "Состав слова (морфемика)", "однокор", "Однокоренные слова"),
+            (3, "Морфология", "падеж", "Падеж имён существительных"),
+            (3, "Синтаксис", "подлежащ", "Главные члены предложения"),
+            (4, "Морфология", "спряж", "Спряжение глагола"),
+            (4, "Орфография и пунктуация", "ться", "-ТСЯ и -ТЬСЯ"),
+            (4, "Лексика", "фразеолог", "Фразеологизмы"),
+        ]
+        for number, topic_name, query, expected in searches:
+            topic_id = await db.scalar(text("""
+                SELECT id FROM topics WHERE subject_id=:subject
+                AND grade_id=:grade AND name=:name
+            """), {"subject": subject_id, "grade": grade_ids[number], "name": topic_name})
+            result = await service.search(CatalogOptionQuery(
+                "subtopics", query, 20, topic_id=topic_id))
+            assert expected in {item["name"] for item in result["items"]}
+
+        for number, topic_name, query, forbidden in [
+            (2, "Морфология", "спряж", "Спряжение глагола"),
+            (1, "Синтаксис", "падеж", "Падеж имён существительных"),
+        ]:
+            topic_id = await db.scalar(text("""
+                SELECT id FROM topics WHERE subject_id=:subject
+                AND grade_id=:grade AND name=:name
+            """), {"subject": subject_id, "grade": grade_ids[number], "name": topic_name})
+            result = await service.search(CatalogOptionQuery(
+                "subtopics", query, 20, topic_id=topic_id))
+            assert forbidden not in {item["name"] for item in result["items"]}
+
+
 async def test_mathematics_hierarchy_search_and_metadata_resolution():
     """The seeded taxonomy stays grade-scoped and resolves without a provider."""
     from datetime import UTC, datetime
