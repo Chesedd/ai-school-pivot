@@ -35,7 +35,11 @@ class IdMixin:
 
 def normalize_catalog_name(value: str) -> str:
     """Match the established deterministic catalog resolver normalization."""
-    return re.sub(r"[^\w]+", " ", unicodedata.normalize("NFKC", value).casefold().replace("ё", "е")).strip()
+    value = unicodedata.normalize("NFKC", value).casefold().replace("ё", "е")
+    # Mathematical radicals and absolute-value bars carry identity. Preserve them
+    # instead of collapsing distinct catalog names such as √x and |x|.
+    value = value.replace("√", " sqrt ").replace("|", " abs ")
+    return re.sub(r"[^\w]+", " ", value).strip()
 
 
 class CatalogLifecycleMixin:
