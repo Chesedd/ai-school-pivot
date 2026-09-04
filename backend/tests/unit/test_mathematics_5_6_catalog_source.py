@@ -52,7 +52,7 @@ def test_mathematics_5_6_taxonomy_is_complete_unique_and_grade_scoped():
     mathematics = [item for item in source["subjects"] if item["name"] == "Математика"]
     assert len(mathematics) == 1
     grades = {grade["number"]: grade for grade in mathematics[0]["grades"]}
-    assert set(grades) == set(range(1, 10))
+    assert set(grades) == set(range(1, 12))
 
     for number, expected_topics in EXPECTED_TOPICS.items():
         topics = grades[number]["topics"]

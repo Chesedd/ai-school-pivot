@@ -161,6 +161,15 @@ async def test_mathematics_hierarchy_search_and_metadata_resolution():
             (5, 4, 29, 116), (6, 6, 36, 135), (7, 6, 49, 134),
             (8, 6, 57, 126), (9, 6, 71, 144),
         ]
+        senior_rows = (await db.execute(text("""
+            SELECT g.number, count(DISTINCT t.id), count(DISTINCT st.id), count(DISTINCT sk.id)
+            FROM subjects s JOIN topics t ON t.subject_id=s.id
+            JOIN grades g ON g.id=t.grade_id JOIN subtopics st ON st.topic_id=t.id
+            JOIN skills sk ON sk.subtopic_id=st.id
+            WHERE s.normalized_name='математика' AND g.number BETWEEN 10 AND 11
+            GROUP BY g.number ORDER BY g.number
+        """))).all()
+        assert senior_rows == [(10, 7, 103, 230), (11, 6, 79, 168)]
         assert await db.scalar(text("""
             SELECT count(*) FROM topics t JOIN subjects s ON s.id=t.subject_id
             JOIN grades g ON g.id=t.grade_id WHERE s.normalized_name='математика'
@@ -174,7 +183,7 @@ async def test_mathematics_hierarchy_search_and_metadata_resolution():
         """)) == 0
 
         subject_id = await db.scalar(text("SELECT id FROM subjects WHERE normalized_name='математика'"))
-        grade_ids = dict((await db.execute(text("SELECT number,id FROM grades WHERE number BETWEEN 1 AND 9"))).all())
+        grade_ids = dict((await db.execute(text("SELECT number,id FROM grades WHERE number BETWEEN 1 AND 11"))).all())
         service = CatalogOptionService(db)
         expected = {1: ("ариф", "Арифметические действия"),
                     2: ("умнож", "Умножение и деление"),
@@ -246,6 +255,36 @@ async def test_mathematics_hierarchy_search_and_metadata_resolution():
             result = await service.search(CatalogOptionQuery(kind, query, 20, **kwargs))
             assert expected_name in {item["name"] for item in result["items"]}
 
+        senior_searches = [
+            (10, "Уравнения и неравенства", "интервал", "Метод интервалов"),
+            (10, "Начала математического анализа", "прогресс", "Арифметическая прогрессия"),
+            (10, "Геометрия", "скрещ", "Скрещивающиеся прямые"),
+            (10, "Вероятность и статистика", "бернул", "Испытания Бернулли"),
+            (11, "Числа и вычисления", "логарифм", "Логарифм числа"),
+            (11, "Начала математического анализа", "производн", "Производная функции"),
+            (11, "Начала математического анализа", "интеграл", "Определённый интеграл"),
+            (11, "Геометрия", "цилиндр", "Цилиндр"),
+            (11, "Вероятность и статистика", "математическ ожид", "Математическое ожидание"),
+        ]
+        for number, topic_name, query, expected_name in senior_searches:
+            topic_id = await db.scalar(text("""
+                SELECT id FROM topics WHERE subject_id=:subject AND grade_id=:grade AND name=:name
+            """), {"subject": subject_id, "grade": grade_ids[number], "name": topic_name})
+            result = await service.search(CatalogOptionQuery("subtopics", query, 20,
+                                                              topic_id=topic_id))
+            assert expected_name in {item["name"] for item in result["items"]}
+
+        grade_10_topics = await service.search(CatalogOptionQuery(
+            "topics", "логарифмическое уравнение", 20, subject_id, grade_ids[10]))
+        assert not grade_10_topics["items"]
+        grade_11_geometry = await db.scalar(text("""
+            SELECT id FROM topics WHERE subject_id=:subject AND grade_id=:grade
+            AND name='Геометрия'
+        """), {"subject": subject_id, "grade": grade_ids[11]})
+        grade_11_leakage = await service.search(CatalogOptionQuery(
+            "subtopics", "многогран", 20, topic_id=grade_11_geometry))
+        assert not grade_11_leakage["items"]
+
         grade_7_equations = await db.scalar(text("""
             SELECT id FROM topics WHERE subject_id=:subject AND grade_id=:grade
             AND name='Уравнения'
@@ -285,6 +324,14 @@ async def test_mathematics_hierarchy_search_and_metadata_resolution():
         for number, topic, subtopic, skill in (
             (5, "Дроби", "Десятичные дроби", "Сравнивать десятичные дроби"),
             (6, "Дроби", "Проценты", "Находить процент от величины"),
+            (10, "Уравнения и неравенства", "Тригонометрические уравнения",
+             "Решать простейшие тригонометрические уравнения"),
+            (10, "Геометрия", "Прямые и плоскости в пространстве",
+             "Применять признаки взаимного расположения прямых и плоскостей"),
+            (11, "Начала математического анализа", "Производная функции",
+             "Находить производную функции"),
+            (11, "Вероятность и статистика", "Математическое ожидание",
+             "Находить математическое ожидание по распределению"),
         ):
             extraction_5_6 = extraction.model_copy(update={"metadata": {
                 **extraction.metadata, "grade": number, "topic": topic,
