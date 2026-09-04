@@ -24,8 +24,8 @@ class Solver:
     async def solve(self, value): self.inputs.append(value); return SOLUTION
 class Repo:
     def __init__(self): self.state=None; self.stages=[]
-    async def create(self, owner_id, artifact_id):
-        now=datetime.now(UTC); self.state=ImageSolvingSession(session_id=uuid4(), owner_id=owner_id, input_artifact_id=artifact_id, lifecycle_status=ImageSolvingStatus.CREATED, created_at=now, updated_at=now); return self.state
+    async def create(self, owner_id, artifact_id, solution_instruction=None):
+        now=datetime.now(UTC); self.state=ImageSolvingSession(session_id=uuid4(), owner_id=owner_id, input_artifact_id=artifact_id, solution_instruction=solution_instruction, lifecycle_status=ImageSolvingStatus.CREATED, created_at=now, updated_at=now); return self.state
     async def get(self, sid): return self.state if self.state and self.state.session_id == sid else None
     async def claim(self, sid, expected, running):
         if self.state.lifecycle_status != expected: return False
@@ -60,7 +60,7 @@ async def test_extraction_solver_validation_flow_and_isolated_inputs():
     record,repo,extractor,solver,service=setup(); session=await service.create_session(owner_id=record.owner_id,input_artifact_id=record.id)
     result=await service.run(session_id=session.session_id,owner_id=record.owner_id)
     assert repo.stages == ["extraction","solver","validation"] and result.lifecycle_status == ImageSolvingStatus.VALIDATED
-    assert set(type(solver.inputs[0]).model_fields) == {"schema_version","extracted_text","structured_statement","detected_task_type","detected_answer_format","choices","ocr_issues"}
+    assert set(type(solver.inputs[0]).model_fields) == {"schema_version","extracted_text","structured_statement","detected_task_type","detected_answer_format","choices","ocr_issues","solution_instruction"}
     assert "storage_reference" not in solver.inputs[0].model_dump_json() and not hasattr(solver.inputs[0],"provider_keys")
     assert not ({"answer","solution","hints"} & set(type(EXTRACTION).model_fields))
     assert not hasattr(repo,"create_task_version")
@@ -158,3 +158,21 @@ async def test_explicit_retry_reuses_extraction_and_completes_solver():
     result = await service.run(session_id=session.session_id, owner_id=record.owner_id)
     assert len(extractor.inputs) == 1 and len(service.solver.inputs) == 2
     assert result.lifecycle_status is ImageSolvingStatus.VALIDATED
+
+async def test_persisted_solution_instruction_is_solver_only_and_survives_retry():
+    record,repo,extractor,solver,service=setup()
+    instruction="Реши через дискриминант"
+    session=await service.create_session(owner_id=record.owner_id,input_artifact_id=record.id,solution_instruction=instruction)
+    await service.run(session_id=session.session_id,owner_id=record.owner_id)
+    assert extractor.inputs[0].user_context == "Solve the task shown in this artifact"
+    assert solver.inputs[0].solution_instruction == instruction
+    assert repo.state.solution_instruction == instruction
+
+
+def test_solver_instruction_changes_fingerprint():
+    from app.application.extraction_pipeline import SolverInputV1
+    plain=SolverInputV1.from_extraction(EXTRACTION)
+    guided=SolverInputV1.from_extraction(EXTRACTION,solution_instruction="Только ответ")
+    assert plain.solution_instruction is None
+    assert guided.solution_instruction == "Только ответ"
+    assert plain.fingerprint != guided.fingerprint

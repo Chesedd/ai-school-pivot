@@ -26,7 +26,7 @@ class ImageSolvingError(RuntimeError):
 
 
 class ImageSolvingRepository(Protocol):
-    async def create(self, owner_id: UUID, artifact_id: UUID) -> ImageSolvingSession: ...
+    async def create(self, owner_id: UUID, artifact_id: UUID, solution_instruction: str | None) -> ImageSolvingSession: ...
     async def get(self, session_id: UUID) -> ImageSolvingSession | None: ...
     async def claim(self, session_id: UUID, expected: ImageSolvingStatus,
                     running: ImageSolvingStatus) -> bool: ...
@@ -77,9 +77,9 @@ class ImageSolvingService:
         self.extractor, self.solver = extractor, solver
         self.validator = validator or DeterministicImageValidator()
 
-    async def create_session(self, *, owner_id: UUID, input_artifact_id: UUID) -> ImageSolvingSession:
+    async def create_session(self, *, owner_id: UUID, input_artifact_id: UUID, solution_instruction: str | None = None) -> ImageSolvingSession:
         await self.artifacts.get_owned_artifact(artifact_id=input_artifact_id, owner_id=owner_id)
-        return await self.repository.create(owner_id, input_artifact_id)
+        return await self.repository.create(owner_id, input_artifact_id, solution_instruction)
 
     async def get_state(self, *, session_id: UUID, owner_id: UUID) -> ImageSolvingSession:
         try:
@@ -128,7 +128,7 @@ class ImageSolvingService:
             if solution is None:
                 if not await self.repository.claim(session_id, ImageSolvingStatus.EXTRACTED, ImageSolvingStatus.SOLVING):
                     raise ImageSolvingError("session_in_progress")
-                solver_input = SolverInputV1.from_extraction(extraction)
+                solver_input = SolverInputV1.from_extraction(extraction, solution_instruction=state.solution_instruction)
                 attempt_started = monotonic()
                 retry_count = 0
                 try:

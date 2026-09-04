@@ -68,10 +68,11 @@ class ImageSolvingApplicationService:
         raise ImageSolvingApiError("image_solving_provider_failed", 503) from None
 
     async def create(self, request: CreateImageSolvingSessionRequest, owner_id: UUID):
-        try: state = await self.flow.create_session(owner_id=owner_id, input_artifact_id=request.artifact_id)
+        try: state = await self.flow.create_session(owner_id=owner_id, input_artifact_id=request.artifact_id, solution_instruction=request.solution_instruction)
         except Exception as exc: self._raise(exc)
         return ImageSolvingSessionResponse(session_id=state.session_id,
             artifact_id=state.input_artifact_id, status=state.lifecycle_status.value,
+            solution_instruction=state.solution_instruction,
             failure_code=state.failure_code,
             failure_stage=self._failure_stage(state))
 
@@ -84,6 +85,7 @@ class ImageSolvingApplicationService:
         except Exception as exc: self._raise(exc)
         return ImageSolvingSessionResponse(session_id=state.session_id,
             artifact_id=state.input_artifact_id, status=state.lifecycle_status.value,
+            solution_instruction=state.solution_instruction,
             failure_code=state.failure_code,
             failure_stage=self._failure_stage(state))
 
@@ -96,6 +98,7 @@ class ImageSolvingApplicationService:
             validation="completed" if state.validation_checkpoint else "pending")
         return ImageSolvingStateResponse(session_id=state.session_id,
             artifact_id=state.input_artifact_id, status=lifecycle, stages=stages,
+            solution_instruction=state.solution_instruction,
             failure_code=state.failure_code, failure_stage=self._failure_stage(state),
             created_at=state.created_at, updated_at=state.updated_at)
 

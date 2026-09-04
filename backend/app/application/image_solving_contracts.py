@@ -197,6 +197,7 @@ class ImageSolvingSession(BaseModel):
     session_id: UUID
     owner_id: UUID
     input_artifact_id: UUID
+    solution_instruction: StrictStr | None = Field(default=None, max_length=4000)
     extraction_checkpoint: ExtractionResultV1 | None = None
     solver_checkpoint: SolverResultV1 | None = None
     validation_checkpoint: ValidationResultV1 | None = None

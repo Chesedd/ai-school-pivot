@@ -30,8 +30,8 @@ _deserialize_checkpoint = deserialize_json_contract
 class SqlAlchemyImageSolvingRepository:
     """The only adapter aware of persisted checkpoint representation."""
     def __init__(self, db: AsyncSession): self.db = db
-    async def create(self, owner_id: UUID, artifact_id: UUID) -> ImageSolvingSession:
-        row = ImageSolvingSessionRow(owner_id=owner_id, input_artifact_id=artifact_id)
+    async def create(self, owner_id: UUID, artifact_id: UUID, solution_instruction: str | None = None) -> ImageSolvingSession:
+        row = ImageSolvingSessionRow(owner_id=owner_id, input_artifact_id=artifact_id, solution_instruction=solution_instruction)
         self.db.add(row); await self.db.commit(); return await self.get(row.id)
     async def get(self, session_id: UUID) -> ImageSolvingSession | None:
         row = await self.db.get(ImageSolvingSessionRow, session_id)
@@ -44,7 +44,7 @@ class SqlAlchemyImageSolvingRepository:
             value = deserialize_json_contract(item.payload, contract)
             if value.fingerprint != item.fingerprint: raise ValueError("invalid_checkpoint")
             checkpoints[item.stage] = value
-        return ImageSolvingSession(session_id=row.id, owner_id=row.owner_id, input_artifact_id=row.input_artifact_id, extraction_checkpoint=checkpoints.get("extraction"), solver_checkpoint=checkpoints.get("solver"), validation_checkpoint=checkpoints.get("validation"), lifecycle_status=ImageSolvingStatus(row.status), failure_code=row.failure_code, created_at=row.created_at, updated_at=row.updated_at)
+        return ImageSolvingSession(session_id=row.id, owner_id=row.owner_id, input_artifact_id=row.input_artifact_id, solution_instruction=row.solution_instruction, extraction_checkpoint=checkpoints.get("extraction"), solver_checkpoint=checkpoints.get("solver"), validation_checkpoint=checkpoints.get("validation"), lifecycle_status=ImageSolvingStatus(row.status), failure_code=row.failure_code, created_at=row.created_at, updated_at=row.updated_at)
     async def claim(self, session_id: UUID, expected: ImageSolvingStatus, running: ImageSolvingStatus) -> bool:
         # A fresh running lease rejects concurrent work; an abandoned lease is
         # recoverable after five minutes without weakening the checkpoint CAS.

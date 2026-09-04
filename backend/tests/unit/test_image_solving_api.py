@@ -215,3 +215,13 @@ async def test_corrupt_checkpoint_maps_to_existing_422_response():
     with pytest.raises(ImageSolvingApiError) as error:
         await service.state(value.session_id, value.owner_id)
     assert (error.value.code, error.value.status) == ("invalid_artifact_or_checkpoint", 422)
+
+@pytest.mark.parametrize("value", ["", "   ", " leading", "trailing ", "x" * 4001])
+def test_solution_instruction_rejects_invalid_values(value):
+    with pytest.raises(ValidationError):
+        CreateImageSolvingSessionRequest(artifact_id=uuid4(), solution_instruction=value)
+
+
+def test_solution_instruction_accepts_null_and_bounded_text():
+    assert CreateImageSolvingSessionRequest(artifact_id=uuid4()).solution_instruction is None
+    assert CreateImageSolvingSessionRequest(artifact_id=uuid4(), solution_instruction="Реши через дискриминант").solution_instruction == "Реши через дискриминант"
