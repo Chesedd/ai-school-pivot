@@ -11,6 +11,7 @@ from sqlalchemy import select
 from app.db.session import async_session_factory
 from app.infrastructure.catalog_lifecycle import (LIVE_CATALOG_STATUSES,
     resolve_effective_catalog_target)
+from app.infrastructure.model_registry import register_all_models
 from app.infrastructure.models import Grade, Skill, Subject, Subtopic, Topic, normalize_catalog_name
 
 DATA = Path(__file__).parents[2] / "data" / "school_catalog_ru_v1.json"
@@ -50,6 +51,7 @@ def _descendant_conflicts(report, grade_data):
 
 async def seed_catalog(path: Path = DATA, *, session_factory=None) -> dict:
     """Apply the dataset without changing any pre-existing catalog row."""
+    register_all_models()
     data = json.loads(path.read_text(encoding="utf-8"))
     report = defaultdict(lambda: {"created": 0, "reused": 0, "conflicts": 0})
     factory = session_factory or async_session_factory
