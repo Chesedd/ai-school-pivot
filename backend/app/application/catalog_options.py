@@ -6,6 +6,8 @@ from sqlalchemy import func, or_, select
 
 from app.infrastructure.models import (CurriculumCatalogAlias, Skill, Subject,
     Subtopic, Topic, normalize_catalog_name)
+from app.infrastructure.catalog_lifecycle import (LIVE_CATALOG_STATUSES,
+    resolve_effective_catalog_target)
 
 
 @dataclass(frozen=True)
@@ -19,6 +21,22 @@ class CatalogOptionQuery:
     subtopic_id: UUID | None = None
 
 
+def catalog_option_rank(row, normalized: str, alias_ids: set[UUID]):
+    """Stable application-side ranking, kept pure for exhaustive unit coverage."""
+    name = row.normalized_name
+    if normalized and name == normalized:
+        bucket = 0
+    elif row.id in alias_ids:
+        bucket = 1
+    elif normalized and name.startswith(normalized):
+        bucket = 2
+    elif normalized and normalized in name:
+        bucket = 3
+    else:
+        bucket = 4
+    return bucket, row.name.casefold(), str(row.id)
+
+
 class CatalogOptionService:
     """Search live rows locally; fuzzy results are never interpreted as bindings."""
     models = {"subjects": Subject, "topics": Topic, "subtopics": Subtopic, "skills": Skill}
@@ -29,7 +47,7 @@ class CatalogOptionService:
     async def search(self, query: CatalogOptionQuery) -> dict:
         model = self.models[query.kind]
         normalized = normalize_catalog_name(query.q) if query.q.strip() else ""
-        statement = select(model).where(model.status.in_(("active", "provisional")))
+        statement = select(model).where(model.status.in_(LIVE_CATALOG_STATUSES))
         if model is Topic:
             statement = statement.where(model.subject_id == query.subject_id,
                                         model.grade_id == query.grade_id)
@@ -52,7 +70,10 @@ class CatalogOptionService:
                 alias = alias.where(CurriculumCatalogAlias.topic_id == query.topic_id)
             elif model is Skill:
                 alias = alias.where(CurriculumCatalogAlias.subtopic_id == query.subtopic_id)
-            alias_ids = set((await self.db.scalars(alias)).all())
+            for target_id in (await self.db.scalars(alias)).all():
+                target_row = await resolve_effective_catalog_target(self.db, model, target_id)
+                if target_row is not None and self._in_scope(target_row, query):
+                    alias_ids.add(target_row.id)
             statement = statement.where(or_(
                 model.normalized_name.contains(normalized),
                 func.similarity(model.normalized_name, normalized) >= 0.2,
@@ -61,15 +82,17 @@ class CatalogOptionService:
         # A defensive over-fetch allows deterministic application ranking without
         # ever transferring the whole catalog to the browser.
         rows = (await self.db.scalars(statement.order_by(model.name, model.id).limit(min(query.limit * 8, 160)))).all()
-        def rank(row):
-            name = row.normalized_name
-            if normalized and name == normalized: bucket = 0
-            elif row.id in alias_ids: bucket = 1
-            elif normalized and name.startswith(normalized): bucket = 2
-            elif normalized and normalized in name: bucket = 3
-            else: bucket = 4
-            return bucket, row.name.casefold(), str(row.id)
-        rows = sorted(rows, key=rank)[:query.limit]
+        rows = sorted(rows, key=lambda row: catalog_option_rank(row, normalized, alias_ids))[:query.limit]
         return {"items": [{"id": str(row.id), "name": row.name, "status": row.status,
-            "match": "alias" if row.id in alias_ids else ("exact" if normalized and row.normalized_name == normalized else "search")}
+            "match": "exact" if normalized and row.normalized_name == normalized else ("alias" if row.id in alias_ids else "search")}
             for row in rows], "limit": query.limit}
+
+    @staticmethod
+    def _in_scope(row, query: CatalogOptionQuery) -> bool:
+        if isinstance(row, Topic):
+            return row.subject_id == query.subject_id and row.grade_id == query.grade_id
+        if isinstance(row, Subtopic):
+            return row.topic_id == query.topic_id
+        if isinstance(row, Skill):
+            return row.subtopic_id == query.subtopic_id
+        return isinstance(row, Subject)

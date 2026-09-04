@@ -5,6 +5,8 @@ from app.application.image_solving_metadata import (CatalogAliasV1, CatalogItemV
     MetadataCatalogSnapshotV1, TagCandidateV1)
 from app.infrastructure.models import (CurriculumCatalogAlias, Grade, Skill, Subject,
     Subtopic, Tag, TagCategory, TaskFolder, Topic)
+from app.infrastructure.catalog_lifecycle import (LIVE_CATALOG_STATUSES,
+    resolve_effective_catalog_target)
 
 class MetadataCatalogConsistencyError(RuntimeError):
     def __init__(self, entity_type, entity_id, relation):
@@ -14,7 +16,7 @@ class MetadataCatalogConsistencyError(RuntimeError):
 class SqlAlchemyMetadataCatalogLoader:
     def __init__(self,db):self.db=db
     async def load(self):
-        live=("active","provisional")
+        live=LIVE_CATALOG_STATUSES
         subjects=(await self.db.scalars(select(Subject).where(Subject.status.in_(live)).order_by(Subject.name))).all()
         grades=(await self.db.scalars(select(Grade).where(Grade.status.in_(live)).order_by(Grade.number))).all()
         topics=(await self.db.scalars(select(Topic).where(Topic.status.in_(live)).order_by(Topic.name))).all()
@@ -48,11 +50,12 @@ class SqlAlchemyMetadataCatalogLoader:
         models={"subject":Subject,"topic":Topic,"subtopic":Subtopic,"skill":Skill}
         target_fields={"subject":"subject_target_id","topic":"topic_target_id","subtopic":"subtopic_target_id","skill":"skill_target_id"}
         for alias in aliases:
-            target=await self.db.get(models[alias.kind],getattr(alias,target_fields[alias.kind]))
-            seen=set()
-            while target is not None and target.status=="deprecated" and target.replacement_id and target.id not in seen:
-                seen.add(target.id); target=await self.db.get(models[alias.kind],target.replacement_id)
-            if target is None or target.status not in live: continue
+            target=await resolve_effective_catalog_target(
+                self.db,models[alias.kind],getattr(alias,target_fields[alias.kind]))
+            if target is None: continue
+            if alias.kind=="topic" and (target.subject_id!=alias.subject_id or target.grade_id!=alias.grade_id): continue
+            if alias.kind=="subtopic" and target.topic_id!=alias.topic_id: continue
+            if alias.kind=="skill" and target.subtopic_id!=alias.subtopic_id: continue
             kwargs={"id":target.id,"name":target.name,"catalog_status":target.status}
             if alias.kind=="topic": kwargs.update(subject_id=target.subject_id,grade_id=target.grade_id)
             elif alias.kind=="subtopic": kwargs.update(topic_id=target.topic_id)
