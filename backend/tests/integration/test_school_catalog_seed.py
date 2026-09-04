@@ -57,9 +57,10 @@ async def test_deprecated_identity_resolves_or_conflicts_without_resurrection(tm
     path = tmp_path / "catalog.json"
     path.write_text(json.dumps(data), encoding="utf-8")
     async with async_session_factory() as db, db.begin():
+        resolver = await db.scalar(text("INSERT INTO users(login,normalized_login,display_name,password_hash) VALUES ('seed-resolver','seed-resolver','Seed Resolver','x') RETURNING id"))
         live = await db.scalar(text("INSERT INTO subjects(code,name,normalized_name,status) VALUES ('live','Renamed','renamed','active') RETURNING id"))
-        old = await db.scalar(text("INSERT INTO subjects(code,name,normalized_name,status,replacement_id) VALUES ('old','Seed Subject','seed subject','deprecated',:live) RETURNING id"), {"live": live})
-        rejected = await db.scalar(text("INSERT INTO subjects(code,name,normalized_name,status) VALUES ('rejected','Rejected Subject','rejected subject','deprecated') RETURNING id"))
+        old = await db.scalar(text("INSERT INTO subjects(code,name,normalized_name,status,replacement_id,resolved_by,resolved_at,resolution_reason) VALUES ('old','Seed Subject','seed subject','deprecated',:live,:resolver,clock_timestamp(),'integration fixture merge') RETURNING id"), {"live": live, "resolver": resolver})
+        rejected = await db.scalar(text("INSERT INTO subjects(code,name,normalized_name,status,resolved_by,resolved_at,resolution_reason) VALUES ('rejected','Rejected Subject','rejected subject','deprecated',:resolver,clock_timestamp(),'integration fixture rejection') RETURNING id"), {"resolver": resolver})
     report = await seed_catalog(path, session_factory=async_session_factory)
     assert report["subjects"] == {"created": 0, "reused": 1, "conflicts": 1}
     async with async_session_factory() as db:
