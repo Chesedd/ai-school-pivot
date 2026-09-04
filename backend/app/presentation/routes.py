@@ -18,6 +18,7 @@ from app.presentation.schemas import FolderCreateRequest, FolderRenameRequest, F
 from app.presentation.schemas import AuditPageResponse, ArchiveRequest, ArchiveResponse, CatalogResponse, DuplicateCheckRequest, DuplicateCheckResponse, EmptyRequest, MethodologyPutRequest, MethodologyResponse, ReturnToDraftRequest, StatusCommandResponse, SubjectNavigationResponse, TaskCardResponse, TaskCreateRequest, TaskListPageResponse, TaskResponse
 from app.presentation.schemas import TagCreateRequest, TagPatchRequest, TagDeprecateRequest, TagResponse, VersionTagsPutRequest, VersionTagsResponse
 from app.application.managed_tags import ManagedTagService
+from app.application.catalog_options import CatalogOptionQuery, CatalogOptionService
 from app.presentation.auth_dependencies import require_capability, require_trusted_origin
 
 router = APIRouter(prefix="/api/content-bank", dependencies=[Depends(require_trusted_origin)])
@@ -169,6 +170,22 @@ async def get_catalog(catalog_name: str) -> object:
     async with async_session_factory() as session:
         items = await SQLAlchemyContentBankRepository(session).catalog(catalog_name)
     return {"catalog": catalog_name, "items": items}
+
+@router.get("/catalog/options/{catalog_name}", dependencies=[Depends(require_capability(CONTENT_READ))])
+async def catalog_options(catalog_name: Literal["subjects", "topics", "subtopics", "skills"],
+        q: Annotated[str, Query(max_length=200)] = "",
+        limit: Annotated[int, Query(ge=1, le=20)] = 20,
+        subject_id: UUID | None = None, grade_id: UUID | None = None,
+        topic_id: UUID | None = None, subtopic_id: UUID | None = None):
+    if catalog_name == "topics" and (subject_id is None or grade_id is None):
+        raise HTTPException(422, "catalog_topic_parents_required")
+    if catalog_name == "subtopics" and topic_id is None:
+        raise HTTPException(422, "catalog_subtopic_parent_required")
+    if catalog_name == "skills" and subtopic_id is None:
+        raise HTTPException(422, "catalog_skill_parent_required")
+    async with async_session_factory() as session:
+        return await CatalogOptionService(session).search(CatalogOptionQuery(
+            catalog_name, q, limit, subject_id, grade_id, topic_id, subtopic_id))
 
 
 @router.get("/navigation/subjects", response_model=SubjectNavigationResponse)
