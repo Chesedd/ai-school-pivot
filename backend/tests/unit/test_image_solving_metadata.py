@@ -136,6 +136,45 @@ def test_russian_primary_catalog_metadata_resolves_locally(
 
 
 @pytest.mark.parametrize(("grade_number", "topic_name", "subtopic_name", "skill_name"), [
+    (5, "Морфология", "Имя существительное", "Определять падеж существительного"),
+    (5, "Синтаксис", "Тире между подлежащим и сказуемым",
+     "Определять условие постановки тире между подлежащим и сказуемым"),
+    (6, "Морфология", "Имя числительное", "Определять разряд числительного по значению"),
+    (6, "Словообразование", "Словообразовательный анализ",
+     "Выполнять словообразовательный анализ"),
+])
+def test_russian_5_6_catalog_metadata_resolves_locally(
+        grade_number, topic_name, subtopic_name, skill_name):
+    subject = item("Русский язык")
+    grade = item(str(grade_number), grade_number=grade_number)
+    topic = item(topic_name, subject_id=subject.id, grade_id=grade.id)
+    subtopic = item(subtopic_name, topic_id=topic.id)
+    skill = item(skill_name, topic_id=topic.id, subtopic_id=subtopic.id)
+    catalog = MetadataCatalogSnapshotV1(
+        subjects=(subject,), grades=(grade,), topics=(topic,), subtopics=(subtopic,),
+        skills=(skill,), tag_categories=(), tags=())
+    extraction = ExtractionResultV1(
+        extracted_text="Задание", structured_statement="Выполнить задание.",
+        detected_task_type="open_question", detected_answer_format="short_text",
+        choices=None, extraction_confidence=Decimal(".99"), ocr_issues=(), metadata={
+            "title": "Задание", "subject": "Русский язык", "grade": grade_number,
+            "topic": topic_name, "subtopic": subtopic_name, "skills": (skill_name,),
+            "task_type": "open_question", "answer_format": "short_text",
+            "difficulty": 2, "tags": (),
+        })
+    now = datetime.now(UTC)
+    session = ImageSolvingSession(
+        session_id=uuid4(), owner_id=uuid4(), input_artifact_id=uuid4(),
+        extraction_checkpoint=extraction, lifecycle_status=ImageSolvingStatus.VALIDATED,
+        created_at=now, updated_at=now)
+
+    result = resolve_metadata(session, catalog)
+
+    assert (result.subject.id, result.grade.id, result.topic.id, result.subtopic.id,
+            result.skills[0].id) == (subject.id, grade.id, topic.id, subtopic.id, skill.id)
+
+
+@pytest.mark.parametrize(("grade_number", "topic_name", "subtopic_name", "skill_name"), [
     (7, "Функции", "Линейная функция", "Строить график линейной функции"),
     (8, "Уравнения и неравенства", "Квадратные уравнения", "Вычислять дискриминант"),
     (9, "Числовые последовательности и прогрессии", "Арифметическая прогрессия", "Находить n-й член арифметической прогрессии"),
