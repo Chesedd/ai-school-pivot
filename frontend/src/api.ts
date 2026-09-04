@@ -8,13 +8,15 @@ export const setUnauthorizedHandler=(handler?:UnauthorizedHandler)=>{unauthorize
 export async function request<T=any>(path:string,init?:RequestInit):Promise<T>{
  const response=await fetch(`${apiBase}${path}`,{...init,credentials:"include"});let data:any={};
  if(response.status!==204)try{data=await response.clone().json()}catch{}
- if(!response.ok){const detail=typeof data?.detail==="string"?data.detail:undefined;const error=new ApiError(response.status,data.error?.code??detail??"unexpected_error",data.error?.message??"Ошибка API",data.error?.details??[]);if(response.status===401&&error.code==="authentication_required")unauthorizedHandler?.();throw error}return data as T
+ if(!response.ok){const native=Array.isArray(data?.detail)?data.detail.map((x:any)=>({field:Array.isArray(x.loc)?x.loc.filter((v:any)=>v!=="body").join("."):"",code:x.type,message:x.msg})):[];const detail=typeof data?.detail==="string"?data.detail:undefined;const error=new ApiError(response.status,data.error?.code??detail??(native.length?"validation_error":"unexpected_error"),data.error?.message??(native.length?"Не удалось выполнить запрос: проверьте заполненные параметры.":"Ошибка API"),data.error?.details??native);if(response.status===401&&error.code==="authentication_required")unauthorizedHandler?.();throw error}return data as T
 }
 export type Folder={id:string;subject_id:string;parent_id:string|null;name:string;depth:number;created_at:string;updated_at:string};
 export type FolderNode=Folder&{children:FolderNode[]};
 export type SubjectRoot={id:string;name:string;status:"active"|"provisional"};
 export type SubjectSummary={id:string;name:string};
 export type CatalogItem={id:string;name:string;subject_id?:string;grade_id?:string;topic_id?:string;subtopic_id?:string};
+export type CatalogOption={id:string;name:string;status:"active"|"provisional";match:"exact"|"alias"|"search"};
+export function getCatalogOptions(kind:"subjects"|"topics"|"subtopics"|"skills",params:Record<string,string>,signal?:AbortSignal):Promise<{items:CatalogOption[];limit:number}>{return request(`/api/content-bank/catalog/options/${kind}?${new URLSearchParams({...params,limit:"20"})}`,{signal})}
 export type LevelContents={subject:SubjectSummary;folder:Folder|null;breadcrumb:Folder[];folders:Folder[];tasks:{items:any[];total:number;offset:number;limit:number};level_task_total:number;subject_task_total:number};
 const enc=encodeURIComponent;
 export const getSubjectRoots=(signal?:AbortSignal):Promise<{items:SubjectRoot[]}>=>(request("/api/content-bank/navigation/subjects",{signal}));
