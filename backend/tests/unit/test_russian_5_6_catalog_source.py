@@ -25,7 +25,6 @@ PRESERVED_RUSSIAN_FINGERPRINTS = {
     2: "85f5ce177949b63f648cd9466013e654968af935f6d17b20bf7aa380f4254a87",
     3: "39d14547fe39e912948ad3fba57ba0128287c657d5c18ca907b9506f5ce56c8d",
     4: "ab9350654a9d35d15a5c7eb4d40176649b21dbaf7df2353abdfca472ee591aa2",
-    7: "1e01f6456f8a9e41c2a522ba9bf2269204018586272d16f5360cac3cfb4ff188",
 }
 MATHEMATICS_FINGERPRINT = "1702f86692e556e5a92d148358aca8911124f77c5f8d955d35c88d284f41e66a"
 
@@ -49,7 +48,7 @@ def test_russian_5_6_source_contract_and_normalized_uniqueness():
     subjects = [item for item in source["subjects"] if item["name"] == "Русский язык"]
     assert len(subjects) == 1
     grades = {grade["number"]: grade for grade in subjects[0]["grades"]}
-    assert set(grades) == {1, 2, 3, 4, 5, 6, 7}
+    assert set(grades) == {1, 2, 3, 4, 5, 6, 7, 8, 9}
     for number in (5, 6):
         topics = grades[number]["topics"]
         assert {topic["name"] for topic in topics} == EXPECTED_TOPICS[number]
