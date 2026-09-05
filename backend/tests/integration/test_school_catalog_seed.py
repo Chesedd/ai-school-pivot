@@ -632,7 +632,7 @@ async def test_surrounding_world_hierarchy_and_grade_scoped_search():
     assert first["topics"]["created"] >= 12
 
 
-async def test_informatics_7_9_hierarchy_and_grade_scoped_search():
+async def test_informatics_7_11_hierarchy_and_grade_scoped_search():
     await seed_catalog(session_factory=async_session_factory)
     async with async_session_factory() as db:
         rows = (await db.execute(text("""
@@ -645,11 +645,12 @@ async def test_informatics_7_9_hierarchy_and_grade_scoped_search():
             WHERE s.normalized_name='информатика'
             GROUP BY g.number ORDER BY g.number
         """))).all()
-        assert rows == [(7, 3, 130, 214), (8, 2, 82, 133), (9, 4, 125, 202)]
+        assert rows == [(7, 3, 130, 214), (8, 2, 82, 133), (9, 4, 125, 202),
+                        (10, 3, 149, 161), (11, 4, 174, 181)]
         assert await db.scalar(text("""
             SELECT count(*) FROM topics t JOIN subjects s ON s.id=t.subject_id
             JOIN grades g ON g.id=t.grade_id
-            WHERE s.normalized_name='информатика' AND g.number NOT IN (7,8,9)
+            WHERE s.normalized_name='информатика' AND g.number NOT IN (7,8,9,10,11)
         """)) == 0
         assert await db.scalar(text("""
             SELECT count(*) FROM skills sk JOIN subtopics st ON st.id=sk.subtopic_id
@@ -660,7 +661,7 @@ async def test_informatics_7_9_hierarchy_and_grade_scoped_search():
         subject_id = await db.scalar(text(
             "SELECT id FROM subjects WHERE normalized_name='информатика'"))
         grade_ids = dict((await db.execute(text(
-            "SELECT number,id FROM grades WHERE number IN (7,8,9)"))).all())
+            "SELECT number,id FROM grades WHERE number IN (7,8,9,10,11)"))).all())
         service = CatalogOptionService(db)
         searches = [
             (7, "Цифровая грамотность", "файлов", "Файловая система"),
@@ -678,6 +679,20 @@ async def test_informatics_7_9_hierarchy_and_grade_scoped_search():
             (9, "Алгоритмы и программирование", "массив", "Одномерный массив"),
             (9, "Алгоритмы и программирование", "обратн связ", "Обратная связь"),
             (9, "Информационные технологии", "абсолютн адрес", "Абсолютная адресация"),
+            (10, "Теоретические основы информатики", "фано", "Условие Фано"),
+            (10, "Теоретические основы информатики", "веществен память", "Представление вещественных чисел в памяти компьютера"),
+            (10, "Теоретические основы информатики", "импликац", "Импликация"),
+            (10, "Теоретические основы информатики", "сумматор", "Сумматор"),
+            (10, "Информационные технологии", "библиограф", "Библиографическая ссылка"),
+            (10, "Информационные технологии", "трёхмер", "Трёхмерная модель"),
+            (11, "Цифровая грамотность", "домен", "Доменное имя"),
+            (11, "Цифровая грамотность", "резервн", "Резервное копирование"),
+            (11, "Теоретические основы информатики", "оптимальн путь", "Оптимальный путь"),
+            (11, "Теоретические основы информатики", "выигрышн стратег", "Выигрышная стратегия"),
+            (11, "Алгоритмы и программирование", "второй максимум", "Второй максимум"),
+            (11, "Информационные технологии", "параметрическ запрос", "Параметрический запрос"),
+            (11, "Информационные технологии", "искусствен интеллект", "Средства искусственного интеллекта"),
+            (11, "Информационные технологии", "интернет вещей", "Интернет вещей"),
         ]
         for number, topic_name, query, expected in searches:
             topic_id = await db.scalar(text("""
@@ -693,6 +708,9 @@ async def test_informatics_7_9_hierarchy_and_grade_scoped_search():
              "Двоичная система счисления"),
             (8, "Алгоритмы и программирование", "массив", "Одномерный массив"),
             (9, "Информационные технологии", "текстовый процессор", "Текстовый процессор"),
+            (10, "Информационные технологии", "искусствен интеллект", "Средства искусственного интеллекта"),
+            (10, "Информационные технологии", "параметрическ запрос", "Параметрический запрос"),
+            (11, "Теоретические основы информатики", "условие фано", "Условие Фано"),
         ]:
             topic_id = await db.scalar(text("""
                 SELECT id FROM topics WHERE subject_id=:subject

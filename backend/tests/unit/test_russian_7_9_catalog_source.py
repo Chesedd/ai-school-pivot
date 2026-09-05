@@ -27,7 +27,7 @@ PRESERVED_OTHER_SUBJECT_FINGERPRINTS = {
     "Математика": "1702f86692e556e5a92d148358aca8911124f77c5f8d955d35c88d284f41e66a",
     "Литература": "fbe9eb1fb3efe4c2ee98dda56104f9e329559e12ff7b426502a44ff83b138487",
     "Английский язык": "f78ff1c654a28495a4dd942cf96c4517a06f74dd1a14171d7fe07f31b31e5914",
-    "Информатика": "0d4bb7ede4c136b55d66799963d74c0bbe2c8a2cc01663b22fd4cad3c7d78023",
+    "Информатика": "04a69e336a7d0fa4ab365a5ce3aeaad8edfb92a969051a0a060a93b686c9c6f9",
     "Физика": "f855c4eb243a8e6ddd58bf794179ca0bfa0fcdc7409d4125fc69a3ad0d379927",
     "Химия": "01d1839896c637d7ff1909025ac10d565019b7030e20f4363fc7e2f242a716b4",
     "Биология": "e18d814a73c1f95e35d3f3ff573c237d4f2f55214c21a2da49c3799a1dbf1027",
