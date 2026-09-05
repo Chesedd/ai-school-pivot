@@ -60,6 +60,50 @@ def test_exact_resolution_is_scoped_to_selected_hierarchy():
 
 
 @pytest.mark.parametrize(("grade_number", "topic_name", "subtopic_name", "skill_name"), [
+    (7, "Движение и взаимодействие тел", "Равномерное движение", "Вычислять скорость"),
+    (7, "Движение и взаимодействие тел", "Плотность вещества", "Вычислять плотность"),
+    (7, "Давление твёрдых тел, жидкостей и газов", "Закон Архимеда", "Вычислять архимедову силу"),
+    (8, "Тепловые явления", "Уравнение теплового баланса", "Решать задачи на тепловой баланс"),
+    (8, "Электрические и магнитные явления", "Закон Ома для участка цепи", "Применять закон Ома для участка цепи"),
+    (9, "Механические явления", "Второй закон Ньютона", "Применять второй закон Ньютона"),
+    (9, "Световые явления", "Закон преломления света", "Применять закон преломления света"),
+    (9, "Квантовые явления", "Период полураспада", "Применять понятие периода полураспада в базовой задаче"),
+])
+def test_physics_7_9_catalog_metadata_resolves_locally(
+        grade_number, topic_name, subtopic_name, skill_name):
+    subject = item("Физика")
+    grade = item(str(grade_number), grade_number=grade_number)
+    topic = item(topic_name, subject_id=subject.id, grade_id=grade.id)
+    subtopic = item(subtopic_name, topic_id=topic.id)
+    skills = (() if skill_name is None else
+              (item(skill_name, topic_id=topic.id, subtopic_id=subtopic.id),))
+    catalog = MetadataCatalogSnapshotV1(
+        subjects=(subject,), grades=(grade,), topics=(topic,), subtopics=(subtopic,),
+        skills=skills, tag_categories=(), tags=())
+    extraction = ExtractionResultV1(
+        extracted_text="Задание", structured_statement="Решить задачу по физике.",
+        detected_task_type="calculation", detected_answer_format="short_text",
+        choices=None, extraction_confidence=Decimal(".99"), ocr_issues=(), metadata={
+            "title": "Задача по физике", "subject": "Физика", "grade": grade_number,
+            "topic": topic_name, "subtopic": subtopic_name,
+            "skills": (() if skill_name is None else (skill_name,)),
+            "task_type": "calculation", "answer_format": "short_text",
+            "difficulty": 2, "tags": (),
+        })
+    now = datetime.now(UTC)
+    session = ImageSolvingSession(
+        session_id=uuid4(), owner_id=uuid4(), input_artifact_id=uuid4(),
+        extraction_checkpoint=extraction, lifecycle_status=ImageSolvingStatus.VALIDATED,
+        created_at=now, updated_at=now)
+
+    result = resolve_metadata(session, catalog)
+
+    assert (result.subject.id, result.grade.id, result.topic.id, result.subtopic.id) == (
+        subject.id, grade.id, topic.id, subtopic.id)
+    assert [resolved.id for resolved in result.skills] == [skill.id for skill in skills]
+
+
+@pytest.mark.parametrize(("grade_number", "topic_name", "subtopic_name", "skill_name"), [
     (5, "Дроби", "Десятичные дроби", "Сравнивать десятичные дроби"),
     (6, "Дроби", "Проценты", "Находить процент от величины"),
 ])
