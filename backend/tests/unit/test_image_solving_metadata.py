@@ -420,3 +420,32 @@ async def test_local_resolution_failures_are_controlled(monkeypatch,failure,stag
     with pytest.raises(MetadataResolutionError) as error:
         await MetadataRecommendationService(_Sessions(),repository,loader).generate(uuid4(),uuid4())
     assert error.value.stage==stage
+
+@pytest.mark.parametrize(("grade_number", "topic_name", "subtopic_name", "skill_name"), [
+    (10, "Фонетика и орфоэпия", "Акцентологические нормы", "Определять нормативное ударение"),
+    (10, "Лексикология и фразеология", "Паронимы", "Выбирать пароним по контексту"),
+    (11, "Синтаксис и синтаксические нормы", "Согласование сказуемого с подлежащим", "Выявлять нарушение согласования сказуемого с подлежащим"),
+    (11, "Пунктуация", "Сложное предложение с разными видами связи", "Расставлять знаки в сложном предложении с разными видами связи"),
+    (11, "Функциональная стилистика и культура речи", "Официально-деловой стиль", "Распознавать официально-деловой стиль"),
+])
+def test_russian_10_11_catalog_metadata_resolves_locally(grade_number, topic_name, subtopic_name, skill_name):
+    subject = item("Русский язык")
+    grade = item(str(grade_number), grade_number=grade_number)
+    topic = item(topic_name, subject_id=subject.id, grade_id=grade.id)
+    subtopic = item(subtopic_name, topic_id=topic.id)
+    skill = item(skill_name, topic_id=topic.id, subtopic_id=subtopic.id)
+    catalog = MetadataCatalogSnapshotV1(subjects=(subject,), grades=(grade,), topics=(topic,),
+        subtopics=(subtopic,), skills=(skill,), tag_categories=(), tags=())
+    extraction = ExtractionResultV1(extracted_text="Задание", structured_statement="Выполнить задание.",
+        detected_task_type="open_question", detected_answer_format="short_text", choices=None,
+        extraction_confidence=Decimal(".99"), ocr_issues=(), metadata={"title": "Задание",
+        "subject": "Русский язык", "grade": grade_number, "topic": topic_name,
+        "subtopic": subtopic_name, "skills": (skill_name,), "task_type": "open_question",
+        "answer_format": "short_text", "difficulty": 2, "tags": ()})
+    now = datetime.now(UTC)
+    session = ImageSolvingSession(session_id=uuid4(), owner_id=uuid4(), input_artifact_id=uuid4(),
+        extraction_checkpoint=extraction, lifecycle_status=ImageSolvingStatus.VALIDATED,
+        created_at=now, updated_at=now)
+    result = resolve_metadata(session, catalog)
+    assert (result.subject.id, result.grade.id, result.topic.id, result.subtopic.id,
+            result.skills[0].id) == (subject.id, grade.id, topic.id, subtopic.id, skill.id)
