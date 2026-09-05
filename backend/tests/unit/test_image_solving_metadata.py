@@ -96,6 +96,54 @@ def test_mathematics_5_6_catalog_metadata_resolves_locally(
 
 
 @pytest.mark.parametrize(("grade_number", "topic_name", "subtopic_name", "skill_name"), [
+    (7, "Теоретические основы информатики", "Информационный объём данных",
+     "Переводить единицы информационного объёма"),
+    (7, "Информационные технологии", "Растровая графика",
+     "Редактировать растровое изображение"),
+    (8, "Теоретические основы информатики", "Двоичная система счисления",
+     "Переводить число из десятичной системы в двоичную"),
+    (8, "Алгоритмы и программирование", "Цикл с условием",
+     "Составлять программу с циклом с условием"),
+    (9, "Алгоритмы и программирование", "Одномерный массив",
+     "Составлять программу с одномерным массивом"),
+    (9, "Информационные технологии", "Абсолютная адресация",
+     "Использовать абсолютную ссылку"),
+])
+def test_informatics_7_9_catalog_metadata_resolves_locally(
+        grade_number, topic_name, subtopic_name, skill_name):
+    subject = item("Информатика")
+    grade = item(str(grade_number), grade_number=grade_number)
+    topic = item(topic_name, subject_id=subject.id, grade_id=grade.id)
+    subtopic = item(subtopic_name, topic_id=topic.id)
+    skills = (() if skill_name is None else
+              (item(skill_name, topic_id=topic.id, subtopic_id=subtopic.id),))
+    catalog = MetadataCatalogSnapshotV1(
+        subjects=(subject,), grades=(grade,), topics=(topic,), subtopics=(subtopic,),
+        skills=skills, tag_categories=(), tags=())
+    extraction = ExtractionResultV1(
+        extracted_text="Задание", structured_statement="Выполнить задание.",
+        detected_task_type="open_question", detected_answer_format="short_text",
+        choices=None, extraction_confidence=Decimal(".99"), ocr_issues=(), metadata={
+            "title": "Задание", "subject": "Информатика", "grade": grade_number,
+            "topic": topic_name, "subtopic": subtopic_name,
+            "skills": (() if skill_name is None else (skill_name,)),
+            "task_type": "open_question", "answer_format": "short_text",
+            "difficulty": 2, "tags": (),
+        })
+    now = datetime.now(UTC)
+    session = ImageSolvingSession(
+        session_id=uuid4(), owner_id=uuid4(), input_artifact_id=uuid4(),
+        extraction_checkpoint=extraction, lifecycle_status=ImageSolvingStatus.VALIDATED,
+        created_at=now, updated_at=now)
+
+    result = resolve_metadata(session, catalog)
+
+    assert (result.subject.id, result.grade.id, result.topic.id, result.subtopic.id) == (
+        subject.id, grade.id, topic.id, subtopic.id)
+    assert [resolved.id for resolved in result.skills] == [skill.id for skill in skills]
+
+
+@pytest.mark.parametrize(("grade_number", "topic_name", "subtopic_name", "skill_name"), [
     (1, "Орфография и пунктуация", "ЖИ–ШИ", "Правильно писать сочетания жи–ши"),
     (2, "Орфография и пунктуация", "Безударные гласные в корне слова",
      "Подбирать проверочное слово для безударной гласной"),
