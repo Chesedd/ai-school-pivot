@@ -57,7 +57,7 @@ def test_source_shape_topics_counts_and_normalized_uniqueness():
     subjects = [s for s in _source()["subjects"] if s["name"] == "Русский язык"]
     assert len(subjects) == 1
     grades = {g["number"]: g for g in subjects[0]["grades"]}
-    assert set(grades) == set(range(1, 10))
+    assert set(grades) == set(range(1, 12))
     for number in (7, 8, 9):
         topics = grades[number]["topics"]
         assert {t["name"] for t in topics} == EXPECTED_TOPICS[number]
