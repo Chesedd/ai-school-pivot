@@ -559,3 +559,74 @@ async def test_russian_7_9_hierarchy_search_reuse_and_no_grade_leakage(tmp_path)
             found = await service.search(CatalogOptionQuery(
                 "subtopics", query, 20, topic_id=topic_id))
             assert forbidden not in {item["name"] for item in found["items"]}
+
+async def test_surrounding_world_hierarchy_and_grade_scoped_search():
+    first = await seed_catalog(session_factory=async_session_factory)
+    # The clean fixture makes this a real first/second seed stability check.
+    async with async_session_factory() as db:
+        rows = (await db.execute(text("""
+            SELECT g.number, count(DISTINCT t.id), count(DISTINCT st.id),
+                   count(DISTINCT sk.id)
+            FROM subjects s JOIN topics t ON t.subject_id=s.id
+            JOIN grades g ON g.id=t.grade_id
+            JOIN subtopics st ON st.topic_id=t.id
+            JOIN skills sk ON sk.subtopic_id=st.id
+            WHERE s.normalized_name='окружающий мир'
+            GROUP BY g.number ORDER BY g.number
+        """))).all()
+        assert rows == [(1, 3, 52, 67), (2, 3, 83, 91),
+                        (3, 3, 102, 116), (4, 3, 96, 106)]
+        assert sum(row[1] for row in rows) == 12
+        assert await db.scalar(text("""
+            SELECT count(*) FROM topics t JOIN subjects s ON s.id=t.subject_id
+            JOIN grades g ON g.id=t.grade_id
+            WHERE s.normalized_name='окружающий мир' AND g.number BETWEEN 5 AND 11
+        """)) == 0
+        subject_id = await db.scalar(text(
+            "SELECT id FROM subjects WHERE normalized_name='окружающий мир'"))
+        grade_ids = dict((await db.execute(text(
+            "SELECT number,id FROM grades WHERE number BETWEEN 1 AND 4"))).all())
+        ids_before = {table: (await db.execute(text(f"SELECT id FROM {table} ORDER BY id"))).scalars().all()
+                      for table in ("subjects", "grades", "topics", "subtopics", "skills")}
+        service = CatalogOptionService(db)
+        searches = [
+            (1, "Человек и природа", "части растен", "Части растения"),
+            (1, "Правила безопасной жизнедеятельности", "пешеход", "Безопасность пешехода"),
+            (2, "Человек и природа", "компас", "Компас"),
+            (2, "Человек и природа", "красн книг", "Красная книга России"),
+            (2, "Человек и общество", "родослов", "Родословная"),
+            (3, "Человек и природа", "круговорот", "Круговорот воды"),
+            (3, "Человек и природа", "цепи питан", "Цепи питания"),
+            (3, "Человек и природа", "пищевар", "Пищеварительная система"),
+            (3, "Человек и общество", "семейн бюджет", "Семейный бюджет"),
+            (4, "Человек и общество", "конституц", "Конституция Российской Федерации"),
+            (4, "Человек и общество", "лента врем", "Лента времени"),
+            (4, "Человек и природа", "природн зон", "Природные зоны России"),
+            (4, "Правила безопасной жизнедеятельности", "велосипед", "Безопасность велосипедиста"),
+        ]
+        for number, topic_name, query, expected in searches:
+            topic_id = await db.scalar(text("""
+                SELECT id FROM topics WHERE subject_id=:subject AND grade_id=:grade AND name=:name
+            """), {"subject": subject_id, "grade": grade_ids[number], "name": topic_name})
+            found = await service.search(CatalogOptionQuery(
+                "subtopics", query, 20, topic_id=topic_id))
+            assert expected in {item["name"] for item in found["items"]}
+        for number, topic_name, query, forbidden in [
+            (1, "Человек и общество", "конституц", "Конституция Российской Федерации"),
+            (2, "Человек и природа", "круговорот", "Круговорот воды"),
+            (3, "Правила безопасной жизнедеятельности", "велосипед", "Безопасность велосипедиста"),
+            (4, "Человек и природа", "пищевар", "Пищеварительная система"),
+        ]:
+            topic_id = await db.scalar(text("""
+                SELECT id FROM topics WHERE subject_id=:subject AND grade_id=:grade AND name=:name
+            """), {"subject": subject_id, "grade": grade_ids[number], "name": topic_name})
+            found = await service.search(CatalogOptionQuery(
+                "subtopics", query, 20, topic_id=topic_id))
+            assert forbidden not in {item["name"] for item in found["items"]}
+    second = await seed_catalog(session_factory=async_session_factory)
+    assert all(second[kind]["created"] == 0 for kind in second)
+    async with async_session_factory() as db:
+        ids_after = {table: (await db.execute(text(f"SELECT id FROM {table} ORDER BY id"))).scalars().all()
+                     for table in ids_before}
+    assert ids_after == ids_before
+    assert first["topics"]["created"] >= 12
