@@ -630,3 +630,74 @@ async def test_surrounding_world_hierarchy_and_grade_scoped_search():
                      for table in ids_before}
     assert ids_after == ids_before
     assert first["topics"]["created"] >= 12
+
+
+async def test_informatics_7_9_hierarchy_and_grade_scoped_search():
+    await seed_catalog(session_factory=async_session_factory)
+    async with async_session_factory() as db:
+        rows = (await db.execute(text("""
+            SELECT g.number, count(DISTINCT t.id), count(DISTINCT st.id),
+                   count(DISTINCT sk.id)
+            FROM subjects s JOIN topics t ON t.subject_id=s.id
+            JOIN grades g ON g.id=t.grade_id
+            JOIN subtopics st ON st.topic_id=t.id
+            JOIN skills sk ON sk.subtopic_id=st.id
+            WHERE s.normalized_name='информатика'
+            GROUP BY g.number ORDER BY g.number
+        """))).all()
+        assert rows == [(7, 3, 130, 214), (8, 2, 82, 133), (9, 4, 125, 202)]
+        assert await db.scalar(text("""
+            SELECT count(*) FROM topics t JOIN subjects s ON s.id=t.subject_id
+            JOIN grades g ON g.id=t.grade_id
+            WHERE s.normalized_name='информатика' AND g.number NOT IN (7,8,9)
+        """)) == 0
+        assert await db.scalar(text("""
+            SELECT count(*) FROM skills sk JOIN subtopics st ON st.id=sk.subtopic_id
+            JOIN topics t ON t.id=st.topic_id
+            WHERE sk.topic_id != t.id
+        """)) == 0
+
+        subject_id = await db.scalar(text(
+            "SELECT id FROM subjects WHERE normalized_name='информатика'"))
+        grade_ids = dict((await db.execute(text(
+            "SELECT number,id FROM grades WHERE number IN (7,8,9)"))).all())
+        service = CatalogOptionService(db)
+        searches = [
+            (7, "Цифровая грамотность", "файлов", "Файловая система"),
+            (7, "Теоретические основы информатики", "информацион объем",
+             "Информационный объём данных"),
+            (7, "Теоретические основы информатики", "rgb", "RGB"),
+            (7, "Информационные технологии", "растров", "Растровая графика"),
+            (8, "Теоретические основы информатики", "двоичн", "Двоичная система счисления"),
+            (8, "Теоретические основы информатики", "истинност", "Таблица истинности"),
+            (8, "Алгоритмы и программирование", "ветвлен", "Ветвление"),
+            (8, "Алгоритмы и программирование", "евклид", "Алгоритм Евклида"),
+            (8, "Алгоритмы и программирование", "строк", "Строковые данные"),
+            (9, "Цифровая грамотность", "фишинг", "Фишинг"),
+            (9, "Теоретические основы информатики", "граф", "Граф"),
+            (9, "Алгоритмы и программирование", "массив", "Одномерный массив"),
+            (9, "Алгоритмы и программирование", "обратн связ", "Обратная связь"),
+            (9, "Информационные технологии", "абсолютн адрес", "Абсолютная адресация"),
+        ]
+        for number, topic_name, query, expected in searches:
+            topic_id = await db.scalar(text("""
+                SELECT id FROM topics WHERE subject_id=:subject
+                AND grade_id=:grade AND name=:name
+            """), {"subject": subject_id, "grade": grade_ids[number], "name": topic_name})
+            result = await service.search(CatalogOptionQuery(
+                "subtopics", query, 20, topic_id=topic_id))
+            assert expected in {item["name"] for item in result["items"]}
+
+        for number, topic_name, query, forbidden in [
+            (7, "Теоретические основы информатики", "двоичн систем счисления",
+             "Двоичная система счисления"),
+            (8, "Алгоритмы и программирование", "массив", "Одномерный массив"),
+            (9, "Информационные технологии", "текстовый процессор", "Текстовый процессор"),
+        ]:
+            topic_id = await db.scalar(text("""
+                SELECT id FROM topics WHERE subject_id=:subject
+                AND grade_id=:grade AND name=:name
+            """), {"subject": subject_id, "grade": grade_ids[number], "name": topic_name})
+            result = await service.search(CatalogOptionQuery(
+                "subtopics", query, 20, topic_id=topic_id))
+            assert forbidden not in {item["name"] for item in result["items"]}
