@@ -449,3 +449,35 @@ def test_russian_10_11_catalog_metadata_resolves_locally(grade_number, topic_nam
     result = resolve_metadata(session, catalog)
     assert (result.subject.id, result.grade.id, result.topic.id, result.subtopic.id,
             result.skills[0].id) == (subject.id, grade.id, topic.id, subtopic.id, skill.id)
+
+@pytest.mark.parametrize(("grade_number", "topic_name", "subtopic_name", "skill_name"), [
+    (1, "Человек и природа", "Части растения", "Находить корень растения"),
+    (2, "Человек и природа", "Компас", "Определять направление по компасу"),
+    (3, "Человек и природа", "Цепи питания", "Составлять простую цепь питания"),
+    (4, "Человек и общество", "Лента времени", "Соотносить событие с историческим периодом"),
+    (4, "Человек и природа", "Природные зоны России", "Определять природную зону по описанию"),
+])
+def test_surrounding_world_catalog_metadata_resolves_locally(
+        grade_number, topic_name, subtopic_name, skill_name):
+    subject = item("Окружающий мир")
+    grade = item(str(grade_number), grade_number=grade_number)
+    topic = item(topic_name, subject_id=subject.id, grade_id=grade.id)
+    subtopic = item(subtopic_name, topic_id=topic.id)
+    skill = item(skill_name, topic_id=topic.id, subtopic_id=subtopic.id)
+    catalog = MetadataCatalogSnapshotV1(subjects=(subject,), grades=(grade,), topics=(topic,),
+        subtopics=(subtopic,), skills=(skill,), tag_categories=(), tags=())
+    extraction = ExtractionResultV1(extracted_text="Задание", structured_statement="Выполнить задание.",
+        detected_task_type="open_question", detected_answer_format="short_text", choices=None,
+        extraction_confidence=Decimal(".99"), ocr_issues=(), metadata={"title": "Задание",
+        "subject": "Окружающий мир", "grade": grade_number, "topic": topic_name,
+        "subtopic": subtopic_name, "skills": (skill_name,), "task_type": "open_question",
+        "answer_format": "short_text", "difficulty": 2, "tags": ()})
+    now = datetime.now(UTC)
+    session = ImageSolvingSession(session_id=uuid4(), owner_id=uuid4(), input_artifact_id=uuid4(),
+        extraction_checkpoint=extraction, lifecycle_status=ImageSolvingStatus.VALIDATED,
+        created_at=now, updated_at=now)
+
+    result = resolve_metadata(session, catalog)
+
+    assert (result.subject.id, result.grade.id, result.topic.id, result.subtopic.id,
+            result.skills[0].id) == (subject.id, grade.id, topic.id, subtopic.id, skill.id)

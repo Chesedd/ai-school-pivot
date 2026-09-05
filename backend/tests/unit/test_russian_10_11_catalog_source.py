@@ -39,7 +39,7 @@ OTHER_SUBJECT_FINGERPRINTS = {
     "Обществознание": "1f4a74c204823c1c1efb26f714d6a49eff0c0dee36c3b7b1d2d241721e54b038",
     "География": "4f851a42d3ff3958b392c55321cc45cfba747201913d5765d6f216da9a42fbd0",
     "Литературное чтение": "f33f125b5d6cd89cf90312676784a5344f9ade2d49e3b15533bf44df36e0a23d",
-    "Окружающий мир": "ac0c6bab8624fd73eb849af43fb597b64c00e6856e1523d472ef9dd24e4a74cd",
+    "Окружающий мир": "a32a30c897f96597353ac00022fa8f7b494576ac24a9840ca94dbe154127e4aa",
 }
 
 
