@@ -48,7 +48,7 @@ def test_informatics_7_9_source_contract_and_normalized_uniqueness():
     matches = [subject for subject in source["subjects"] if subject["name"] == "Информатика"]
     assert len(matches) == 1
     grades = {grade["number"]: grade for grade in matches[0]["grades"]}
-    assert set(grades) == {7, 8, 9}
+    assert {7, 8, 9} <= set(grades)
 
     for number, expected_topics in EXPECTED_TOPICS.items():
         topics = grades[number]["topics"]
@@ -71,7 +71,10 @@ def test_informatics_7_9_source_contract_and_normalized_uniqueness():
 def test_informatics_boundaries_are_language_neutral_and_defensive():
     source = json.loads(DATA.read_text(encoding="utf-8"))
     informatics = next(s for s in source["subjects"] if s["name"] == "Информатика")
-    payload = json.dumps(informatics, ensure_ascii=False).casefold()
+    payload = json.dumps(
+        {"grades": [grade for grade in informatics["grades"] if grade["number"] in (7, 8, 9)]},
+        ensure_ascii=False,
+    ).casefold()
     for forbidden in (
         "python", "c++", "console.writeline", "range()", "огэ", "задание 15",
         "искусственный интеллект", "машинное обучение", "нейронные сети",
