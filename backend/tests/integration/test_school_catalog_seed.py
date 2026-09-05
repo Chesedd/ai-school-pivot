@@ -93,6 +93,71 @@ async def test_full_seed_first_run_and_second_run_are_complete_and_idempotent():
     assert before == after
 
 
+async def test_physics_7_9_hierarchy_counts_boundaries_and_search():
+    await seed_catalog(session_factory=async_session_factory)
+    expected_topics = {
+        7: {"Физика и её роль в познании окружающего мира", "Первоначальные сведения о строении вещества", "Движение и взаимодействие тел", "Давление твёрдых тел, жидкостей и газов", "Работа и мощность. Энергия"},
+        8: {"Тепловые явления", "Электрические и магнитные явления"},
+        9: {"Механические явления", "Механические колебания и волны", "Электромагнитное поле и электромагнитные волны", "Световые явления", "Квантовые явления"},
+    }
+    expected_counts = {7: (5, 120, 235), 8: (2, 97, 192), 9: (5, 154, 301)}
+    async with async_session_factory() as db:
+        subject_id = await db.scalar(text(
+            "SELECT id FROM subjects WHERE normalized_name='физика'"))
+        grades = dict((await db.execute(text(
+            "SELECT number,id FROM grades WHERE number BETWEEN 1 AND 11"))).all())
+        rows = (await db.execute(text("""
+            SELECT g.number, count(DISTINCT t.id), count(DISTINCT st.id),
+                   count(DISTINCT sk.id)
+            FROM subjects s JOIN topics t ON t.subject_id=s.id
+            JOIN grades g ON g.id=t.grade_id
+            JOIN subtopics st ON st.topic_id=t.id JOIN skills sk ON sk.subtopic_id=st.id
+            WHERE s.normalized_name='физика'
+            GROUP BY g.number ORDER BY g.number
+        """))).all()
+        assert rows == [(n, *expected_counts[n]) for n in (7, 8, 9)]
+        assert await db.scalar(text("""
+            SELECT count(*) FROM topics t JOIN subjects s ON s.id=t.subject_id
+            JOIN grades g ON g.id=t.grade_id WHERE s.normalized_name='физика'
+            AND g.number NOT IN (7,8,9)
+        """)) == 0
+        assert await db.scalar(text("""
+            SELECT count(*) FROM topics t JOIN subjects s ON s.id=t.subject_id
+            WHERE s.normalized_name='физика' AND t.normalized_name='механика'
+        """)) == 0
+        service = CatalogOptionService(db)
+        searches = [
+            (7, "Движение и взаимодействие тел", "равномерн движ", "Равномерное движение"),
+            (7, "Движение и взаимодействие тел", "плотност", "Плотность вещества"),
+            (7, "Давление твёрдых тел, жидкостей и газов", "архимед", "Закон Архимеда"),
+            (7, "Давление твёрдых тел, жидкостей и газов", "паскал", "Закон Паскаля"),
+            (7, "Работа и мощность. Энергия", "кпд", "КПД простого механизма"),
+            (8, "Тепловые явления", "теплов баланс", "Уравнение теплового баланса"),
+            (8, "Электрические и магнитные явления", "закон ома", "Закон Ома для участка цепи"),
+            (8, "Электрические и магнитные явления", "последовательн соедин", "Последовательное соединение проводников"),
+            (8, "Электрические и магнитные явления", "электромагнитн индукц", "Электромагнитная индукция"),
+            (9, "Механические явления", "второй закон ньют", "Второй закон Ньютона"),
+            (9, "Механические явления", "сохранен импульс", "Закон сохранения импульса"),
+            (9, "Механические колебания и волны", "резонанс", "Резонанс"),
+            (9, "Световые явления", "преломлен", "Закон преломления света"),
+            (9, "Квантовые явления", "полураспад", "Период полураспада"),
+        ]
+        topic_ids = {}
+        for number, topic_name, query, expected in searches:
+            key = (number, topic_name)
+            if key not in topic_ids:
+                topic_ids[key] = await db.scalar(text("""
+                    SELECT id FROM topics WHERE subject_id=:subject AND grade_id=:grade
+                    AND name=:name
+                """), {"subject": subject_id, "grade": grades[number], "name": topic_name})
+            result = await service.search(CatalogOptionQuery(
+                "subtopics", query, 20, topic_id=topic_ids[key]))
+            assert expected in {item["name"] for item in result["items"]}
+        assert {row[0]: {name for name, in (await db.execute(text("""
+            SELECT name FROM topics WHERE subject_id=:subject AND grade_id=:grade
+        """), {"subject": subject_id, "grade": grades[row[0]]})).all()} for row in rows} == expected_topics
+
+
 async def test_deprecated_identity_resolves_or_conflicts_without_resurrection(tmp_path):
     data = {"subjects": [{"name": "Seed Subject", "grades": []},
                          {"name": "Rejected Subject", "grades": []}]}

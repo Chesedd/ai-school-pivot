@@ -179,5 +179,22 @@ async def test_seed_reuses_bridge_then_is_fully_idempotent():
             JOIN grades g ON g.id=t.grade_id
             WHERE s.normalized_name='физика' AND g.number=7
         """))).all()
-        assert physics == [(ids["topic"], "Движение и взаимодействие тел")]
+        assert set(physics) >= {(ids["topic"], "Движение и взаимодействие тел")}
+        assert {name for _, name in physics} == {
+            "Физика и её роль в познании окружающего мира",
+            "Первоначальные сведения о строении вещества",
+            "Движение и взаимодействие тел",
+            "Давление твёрдых тел, жидкостей и газов",
+            "Работа и мощность. Энергия",
+        }
+        assert len(physics) == 5
+        assert (await connection.execute(sa.text(
+            "SELECT code FROM topics WHERE id=:id"), {"id": ids["topic"]})).scalar_one() == "historical-mechanics"
+        assert (await connection.execute(sa.text(
+            "SELECT id FROM subtopics WHERE topic_id=:topic AND normalized_name='равномерное движение'"),
+            {"topic": ids["topic"]})).scalar_one() == ids["subtopic"]
+        assert set((await connection.execute(sa.text(
+            "SELECT id FROM skills WHERE subtopic_id=:subtopic AND normalized_name IN "
+            "('вычислять скорость','строить график движения')"),
+            {"subtopic": ids["subtopic"]})).scalars()) == {ids["speed"], ids["graph"]}
     await engine.dispose()
