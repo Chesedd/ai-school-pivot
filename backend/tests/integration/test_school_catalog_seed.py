@@ -145,7 +145,7 @@ async def test_russian_primary_hierarchy_and_grade_scoped_search():
         assert await db.scalar(text("""
             SELECT count(*) FROM topics t JOIN subjects s ON s.id=t.subject_id
             JOIN grades g ON g.id=t.grade_id
-            WHERE s.normalized_name='русский язык' AND g.number IN (5,6,8,9,10,11)
+            WHERE s.normalized_name='русский язык' AND g.number IN (5,6,10,11)
         """)) == 0
         assert await db.scalar(text("""
             SELECT count(*) FROM skills sk JOIN subtopics st ON st.id=sk.subtopic_id
@@ -250,7 +250,7 @@ async def test_russian_5_6_hierarchy_and_grade_scoped_search():
         assert await db.scalar(text("""
             SELECT count(*) FROM topics t JOIN subjects s ON s.id=t.subject_id
             JOIN grades g ON g.id=t.grade_id
-            WHERE s.normalized_name='русский язык' AND g.number IN (8,9,10,11)
+            WHERE s.normalized_name='русский язык' AND g.number IN (10,11)
         """)) == 0
 
 
@@ -469,3 +469,93 @@ async def test_mathematics_hierarchy_search_and_metadata_resolution():
             assert (resolved.grade.label, resolved.topic.label,
                     resolved.subtopic.label, resolved.skills[0].label) == (
                         str(number), topic, subtopic, skill)
+
+async def test_russian_7_9_hierarchy_search_reuse_and_no_grade_leakage(tmp_path):
+    historical = {"subjects": [{"name": "Русский язык", "grades": [{"number": 7,
+        "topics": [{"name": "Морфология", "subtopics": [{"name": "Причастие",
+        "skills": ["Находить причастия в тексте", "Выполнять морфологический разбор"]}]}]}]}]}
+    old_path = tmp_path / "historical-russian.json"
+    old_path.write_text(json.dumps(historical, ensure_ascii=False), encoding="utf-8")
+    await seed_catalog(old_path, session_factory=async_session_factory)
+    async with async_session_factory() as db:
+        historical_ids = (await db.execute(text("""
+            SELECT g.id, t.id, st.id,
+                   array_agg(sk.id ORDER BY sk.normalized_name)
+            FROM subjects s JOIN topics t ON t.subject_id=s.id
+            JOIN grades g ON g.id=t.grade_id JOIN subtopics st ON st.topic_id=t.id
+            JOIN skills sk ON sk.subtopic_id=st.id
+            WHERE s.normalized_name='русский язык' AND g.number=7
+              AND t.name='Морфология' AND st.name='Причастие'
+            GROUP BY g.id,t.id,st.id
+        """))).one()
+
+    report = await seed_catalog(session_factory=async_session_factory)
+    assert report["grades"]["reused"] >= 1
+    assert report["subjects"]["reused"] >= 1
+    async with async_session_factory() as db:
+        current_ids = (await db.execute(text("""
+            SELECT g.id, t.id, st.id,
+                   array_agg(sk.id ORDER BY sk.normalized_name) FILTER (
+                     WHERE sk.name IN ('Находить причастия в тексте','Выполнять морфологический разбор'))
+            FROM subjects s JOIN topics t ON t.subject_id=s.id
+            JOIN grades g ON g.id=t.grade_id JOIN subtopics st ON st.topic_id=t.id
+            JOIN skills sk ON sk.subtopic_id=st.id
+            WHERE s.normalized_name='русский язык' AND g.number=7
+              AND t.name='Морфология' AND st.name='Причастие'
+            GROUP BY g.id,t.id,st.id
+        """))).one()
+        assert current_ids == historical_ids
+        rows = (await db.execute(text("""
+            SELECT g.number, count(DISTINCT t.id), count(DISTINCT st.id), count(DISTINCT sk.id)
+            FROM subjects s JOIN topics t ON t.subject_id=s.id JOIN grades g ON g.id=t.grade_id
+            JOIN subtopics st ON st.topic_id=t.id JOIN skills sk ON sk.subtopic_id=st.id
+            WHERE s.normalized_name='русский язык' AND g.number BETWEEN 1 AND 9
+            GROUP BY g.number ORDER BY g.number
+        """))).all()
+        assert rows == [(1,7,46,72),(2,8,55,80),(3,8,65,82),(4,8,74,94),
+                        (5,10,176,217),(6,8,132,149),(7,6,96,130),(8,5,76,100),(9,5,73,100)]
+        assert await db.scalar(text("""
+            SELECT count(*) FROM topics t JOIN subjects s ON s.id=t.subject_id
+            JOIN grades g ON g.id=t.grade_id
+            WHERE s.normalized_name='русский язык' AND g.number IN (10,11)
+        """)) == 0
+        subject_id = await db.scalar(text("SELECT id FROM subjects WHERE normalized_name='русский язык'"))
+        grade_ids = dict((await db.execute(text("SELECT number,id FROM grades WHERE number BETWEEN 7 AND 9"))).all())
+        service = CatalogOptionService(db)
+        searches = [
+            (7,"Морфология","причастн","Причастный оборот"),(7,"Морфология","дееприч","Деепричастие"),
+            (7,"Морфология","нареч","Наречие"),(7,"Орфография и пунктуация","производн предлог","Производные предлоги"),
+            (8,"Синтаксис и пунктуация","односостав","Односоставные предложения"),
+            (8,"Синтаксис и пунктуация","составн имен","Составное именное сказуемое"),
+            (8,"Синтаксис и пунктуация","обособлен","Обособленные определения"),
+            (8,"Синтаксис и пунктуация","вводн","Вводные конструкции"),
+            (8,"Синтаксис и пунктуация","управлен","Управление"),
+            (9,"Синтаксис и пунктуация","сложноподчин","Сложноподчинённое предложение"),
+            (9,"Синтаксис и пунктуация","определительн","Придаточное определительное"),
+            (9,"Синтаксис и пунктуация","бессоюз","Бессоюзное сложное предложение"),
+            (9,"Синтаксис и пунктуация","двоеточ","Двоеточие в БСП"),
+            (9,"Синтаксис и пунктуация","разными видами","Сложное предложение с разными видами связи"),
+            (9,"Синтаксис и пунктуация","цитир","Цитирование"),
+        ]
+        topic_ids = {}
+        for number, topic_name, query, expected in searches:
+            key=(number,topic_name)
+            if key not in topic_ids:
+                topic_ids[key] = await db.scalar(text("""SELECT id FROM topics
+                    WHERE subject_id=:subject AND grade_id=:grade AND name=:name"""),
+                    {"subject":subject_id,"grade":grade_ids[number],"name":topic_name})
+            found = await service.search(CatalogOptionQuery("subtopics", query, 20,
+                                                              topic_id=topic_ids[key]))
+            assert expected in {item["name"] for item in found["items"]}
+        for number, topic_name, query, forbidden in [
+            (7, "Морфология", "односостав", "Односоставные предложения"),
+            (8, "Синтаксис и пунктуация", "бессоюз", "Бессоюзное сложное предложение"),
+            (9, "Синтаксис и пунктуация", "дееприч", "Деепричастие"),
+        ]:
+            topic_id = topic_ids.get((number, topic_name)) or await db.scalar(text("""
+                SELECT id FROM topics WHERE subject_id=:subject
+                AND grade_id=:grade AND name=:name
+            """), {"subject": subject_id, "grade": grade_ids[number], "name": topic_name})
+            found = await service.search(CatalogOptionQuery(
+                "subtopics", query, 20, topic_id=topic_id))
+            assert forbidden not in {item["name"] for item in found["items"]}
