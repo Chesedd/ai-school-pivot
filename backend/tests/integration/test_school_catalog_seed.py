@@ -93,14 +93,17 @@ async def test_full_seed_first_run_and_second_run_are_complete_and_idempotent():
     assert before == after
 
 
-async def test_physics_7_9_hierarchy_counts_boundaries_and_search():
+async def test_physics_7_11_hierarchy_counts_boundaries_and_search():
     await seed_catalog(session_factory=async_session_factory)
     expected_topics = {
         7: {"Физика и её роль в познании окружающего мира", "Первоначальные сведения о строении вещества", "Движение и взаимодействие тел", "Давление твёрдых тел, жидкостей и газов", "Работа и мощность. Энергия"},
         8: {"Тепловые явления", "Электрические и магнитные явления"},
         9: {"Механические явления", "Механические колебания и волны", "Электромагнитное поле и электромагнитные волны", "Световые явления", "Квантовые явления"},
+        10: {"Физика и методы научного познания", "Механика", "Молекулярная физика и термодинамика", "Электродинамика"},
+        11: {"Электродинамика", "Колебания и волны", "Основы специальной теории относительности", "Квантовая физика", "Элементы астрономии и астрофизики"},
     }
-    expected_counts = {7: (5, 120, 235), 8: (2, 97, 192), 9: (5, 154, 301)}
+    expected_counts = {7: (5, 120, 235), 8: (2, 97, 192), 9: (5, 154, 301),
+                       10: (4, 257, 283), 11: (5, 242, 250)}
     async with async_session_factory() as db:
         subject_id = await db.scalar(text(
             "SELECT id FROM subjects WHERE normalized_name='физика'"))
@@ -115,15 +118,17 @@ async def test_physics_7_9_hierarchy_counts_boundaries_and_search():
             WHERE s.normalized_name='физика'
             GROUP BY g.number ORDER BY g.number
         """))).all()
-        assert rows == [(n, *expected_counts[n]) for n in (7, 8, 9)]
+        assert rows == [(n, *expected_counts[n]) for n in (7, 8, 9, 10, 11)]
         assert await db.scalar(text("""
             SELECT count(*) FROM topics t JOIN subjects s ON s.id=t.subject_id
             JOIN grades g ON g.id=t.grade_id WHERE s.normalized_name='физика'
-            AND g.number NOT IN (7,8,9)
+            AND g.number NOT IN (7,8,9,10,11)
         """)) == 0
         assert await db.scalar(text("""
             SELECT count(*) FROM topics t JOIN subjects s ON s.id=t.subject_id
+            JOIN grades g ON g.id=t.grade_id
             WHERE s.normalized_name='физика' AND t.normalized_name='механика'
+            AND g.number != 10
         """)) == 0
         service = CatalogOptionService(db)
         searches = [
@@ -141,6 +146,22 @@ async def test_physics_7_9_hierarchy_counts_boundaries_and_search():
             (9, "Механические колебания и волны", "резонанс", "Резонанс"),
             (9, "Световые явления", "преломлен", "Закон преломления света"),
             (9, "Квантовые явления", "полураспад", "Период полураспада"),
+            (10, "Молекулярная физика и термодинамика", "менделеев клапейрон", "Уравнение Менделеева–Клапейрона"),
+            (10, "Молекулярная физика и термодинамика", "первый закон термодинамик", "Первый закон термодинамики"),
+            (10, "Молекулярная физика и термодинамика", "цикл карно", "Цикл Карно"),
+            (10, "Молекулярная физика и термодинамика", "насыщенн пар", "Насыщенный пар"),
+            (10, "Электродинамика", "полная цеп", "Закон Ома для полной цепи"),
+            (10, "Электродинамика", "внутрен сопротивлен", "Внутреннее сопротивление источника"),
+            (10, "Электродинамика", "p n переход", "p–n-переход"),
+            (11, "Электродинамика", "сила ампера", "Сила Ампера"),
+            (11, "Электродинамика", "сила лоренца", "Сила Лоренца"),
+            (11, "Электродинамика", "фараде", "Закон электромагнитной индукции Фарадея"),
+            (11, "Колебания и волны", "томсон", "Формула Томсона"),
+            (11, "Колебания и волны", "тонк линз", "Формула тонкой линзы"),
+            (11, "Квантовая физика", "фотоэффект", "Фотоэффект"),
+            (11, "Квантовая физика", "де бройл", "Волны де Бройля"),
+            (11, "Элементы астрономии и астрофизики", "хаббл", "Закон Хаббла"),
+            (11, "Элементы астрономии и астрофизики", "реликтов", "Реликтовое излучение"),
         ]
         topic_ids = {}
         for number, topic_name, query, expected in searches:
@@ -153,6 +174,17 @@ async def test_physics_7_9_hierarchy_counts_boundaries_and_search():
             result = await service.search(CatalogOptionQuery(
                 "subtopics", query, 20, topic_id=topic_ids[key]))
             assert expected in {item["name"] for item in result["items"]}
+        leakage = [
+            (10, "Электродинамика", "сила ампера"),
+            (10, "Электродинамика", "фотоэффект"),
+            (10, "Электродинамика", "хаббл"),
+            (11, "Электродинамика", "менделеев клапейрон"),
+            (11, "Электродинамика", "закон ома полной цеп"),
+        ]
+        for number, topic_name, query in leakage:
+            result = await service.search(CatalogOptionQuery(
+                "subtopics", query, 20, topic_id=topic_ids[(number, topic_name)]))
+            assert result["items"] == []
         assert {row[0]: {name for name, in (await db.execute(text("""
             SELECT name FROM topics WHERE subject_id=:subject AND grade_id=:grade
         """), {"subject": subject_id, "grade": grades[row[0]]})).all()} for row in rows} == expected_topics
