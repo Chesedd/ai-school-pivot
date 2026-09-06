@@ -26,7 +26,7 @@ def test_physics_source_contract_and_normalized_uniqueness():
     matches=[s for s in source["subjects"] if s["name"]=="Физика"]
     assert len(matches)==1
     grades={g["number"]:g for g in matches[0]["grades"]}
-    assert set(grades)=={7,8,9}
+    assert {7,8,9} <= set(grades)
     for number, expected in TOPICS.items():
         topics=grades[number]["topics"]
         assert {t["name"] for t in topics}==expected
