@@ -17,6 +17,7 @@ from app.infrastructure.assessment_models import (Assignment, AssignmentParticip
     AssessmentItem, AssessmentVariant, ClassGroup, Student)
 from app.infrastructure.models import Task, TaskVersion
 from app.application.object_access import ObjectAccessScope
+from app.infrastructure.classroom_repository import SQLAlchemyClassroomAccessRepository
 
 
 class SQLAlchemyContentBankReadPort:
@@ -137,8 +138,11 @@ class SQLAlchemyAssessmentRepository:
         return {"items": [ClassGroupSummary(group.id, group.name, count) for group, count in rows],
                 "total": total, "offset": offset, "limit": limit}
 
-    async def list_assignments(self, assessment_id: UUID, offset: int, limit: int):
+    async def list_assignments(self, assessment_id: UUID, offset: int, limit: int,
+                               accessible_class_ids: tuple[UUID, ...] | None = None):
         base = select(Assignment).where(Assignment.assessment_id == assessment_id)
+        if accessible_class_ids is not None:
+            base = base.where(Assignment.class_group_id.in_(accessible_class_ids))
         total = await self.session.scalar(select(func.count()).select_from(base.subquery())) or 0
         counts = (select(AssignmentParticipant.assignment_id, func.count().label("participant_count"))
                   .group_by(AssignmentParticipant.assignment_id).subquery())
@@ -147,6 +151,8 @@ class SQLAlchemyAssessmentRepository:
             .join(ClassGroup, ClassGroup.id == Assignment.class_group_id)
             .outerjoin(counts, counts.c.assignment_id == Assignment.id)
             .where(Assignment.assessment_id == assessment_id)
+            .where(Assignment.class_group_id.in_(accessible_class_ids)
+                   if accessible_class_ids is not None else True)
             .order_by(Assignment.created_at, Assignment.id).offset(offset).limit(limit))).all()
         return {"items": [AssignmentSummary(a.id, a.assessment_id, a.class_group_id, name, a.status,
                     a.start_at, a.due_at, a.max_attempts, count, a.created_at, a.closed_at)
@@ -358,6 +364,7 @@ class SQLAlchemyAssessmentUnitOfWork:
         self.session = self.factory()
         self.repository = SQLAlchemyAssessmentRepository(self.session)
         self.content_bank = SQLAlchemyContentBankReadPort(self.session)
+        self.classroom_access = SQLAlchemyClassroomAccessRepository(self.session)
         return self
 
     async def __aexit__(self, exc_type: type[BaseException] | None, exc: BaseException | None, tb: TracebackType | None):

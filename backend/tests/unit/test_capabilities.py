@@ -10,6 +10,7 @@ def test_teacher_has_exact_b1_grants():
         "content.read", "content.create", "content.edit", "content.review.submit",
         "image_solving.use", "assessment.create", "assessment.manage", "assessment.results.read",
         "catalog.propose",
+        "classroom.use",
     }
     assert not {"users.manage", "catalog.manage", "content.approve", "content.archive"} & ROLE_CAPABILITIES["teacher"]
 

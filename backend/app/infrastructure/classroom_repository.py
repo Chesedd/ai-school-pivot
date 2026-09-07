@@ -4,6 +4,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.classroom_administration import ClassView, StudentView, TeacherView
+from app.application.classroom_access import TeacherClassSummary, TeacherStudentSummary
 from app.infrastructure.assessment_models import ClassGroup, Student
 from app.infrastructure.auth_models import User, UserRole
 from app.infrastructure.classroom_models import ClassGroupTeacher, ClassroomAuditLog
@@ -76,3 +77,103 @@ class SQLAlchemyClassroomRepository:
     async def update_student(self,id,values):
         obj=await self.session.get(Student,id);[setattr(obj,k,v) for k,v in values.items()];await self.session.flush();return self.sv(obj)
     async def audit(self,aggregate_type,aggregate_id,event,actor,details): self.session.add(ClassroomAuditLog(aggregate_type=aggregate_type,aggregate_id=aggregate_id,event_type=event,actor_user_id=actor,details=details));await self.session.flush()
+
+
+class SQLAlchemyClassroomAccessRepository:
+    """SQL-level membership enforcement shared by Classroom and Assessment."""
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    @staticmethod
+    def _membership(statement, actor_id: UUID, unrestricted: bool):
+        if unrestricted:
+            return statement
+        return statement.join(
+            ClassGroupTeacher, ClassGroupTeacher.class_group_id == ClassGroup.id
+        ).where(ClassGroupTeacher.teacher_user_id == actor_id)
+
+    @staticmethod
+    def _status(statement, status: str):
+        if status == "active":
+            return statement.where(ClassGroup.archived_at.is_(None))
+        if status == "archived":
+            return statement.where(ClassGroup.archived_at.is_not(None))
+        return statement
+
+    @staticmethod
+    def _summary(row):
+        group, grade_number, grade_name, count = row
+        return TeacherClassSummary(group.id, group.name, group.grade_id, grade_number,
+                                   grade_name, group.archived_at, count)
+
+    def _class_rows(self):
+        students = select(func.count(Student.id)).where(
+            Student.class_group_id == ClassGroup.id,
+            Student.archived_at.is_(None),
+        ).scalar_subquery()
+        return select(ClassGroup, Grade.number, Grade.name, students).outerjoin(
+            Grade, Grade.id == ClassGroup.grade_id)
+
+    async def list_accessible_classes(self, actor_id, unrestricted, status, offset, limit):
+        base = self._status(self._membership(select(ClassGroup.id), actor_id, unrestricted), status)
+        total = await self.session.scalar(select(func.count()).select_from(base.subquery())) or 0
+        query = self._status(self._membership(self._class_rows(), actor_id, unrestricted), status)
+        rows = (await self.session.execute(query.order_by(ClassGroup.name, ClassGroup.id)
+                                           .offset(offset).limit(limit))).all()
+        return {"items": [self._summary(row) for row in rows], "total": total,
+                "offset": offset, "limit": limit}
+
+    async def get_accessible_class(self, class_group_id, actor_id, unrestricted):
+        query = self._membership(self._class_rows(), actor_id, unrestricted).where(
+            ClassGroup.id == class_group_id)
+        row = (await self.session.execute(query)).first()
+        return self._summary(row) if row else None
+
+    async def list_accessible_students(self, class_group_id, actor_id, unrestricted, status):
+        query = select(Student).join(ClassGroup, ClassGroup.id == Student.class_group_id).where(
+            ClassGroup.id == class_group_id)
+        query = self._membership(query, actor_id, unrestricted)
+        if status == "active": query = query.where(Student.archived_at.is_(None))
+        elif status == "archived": query = query.where(Student.archived_at.is_not(None))
+        rows = (await self.session.scalars(query.order_by(Student.display_name, Student.id))).all()
+        if not rows and not await self.can_access_class(class_group_id, actor_id, unrestricted):
+            return None
+        return [TeacherStudentSummary(row.id, row.display_name, row.external_ref, row.archived_at)
+                for row in rows]
+
+    async def can_access_class(self, class_group_id, actor_id, unrestricted, *,
+                               require_active=False, require_configured=False, lock=False):
+        if lock and not unrestricted:
+            # Lock both the authoritative membership and its class row. An admin
+            # unassignment must wait for the publication transaction to finish.
+            query = select(ClassGroupTeacher).join(
+                ClassGroup, ClassGroup.id == ClassGroupTeacher.class_group_id
+            ).where(ClassGroupTeacher.class_group_id == class_group_id,
+                    ClassGroupTeacher.teacher_user_id == actor_id)
+            if require_active: query = query.where(ClassGroup.archived_at.is_(None))
+            if require_configured: query = query.where(ClassGroup.grade_id.is_not(None))
+            return await self.session.scalar(query.with_for_update()) is not None
+        query = self._membership(select(ClassGroup), actor_id, unrestricted).where(
+            ClassGroup.id == class_group_id)
+        if require_active: query = query.where(ClassGroup.archived_at.is_(None))
+        if require_configured: query = query.where(ClassGroup.grade_id.is_not(None))
+        if lock: query = query.with_for_update(of=ClassGroup)
+        return await self.session.scalar(query) is not None
+
+    async def accessible_class_ids(self, actor_id, unrestricted):
+        query = self._membership(select(ClassGroup.id), actor_id, unrestricted)
+        return tuple((await self.session.scalars(query)).all())
+
+    async def list_assignment_eligible_classes(self, actor_id, unrestricted, offset, limit):
+        base = self._membership(select(ClassGroup.id), actor_id, unrestricted).where(
+            ClassGroup.archived_at.is_(None), ClassGroup.grade_id.is_not(None))
+        total = await self.session.scalar(select(func.count()).select_from(base.subquery())) or 0
+        counts = select(func.count(Student.id)).where(
+            Student.class_group_id == ClassGroup.id, Student.archived_at.is_(None)
+        ).scalar_subquery()
+        query = self._membership(select(ClassGroup, counts), actor_id, unrestricted).where(
+            ClassGroup.archived_at.is_(None), ClassGroup.grade_id.is_not(None))
+        rows = (await self.session.execute(query.order_by(ClassGroup.name, ClassGroup.id)
+                                           .offset(offset).limit(limit))).all()
+        return {"items": [(group.id, group.name, count) for group, count in rows],
+                "total": total, "offset": offset, "limit": limit}

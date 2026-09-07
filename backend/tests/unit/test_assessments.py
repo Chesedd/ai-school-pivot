@@ -170,7 +170,14 @@ class PublicationRepository:
         self.audit.append((aggregate_type, aggregate_id, event, actor_id, details))
     async def lock_assignment(self, value):
         if self.assignment is None or self.assignment.id != value: return None
-        return SimpleNamespace(status="closed" if self.closed else "open")
+        return SimpleNamespace(status="closed" if self.closed else "open",
+                               class_group_id=self.assignment.class_group_id)
+    async def list_assignments(self, assessment_id, offset, limit, accessible_class_ids=None):
+        rows = [] if self.assignment is None else [self.assignment]
+        if accessible_class_ids is not None:
+            rows = [row for row in rows if row.class_group_id in accessible_class_ids]
+        return {"items": rows[offset:offset + limit], "total": len(rows),
+                "offset": offset, "limit": limit}
     async def close_assignment(self, value, now, actor_id): self.closed = True
     async def get_assignment(self, value):
         if self.assignment is None or self.assignment.id != value: return None
@@ -192,6 +199,17 @@ class PublicationUow:
     async def commit(self): self.commits += 1
 
 
+class ClassroomAccessDouble:
+    def __init__(self, allowed=True):
+        self.allowed = allowed
+        self.calls = []
+    async def can_access_class(self, class_id, actor_id, unrestricted, **requirements):
+        self.calls.append((class_id, actor_id, unrestricted, requirements))
+        return self.allowed or unrestricted
+    async def accessible_class_ids(self, actor_id, unrestricted):
+        return (uuid4(),) if self.allowed or unrestricted else ()
+
+
 def publication_command(repository):
     return PublishAssessmentCommand(repository.assessment_id, repository.group_id,
         datetime(2026, 8, 1, tzinfo=timezone.utc), datetime(2027, 8, 1, tzinfo=timezone.utc), 2)
@@ -206,6 +224,43 @@ async def test_publish_orchestrates_concrete_revalidation_snapshot_and_audits():
     assert result.assignment.participant_ids == uow.repository.students
     assert [entry[2] for entry in uow.repository.audit] == ["assessment_published", "assignment_created"]
     assert all(entry[3] == actor.actor_id for entry in uow.repository.audit) and uow.commits == 1
+
+
+async def test_publish_foreign_class_fails_inside_uow_before_any_mutation():
+    uow = PublicationUow(); uow.classroom_access = ClassroomAccessDouble(False)
+    actor = ActorContext(uow.repository.actor_id)
+    with pytest.raises(AssessmentError) as error:
+        await AssessmentService(uow).publish_and_assign(publication_command(uow.repository), actor)
+    assert (error.value.code, error.value.status) == ("class_group_not_found", 404)
+    assert uow.repository.row.status == "draft"
+    assert uow.repository.assignment is None and uow.repository.audit == [] and uow.commits == 0
+    assert uow.classroom_access.calls[0][3] == {
+        "require_active": True, "require_configured": True, "lock": True}
+
+
+async def test_admin_publication_bypasses_membership_through_unrestricted_scope():
+    from app.application.object_access import ObjectAccessScope
+    uow = PublicationUow(); uow.classroom_access = ClassroomAccessDouble(False)
+    actor = ActorContext(uow.repository.actor_id,
+                         access=ObjectAccessScope(uow.repository.actor_id, unrestricted=True))
+    result = await AssessmentService(uow).publish_and_assign(publication_command(uow.repository), actor)
+    assert result.assignment.class_group_id == uow.repository.group_id
+    assert uow.classroom_access.calls[0][2] is True
+
+
+async def test_assignment_list_detail_and_close_disappear_after_unassignment():
+    uow = PublicationUow(); access = ClassroomAccessDouble(True); uow.classroom_access = access
+    actor = ActorContext(uow.repository.actor_id)
+    published = await AssessmentService(uow).publish_and_assign(publication_command(uow.repository), actor)
+    access.allowed = False
+    page = await AssessmentService(uow).list_assignments(uow.repository.assessment_id, 0, 20, actor)
+    assert page["items"] == []
+    with pytest.raises(AssessmentError) as detail:
+        await AssessmentService(uow).get_assignment(published.assignment.id, actor)
+    assert detail.value.code == "assignment_not_found"
+    with pytest.raises(AssessmentError) as close:
+        await AssessmentService(uow).close_assignment(published.assignment.id, actor)
+    assert close.value.code == "assignment_not_found" and not uow.repository.closed
 
 
 @pytest.mark.parametrize("status,eligible,students,code", [

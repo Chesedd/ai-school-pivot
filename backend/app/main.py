@@ -19,11 +19,13 @@ from app.presentation.authoring_routes import router as authoring_router
 from app.application.authoring_api import AuthoringApiError
 from app.application.image_solving_api import ImageSolvingApiError
 from app.application.classroom_administration import ClassroomError
+from app.application.classroom_access import ClassroomAccessError
 from app.presentation.image_solving_routes import router as image_solving_router
 from app.presentation.image_artifact_routes import router as image_artifact_router
 from app.presentation.auth_routes import router as auth_router
 from app.presentation.admin_user_routes import router as admin_user_router
 from app.presentation.admin_classroom_routes import router as admin_classroom_router
+from app.presentation.classroom_routes import router as classroom_router
 from app.application.user_administration import AdministrationError
 from app.application.catalog_proposals import CatalogProposalError
 from app.application.catalog_resolution import CatalogResolutionError
@@ -37,6 +39,7 @@ app.add_middleware(CORSMiddleware, allow_origins=list(settings.allowed_origins),
 app.include_router(auth_router)
 app.include_router(admin_user_router)
 app.include_router(admin_classroom_router)
+app.include_router(classroom_router)
 app.include_router(router)
 app.include_router(assessment_router)
 app.include_router(student_assessment_router)
@@ -60,6 +63,10 @@ async def administration_error(_: Request, exc: AdministrationError) -> JSONResp
 
 @app.exception_handler(ClassroomError)
 async def classroom_error(_: Request, exc: ClassroomError) -> JSONResponse:
+    return error_response(exc.code, str(exc), [], exc.status)
+
+@app.exception_handler(ClassroomAccessError)
+async def classroom_access_error(_: Request, exc: ClassroomAccessError) -> JSONResponse:
     return error_response(exc.code, str(exc), [], exc.status)
 
 @app.exception_handler(ImageSolvingApiError)

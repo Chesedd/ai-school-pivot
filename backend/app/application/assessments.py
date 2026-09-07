@@ -159,6 +159,7 @@ class AssessmentRepository(Protocol):
 class AssessmentUnitOfWork(Protocol):
     repository: AssessmentRepository
     content_bank: ContentBankReadPort
+    classroom_access: object
     async def __aenter__(self): ...
     async def __aexit__(self, exc_type, exc, tb): ...
     async def commit(self): ...
@@ -206,13 +207,24 @@ class AssessmentService:
 
     async def list_class_groups(self, offset: int, limit: int, actor: ActorContext):
         async with self.uow:
-            return await self.uow.repository.list_class_groups(offset, limit)
+            access = getattr(self.uow, "classroom_access", None)
+            if access is None:
+                return await self.uow.repository.list_class_groups(offset, limit)
+            result = await access.list_assignment_eligible_classes(
+                actor.actor_id, actor.object_scope.unrestricted, offset, limit)
+            return {**result, "items": [ClassGroupSummary(*row) for row in result["items"]]}
 
     async def list_assignments(self, assessment_id: UUID, offset: int, limit: int, actor: ActorContext):
         async with self.uow:
             if await self._get(assessment_id, actor) is None:
                 raise AssessmentError("assessment_not_found", "Работа не найдена.", 404)
-            return await self.uow.repository.list_assignments(assessment_id, offset, limit)
+            access = getattr(self.uow, "classroom_access", None)
+            if access is None:
+                return await self.uow.repository.list_assignments(assessment_id, offset, limit)
+            class_ids = await access.accessible_class_ids(
+                actor.actor_id, actor.object_scope.unrestricted)
+            return await self.uow.repository.list_assignments(
+                assessment_id, offset, limit, class_ids)
 
     async def get(self, assessment_id: UUID, actor: ActorContext):
         async with self.uow:
@@ -368,6 +380,13 @@ class AssessmentService:
             version_ids = tuple(item.task_version_id for variant in composition for item in variant.items)
             if not await self.uow.content_bank.lock_publication_usage(version_ids):
                 raise AssessmentError("invalid_task_version", "Сохранённая версия задания больше недоступна для публикации.")
+            access = getattr(self.uow, "classroom_access", None)
+            if access is not None:
+                accessible = await access.can_access_class(
+                    command.class_group_id, actor.actor_id, actor.object_scope.unrestricted,
+                    require_active=True, require_configured=True, lock=True)
+                if not accessible:
+                    raise AssessmentError("class_group_not_found", "Группа не найдена.", 404)
             students = await self.uow.repository.lock_group_students(command.class_group_id)
             if students is None:
                 raise AssessmentError("publication_requirements_not_met", "Группа недоступна для публикации.", 422,
@@ -398,6 +417,10 @@ class AssessmentService:
             row = await scoped(assignment_id, actor.object_scope) if scoped else await self.uow.repository.get_assignment(assignment_id)
             if row is None:
                 raise AssessmentError("assignment_not_found", "Назначение не найдено.", 404)
+            access = getattr(self.uow, "classroom_access", None)
+            if access is not None and not await access.can_access_class(
+                    row.class_group_id, actor.actor_id, actor.object_scope.unrestricted):
+                raise AssessmentError("assignment_not_found", "Назначение не найдено.", 404)
             return row
 
     async def close_assignment(self, assignment_id: UUID, actor: ActorContext):
@@ -405,6 +428,10 @@ class AssessmentService:
             scoped = getattr(self.uow.repository, "lock_assignment_scoped", None)
             row = await scoped(assignment_id, actor.object_scope) if scoped else await self.uow.repository.lock_assignment(assignment_id)
             if row is None:
+                raise AssessmentError("assignment_not_found", "Назначение не найдено.", 404)
+            access = getattr(self.uow, "classroom_access", None)
+            if access is not None and not await access.can_access_class(
+                    row.class_group_id, actor.actor_id, actor.object_scope.unrestricted, lock=True):
                 raise AssessmentError("assignment_not_found", "Назначение не найдено.", 404)
             if row.status != "open":
                 raise AssessmentError("invalid_status_transition", "Закрытое назначение нельзя закрыть повторно.")
