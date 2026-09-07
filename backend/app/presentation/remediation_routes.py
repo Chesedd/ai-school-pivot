@@ -2,12 +2,15 @@ from typing import Annotated,Literal
 from uuid import UUID
 from fastapi import APIRouter,Depends,Query,Response
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.application.capabilities import REMEDIATION_MANAGE,STUDENT_REMEDIATIONS_READ
+from app.application.capabilities import REMEDIATION_MANAGE,STUDENT_REMEDIATIONS_READ,STUDENT_REMEDIATIONS_EXECUTE
+from app.application.remediation_execution import RemediationExecutionService
 from app.application.principal import Principal
 from app.db.session import get_session
 from app.infrastructure.remediation_repository import RemediationRepository
 from app.presentation.auth_dependencies import require_capability,require_student_identity,require_trusted_origin
 from app.presentation.remediation_schemas import *
+from app.presentation.assessment_schemas import EmptyRequest
+from app.db.session import async_session_factory
 router=APIRouter(prefix="/api",dependencies=[Depends(require_trusted_origin)],tags=["remediation"])
 def repo(s:AsyncSession=Depends(get_session)):return RemediationRepository(s)
 def admin(p):return "admin" in p.roles
@@ -30,3 +33,29 @@ async def history(class_id:UUID,student_id:UUID,status:Literal['draft','assigned
 async def student_list(student_id:UUID=Depends(require_student_identity),_:Principal=Depends(require_capability(STUDENT_REMEDIATIONS_READ)),offset:Annotated[int,Query(ge=0)]=0,limit:Annotated[int,Query(ge=1,le=100)]=20,r:RemediationRepository=Depends(repo)):return await r.student_list(student_id,offset,limit)
 @router.get("/student/remediations/{id}",response_model=StudentDetail)
 async def student_detail(id:UUID,student_id:UUID=Depends(require_student_identity),_:Principal=Depends(require_capability(STUDENT_REMEDIATIONS_READ)),r:RemediationRepository=Depends(repo)):return await r.student_detail(id,student_id)
+
+def execution_service(): return RemediationExecutionService(async_session_factory)
+
+@router.get("/student/remediations/{id}/execution",response_model=RemediationExecutionResponse)
+async def execution(id:UUID,student_id:UUID=Depends(require_student_identity),_:Principal=Depends(require_capability(STUDENT_REMEDIATIONS_EXECUTE))):
+ return await execution_service().get_execution(id,student_id)
+
+@router.post("/student/remediations/{id}/start",response_model=RemediationExecutionResponse)
+async def start_execution(id:UUID,payload:EmptyRequest,response:Response,student_id:UUID=Depends(require_student_identity),_:Principal=Depends(require_capability(STUDENT_REMEDIATIONS_EXECUTE))):
+ result,status=await execution_service().start(id,student_id);response.status_code=status
+ if status==201:response.headers["Location"]=f"/api/student/remediations/{id}/execution"
+ return result
+
+@router.put("/student/remediations/{id}/answers/{item_id}",response_model=RemediationAnswerResponse|None)
+async def save_execution_answer(id:UUID,item_id:UUID,payload:RemediationAnswerPut,response:Response,student_id:UUID=Depends(require_student_identity),_:Principal=Depends(require_capability(STUDENT_REMEDIATIONS_EXECUTE))):
+ result,status=await execution_service().save_answer(id,item_id,student_id,payload.raw_answer);response.status_code=status
+ if status==204:return Response(status_code=204)
+ return result
+
+@router.delete("/student/remediations/{id}/answers/{item_id}",status_code=204)
+async def delete_execution_answer(id:UUID,item_id:UUID,student_id:UUID=Depends(require_student_identity),_:Principal=Depends(require_capability(STUDENT_REMEDIATIONS_EXECUTE))):
+ await execution_service().delete_answer(id,item_id,student_id);return Response(status_code=204)
+
+@router.post("/student/remediations/{id}/submit",response_model=RemediationExecutionResponse)
+async def submit_execution(id:UUID,payload:EmptyRequest,student_id:UUID=Depends(require_student_identity),_:Principal=Depends(require_capability(STUDENT_REMEDIATIONS_EXECUTE))):
+ return await execution_service().submit(id,student_id)
