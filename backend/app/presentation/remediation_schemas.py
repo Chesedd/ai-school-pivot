@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal, Annotated
+from typing import Any, Literal, Annotated
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 class Strict(BaseModel): model_config=ConfigDict(extra="forbid",from_attributes=True)
@@ -24,3 +24,12 @@ class StudentDetail(StudentRemediationSummary): items:list[RemediationItemRespon
 class CandidateSearch(Strict): assignment_id:UUID; student_id:UUID; source_submission_id:UUID; source_check_run_id:UUID; finding_ids:list[UUID]=[]; mode:Literal["suggested","manual"]="suggested"; q:str|None=None; difficulty_min:int|None=Field(None,ge=1,le=100); difficulty_max:int|None=Field(None,ge=1,le=100); task_type:str|None=None; offset:int=Field(0,ge=0); limit:int=Field(20,ge=1,le=50)
 class CandidateReason(Strict): match_type:str; matched_skill_id:UUID|None=None; matched_typical_error_id:UUID|None=None; matched_title:str|None=None
 class Candidate(Strict): task_id:UUID; task_version_id:UUID; title:str|None; statement_preview:str; task_type:str; answer_format:str; difficulty:int; subject_id:UUID; grade_id:UUID; topic_id:UUID; subtopic_id:UUID|None; primary_skill_id:UUID|None; primary_skill_name:str|None; reasons:list[CandidateReason]
+
+class RemediationAnswerPut(Strict): raw_answer:Any
+class RemediationChoiceOption(Strict): option_id:str; content:str
+class RemediationExecutionItem(Strict):
+ remediation_plan_item_id:UUID; position:int; task_version_id:UUID; title:str|None; statement:str; task_type:str; answer_format:str; difficulty:int; choice_options:list[RemediationChoiceOption]; current_raw_answer:Any|None
+class RemediationExecutionResponse(Strict):
+ remediation_id:UUID; title:str; instructions:str|None; plan_status:Literal["assigned","cancelled"]; due_at:datetime|None; execution_status:Literal["not_started","in_progress","submitted","cancelled","expired"]; submission_id:UUID|None; submission_status:Literal["draft","submitted"]|None; attempt_no:int|None; items:list[RemediationExecutionItem]
+class RemediationAnswerResponse(Strict):
+ remediation_plan_item_id:UUID; raw_answer:Any; normalized_answer:Any; created_at:datetime; updated_at:datetime

@@ -23,6 +23,7 @@ STUDENT_ATTEMPTS_SUBMIT = "student.attempts.submit"
 STUDENT_RESULTS_READ = "student.results.read"
 REMEDIATION_MANAGE = "remediation.manage"
 STUDENT_REMEDIATIONS_READ = "student.remediations.read"
+STUDENT_REMEDIATIONS_EXECUTE = "student.remediations.execute"
 
 ALL_CAPABILITIES = frozenset(
     {
@@ -49,6 +50,7 @@ ALL_CAPABILITIES = frozenset(
         STUDENT_RESULTS_READ,
         REMEDIATION_MANAGE,
         STUDENT_REMEDIATIONS_READ,
+        STUDENT_REMEDIATIONS_EXECUTE,
     }
 )
 
@@ -76,6 +78,7 @@ ROLE_CAPABILITIES: dict[str, frozenset[str]] = {
             STUDENT_ATTEMPTS_SUBMIT,
             STUDENT_RESULTS_READ,
             STUDENT_REMEDIATIONS_READ,
+            STUDENT_REMEDIATIONS_EXECUTE,
         }
     ),
 }
