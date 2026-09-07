@@ -9,8 +9,10 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
+from app.application.checking_items import InvalidCheckingItemIdentity, snapshot_item_key
 
 SNAPSHOT_SCHEMA_VERSION = "checking_input_v1"
+REMEDIATION_SNAPSHOT_SCHEMA_VERSION = "checking_input_remediation_v1"
 HANDOFF_VERSION = 1
 ROUTING_CONTRACT_VERSION = "checking_routing_contract_v1"
 _EMPTY_EVIDENCE: Mapping[str, Any] = MappingProxyType({})
@@ -252,7 +254,9 @@ def _canonical_decimal(value: Any) -> Decimal | None:
 def _decision(item: Mapping[str, Any], candidate: CheckerType, disposition: RoutingDisposition,
               reason: RoutingReason) -> RoutingDecision:
     effective = candidate if disposition in {RoutingDisposition.READY, RoutingDisposition.UNANSWERED} else CheckerType.MANUAL_REQUIRED
-    return RoutingDecision(str(item.get("assessment_item_id", "")), str(item.get("task_version_id", "")),
+    try: identity=str(snapshot_item_key(item).item_id)
+    except InvalidCheckingItemIdentity: identity=""
+    return RoutingDecision(identity, str(item.get("task_version_id", "")),
         ROUTING_CONTRACT_VERSION, effective, candidate, disposition, reason,
         disposition is RoutingDisposition.UNANSWERED, disposition is RoutingDisposition.READY)
 
@@ -420,7 +424,9 @@ def _route_answered(item: Mapping[str, Any], method: Mapping[str, Any], fmt: str
 def route_item(item: Mapping[str, Any]) -> RoutingDecision:
     if not isinstance(item, Mapping): raise RoutingInputError(RoutingReason.MALFORMED_ITEM)
     fmt=item.get("answer_format"); candidate=_NATURAL.get(fmt,CheckerType.MANUAL_REQUIRED)
-    if _uuid(item.get("assessment_item_id")) is None or _uuid(item.get("task_version_id")) is None or _decimal(item.get("points"),positive=True) is None:
+    try: identity=snapshot_item_key(item)
+    except InvalidCheckingItemIdentity: identity=None
+    if identity is None or _uuid(str(identity.item_id)) is None or _uuid(item.get("task_version_id")) is None or _decimal(item.get("points"),positive=True) is None:
         return _insufficient(item,candidate,RoutingReason.MALFORMED_ITEM)
     method=item.get("methodology")
     if not isinstance(method,Mapping): return _insufficient(item,candidate,RoutingReason.MALFORMED_ITEM)
@@ -442,11 +448,13 @@ def route_snapshot(snapshot: Mapping[str, Any]) -> tuple[RoutingDecision, ...]:
     versions=(snapshot.get("snapshot_schema_version"),snapshot.get("handoff_version"),snapshot.get("routing_contract_version"))
     malformed = not isinstance(versions[0],str) or not isinstance(versions[1],int) or not isinstance(versions[2],str)
     if malformed: raise RoutingInputError()
-    future=versions != (SNAPSHOT_SCHEMA_VERSION,HANDOFF_VERSION,ROUTING_CONTRACT_VERSION)
+    future=versions not in ((SNAPSHOT_SCHEMA_VERSION,HANDOFF_VERSION,ROUTING_CONTRACT_VERSION),
+        (REMEDIATION_SNAPSHOT_SCHEMA_VERSION,HANDOFF_VERSION,ROUTING_CONTRACT_VERSION))
     result=[]; identities=set()
     for item in items:
         if not isinstance(item,Mapping): raise RoutingInputError(RoutingReason.MALFORMED_ITEM)
-        identity=(item.get("assessment_item_id"),item.get("task_version_id"))
+        try: identity=(snapshot_item_key(item),item.get("task_version_id"))
+        except InvalidCheckingItemIdentity: raise RoutingInputError(RoutingReason.MALFORMED_ITEM) from None
         if identity in identities: raise RoutingInputError(RoutingReason.MALFORMED_ITEM)
         identities.add(identity)
         candidate=_NATURAL.get(item.get("answer_format"),CheckerType.MANUAL_REQUIRED)

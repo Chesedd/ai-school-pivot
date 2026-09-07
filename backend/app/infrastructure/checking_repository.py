@@ -16,6 +16,8 @@ from app.application.checking_provider import (MAX_ATTEMPTS, AttemptDisposition,
     RequestConflict, retry_allowed, thaw_json)
 from app.application.checking_results import (ConfidenceGatePolicy, PreparedCheckingResult,
     ResultReplayConflict, RunObservability, prepare_result, OBSERVABILITY_SCHEMA_VERSION)
+from app.application.checking_items import (CheckingItemKey, CheckingItemKind,
+    InvalidCheckingItemIdentity, find_snapshot_item, snapshot_item_key)
 
 
 def _prompt_lock_key(spec: PromptSpec) -> str:
@@ -69,16 +71,18 @@ class CheckingRepository:
         """Validate and append one complete result aggregate in the caller transaction."""
         run = await self.session.get(CheckRun, result.check_run_id)
         if run is None: raise InvalidPersistenceCommand("run not found")
-        validate_result(run.input_snapshot, result.assessment_item_id, result.task_version_id,
+        key=CheckingItemKey(CheckingItemKind.ASSESSMENT,result.assessment_item_id) if result.assessment_item_id else CheckingItemKey(CheckingItemKind.REMEDIATION,result.remediation_plan_item_id)
+        validate_result(run.input_snapshot, key, result.task_version_id,
                         result.max_score, result.result_status, result.score_suggested)
         self.session.add(result); await self.session.flush()
         for finding in findings:
-            validate_finding(run.input_snapshot, result.assessment_item_id, finding.rubric_item_id,
+            validate_finding(run.input_snapshot, key, finding.rubric_item_id,
                              finding.typical_error_id, finding.skill_id, finding.evidence)
             finding.check_result_id = result.id
         self.session.add_all(findings)
         self.session.add(CheckerEvent(check_run_id=run.id, check_result_id=result.id,
-            assessment_item_id=result.assessment_item_id, event_type="result_recorded",
+            assessment_item_id=result.assessment_item_id, remediation_plan_item_id=result.remediation_plan_item_id,
+            event_type="result_recorded",
             details={"checker_type": result.checker_type, "result_status": result.result_status}))
         await self.session.flush()
 
@@ -116,36 +120,38 @@ class CheckingRepository:
             return existing
         return row
 
-    async def model_attempts(self, run_id: UUID, item_id: UUID) -> tuple[ModelRun, ...]:
+    async def model_attempts(self, run_id: UUID, key: CheckingItemKey | UUID) -> tuple[ModelRun, ...]:
+        if isinstance(key,UUID): key=CheckingItemKey(CheckingItemKind.ASSESSMENT,key)
+        column=ModelRun.assessment_item_id if key.kind is CheckingItemKind.ASSESSMENT else ModelRun.remediation_plan_item_id
         return tuple((await self.session.scalars(select(ModelRun).where(
-            ModelRun.check_run_id == run_id, ModelRun.assessment_item_id == item_id)
+            ModelRun.check_run_id == run_id, column == key.item_id)
             .order_by(ModelRun.attempt_no))).all())
 
-    async def claim_model_attempt(self, run_id: UUID, item_id: UUID, prompt: PromptVersion,
+    async def claim_model_attempt(self, run_id: UUID, key: CheckingItemKey | UUID, prompt: PromptVersion,
                                   request: ProviderRequest, max_attempts: int = 3) -> ModelRun:
         """Claim one append-only attempt. Caller commits before making the provider call."""
         run = await self.session.scalar(select(CheckRun).where(CheckRun.id == run_id).with_for_update())
         if run is None: raise InvalidPersistenceCommand("run not found")
-        matches = [item for item in run.input_snapshot.get("items", ())
-                   if item.get("assessment_item_id") == str(item_id)]
-        if len(matches) != 1: raise InvalidPersistenceCommand("assessment item is absent or duplicated in snapshot")
+        if isinstance(key,UUID): key=CheckingItemKey(CheckingItemKind.ASSESSMENT,key)
+        try: find_snapshot_item(run.input_snapshot,key)
+        except InvalidCheckingItemIdentity as exc: raise InvalidPersistenceCommand(str(exc)) from exc
         prompt = await self.session.get(PromptVersion, prompt.id)
         if prompt is None: raise InvalidPersistenceCommand("prompt not found")
-        attempts = await self.model_attempts(run_id, item_id)
+        attempts = await self.model_attempts(run_id, key)
         if any(row.request_fingerprint != request.request_fingerprint for row in attempts):
             raise IdempotencyConflict("request fingerprint conflict")
         if attempts and attempts[-1].status == "running": return attempts[-1]
         if prompt.retired_at is not None: raise InvalidPersistenceCommand("prompt is retired")
         if [row.attempt_no for row in attempts] != list(range(1, len(attempts) + 1)) or len(attempts) >= max_attempts:
             raise InvalidPersistenceCommand("attempt budget exhausted or history is noncontiguous")
-        row = ModelRun(check_run_id=run_id, assessment_item_id=item_id, prompt_version_id=prompt.id,
+        row = ModelRun(check_run_id=run_id, **key.columns, prompt_version_id=prompt.id,
             check_result_id=None, provider_id=request.provider_id, model_id=request.model_id,
             settings_snapshot=dict(request.settings), request_fingerprint=request.request_fingerprint,
             attempt_no=len(attempts) + 1, timeout_ms=request.timeout_ms, status="running")
         try:
             async with self.session.begin_nested(): self.session.add(row); await self.session.flush()
         except IntegrityError as exc: raise ConcurrentConflict("model attempt claim race") from exc
-        self.session.add(CheckerEvent(check_run_id=run_id, assessment_item_id=item_id,
+        self.session.add(CheckerEvent(check_run_id=run_id, **key.columns,
             event_type="model_attempt", details={"model_run_id": str(row.id), "attempt_no": row.attempt_no}))
         await self.session.flush(); return row
 
@@ -213,10 +219,10 @@ class SQLAlchemyProviderAttemptStore:
                 run = await session.scalar(select(CheckRun).where(
                     CheckRun.id == key.check_run_id).with_for_update())
                 if run is None: raise InvalidPersistenceCommand("run not found")
-                matches = [item for item in run.input_snapshot.get("items", ())
-                           if item.get("assessment_item_id") == str(key.assessment_item_id)]
-                if len(matches) != 1: raise InvalidPersistenceCommand("assessment item is absent or duplicated in snapshot")
-                attempts = await repository.model_attempts(key.check_run_id, key.assessment_item_id)
+                item_key=CheckingItemKey(key.item_kind,key.item_id)
+                try: find_snapshot_item(run.input_snapshot,item_key)
+                except InvalidCheckingItemIdentity as exc: raise InvalidPersistenceCommand(str(exc)) from exc
+                attempts = await repository.model_attempts(key.check_run_id, item_key)
                 if any(row.request_fingerprint != request.request_fingerprint for row in attempts):
                     raise RequestConflict("request fingerprint conflict")
                 if [row.attempt_no for row in attempts] != list(range(1, len(attempts) + 1)):
@@ -230,7 +236,7 @@ class SQLAlchemyProviderAttemptStore:
                 if len(attempts) >= maximum_attempts:
                     return _attempt_state(attempts[-1], AttemptDisposition.TERMINAL_EXISTING)
                 row = await repository.claim_model_attempt(key.check_run_id,
-                    key.assessment_item_id, prompt_row, request, maximum_attempts)
+                    item_key, prompt_row, request, maximum_attempts)
                 return _attempt_state(row, AttemptDisposition.CLAIMED)
 
     async def finalize(self, key: ProviderExecutionKey, attempt: AttemptState, *, status: str,
@@ -244,7 +250,8 @@ class SQLAlchemyProviderAttemptStore:
         async with self.session_factory() as session:
             async with session.begin():
                 row = await session.get(ModelRun, attempt.attempt_id)
-                if row is None or row.check_run_id != key.check_run_id or row.assessment_item_id != key.assessment_item_id:
+                columns=CheckingItemKey(key.item_kind,key.item_id).columns
+                if row is None or row.check_run_id != key.check_run_id or any(getattr(row,k)!=v for k,v in columns.items()):
                     raise InvalidPersistenceCommand("attempt execution mismatch")
                 validation = ({"code": error_code} if status == "invalid" and error_code else None)
                 row = await CheckingRepository(session).finalize_provider_attempt(
@@ -274,18 +281,22 @@ class SQLAlchemyCheckingResultPersistence:
             if run is None: raise InvalidPersistenceCommand("run not found")
             if run.threshold_policy_version!=policy.semantic_version: raise IdempotencyConflict("confidence policy conflict")
             items=tuple(run.input_snapshot.get("items",()))
-            expected=[x.get("assessment_item_id") for x in items]; supplied=[x.assessment_item_id for x in drafts]
+            try: keys=[snapshot_item_key(x) for x in items]
+            except InvalidCheckingItemIdentity as exc: raise InvalidPersistenceCommand(str(exc)) from exc
+            expected=[str(x.item_id) for x in keys]; supplied=[x.assessment_item_id for x in drafts]
             if len(supplied)!=len(set(supplied)) or set(supplied)!=set(expected): raise InvalidPersistenceCommand("result batch identity mismatch")
-            by_id={x.assessment_item_id:x for x in drafts}; prepared=tuple(prepare_result(x,by_id[x["assessment_item_id"]],policy) for x in items)
-            existing=tuple((await session.scalars(select(CheckResult).where(CheckResult.check_run_id==run_id).order_by(CheckResult.assessment_item_id))).all())
+            by_id={x.assessment_item_id:x for x in drafts}
+            prepared=tuple(prepare_result(item,by_id[str(key.item_id)],policy) for item,key in zip(items,keys))
+            existing=tuple((await session.scalars(select(CheckResult).where(CheckResult.check_run_id==run_id))).all())
             if run.status in {"completed","completed_with_review_required"}:
                 if len(existing)!=len(prepared): raise ResultReplayConflict("completed result set differs")
-                for row,value in zip(sorted(existing,key=lambda x:str(x.assessment_item_id)),sorted(prepared,key=lambda x:str(x.assessment_item_id))):
+                for row,value in zip(sorted(existing,key=lambda x:str(x.assessment_item_id or x.remediation_plan_item_id)),sorted(prepared,key=lambda x:str(x.assessment_item_id))):
                     if row.validated_result!=dict(value.validated_result): raise ResultReplayConflict("prepared result differs")
                 return await self._observability(session,run)
             if run.status!="running" or run.row_version!=expected_row_version or existing: raise ConcurrentConflict("run cannot be finalized")
             for value in prepared:
-                row=CheckResult(check_run_id=run.id,assessment_item_id=value.assessment_item_id,task_version_id=value.task_version_id,
+                key=next(x for x in keys if x.item_id==value.assessment_item_id)
+                row=CheckResult(check_run_id=run.id,**key.columns,task_version_id=value.task_version_id,
                     checker_type=value.checker_type,checker_version=value.checker_version,schema_version=value.schema_version,
                     result_status=value.outcome,reason_code=value.reason_code,score_suggested=value.score_suggested,max_score=value.max_score,
                     confidence=value.confidence.effective,confidence_policy_version=policy.semantic_version,
@@ -297,14 +308,15 @@ class SQLAlchemyCheckingResultPersistence:
                 for f in value.findings: session.add(CheckFinding(check_result_id=row.id,finding_type=f.finding_type,
                     rubric_item_id=f.rubric_item_id,typical_error_id=f.typical_error_id,skill_id=f.skill_id,snapshot_code=f.snapshot_code,
                     snapshot_title=f.snapshot_title,snapshot_criterion=f.snapshot_criterion,severity=f.severity,confidence=f.confidence,evidence=dict(f.evidence)))
-                attempts=tuple((await session.scalars(select(ModelRun).where(ModelRun.check_run_id==run.id,ModelRun.assessment_item_id==value.assessment_item_id).with_for_update())).all())
+                attempt_column=ModelRun.assessment_item_id if key.kind is CheckingItemKind.ASSESSMENT else ModelRun.remediation_plan_item_id
+                attempts=tuple((await session.scalars(select(ModelRun).where(ModelRun.check_run_id==run.id,attempt_column==key.item_id).with_for_update())).all())
                 if any(x.status=="running" for x in attempts): raise InvalidPersistenceCommand("model attempt still running")
                 if value.checker_type=="llm_rubric":
                     for attempt in attempts:
                         if attempt.check_result_id not in (None,row.id): raise IdempotencyConflict("model result association conflict")
                         attempt.check_result_id=row.id
                 elif attempts: raise InvalidPersistenceCommand("deterministic result has model attempts")
-                session.add(CheckerEvent(check_run_id=run.id,check_result_id=row.id,assessment_item_id=row.assessment_item_id,
+                session.add(CheckerEvent(check_run_id=run.id,check_result_id=row.id,**key.columns,
                     event_type="result_recorded",reason_code=value.reason_code,details={"checker_type":value.checker_type,
                     "result_status":value.outcome,"reason_code":value.reason_code,"confidence":format(value.confidence.effective,".4f"),
                     "needs_human_review":value.confidence.needs_human_review,"finding_count":len(value.findings)}))

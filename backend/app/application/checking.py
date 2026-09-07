@@ -7,6 +7,9 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
+from app.application.checking_items import (CheckingItemKey, InvalidCheckingItemIdentity,
+    find_snapshot_item)
+
 
 class CheckingPersistenceError(Exception): pass
 class InvalidPersistenceCommand(CheckingPersistenceError): pass
@@ -65,16 +68,17 @@ def safe_event_details(details: dict[str, Any]) -> dict[str, Any]:
     return dict(details)
 
 
-def _snapshot_item(snapshot: dict[str, Any], item_id: UUID) -> dict[str, Any]:
-    matches = [item for item in snapshot.get("items", ()) if item.get("assessment_item_id") == str(item_id)]
-    if len(matches) != 1:
-        raise InvalidPersistenceCommand("assessment item is absent or duplicated in snapshot")
-    return matches[0]
+def _snapshot_item(snapshot: dict[str, Any], key: CheckingItemKey | UUID) -> dict[str, Any]:
+    if isinstance(key,UUID):
+        from app.application.checking_items import CheckingItemKind
+        key=CheckingItemKey(CheckingItemKind.ASSESSMENT,key)
+    try: return dict(find_snapshot_item(snapshot,key))
+    except InvalidCheckingItemIdentity as exc: raise InvalidPersistenceCommand(str(exc)) from exc
 
 
-def validate_result(snapshot: dict[str, Any], item_id: UUID, task_version_id: UUID,
+def validate_result(snapshot: dict[str, Any], key: CheckingItemKey | UUID, task_version_id: UUID,
                     max_score: Decimal, status: str, score: Decimal | None) -> None:
-    item = _snapshot_item(snapshot, item_id)
+    item = _snapshot_item(snapshot, key)
     if item.get("task_version_id") != str(task_version_id): raise InvalidPersistenceCommand("task version mismatch")
     try: frozen = Decimal(str(item["points"]))
     except (KeyError, ValueError): raise InvalidPersistenceCommand("invalid frozen points") from None
@@ -85,9 +89,9 @@ def validate_result(snapshot: dict[str, Any], item_id: UUID, task_version_id: UU
     if not valid: raise InvalidPersistenceCommand("score/status mismatch")
 
 
-def validate_finding(snapshot: dict[str, Any], item_id: UUID, rubric_item_id: UUID | None,
+def validate_finding(snapshot: dict[str, Any], key: CheckingItemKey | UUID, rubric_item_id: UUID | None,
                      typical_error_id: UUID | None, skill_id: UUID | None, evidence: dict[str, Any]) -> None:
-    item = _snapshot_item(snapshot, item_id)
+    item = _snapshot_item(snapshot, key)
     allowlists = {"rubric_item_ids": rubric_item_id, "typical_error_ids": typical_error_id, "skill_ids": skill_id}
     for key, value in allowlists.items():
         if value is not None and str(value) not in item.get(key, ()): raise InvalidPersistenceCommand(f"{key} provenance is outside snapshot")

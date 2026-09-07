@@ -18,6 +18,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, Awaitable, Callable, Mapping, Protocol, runtime_checkable
 from uuid import UUID
+from app.application.checking_items import CheckingItemKind
 
 from pydantic import BaseModel, ConfigDict, StrictBool, ValidationError
 
@@ -95,10 +96,19 @@ def _canonical_uuid(value: object) -> UUID:
 class ProviderExecutionKey:
     """Application persistence identity; never crosses the provider port."""
     check_run_id: UUID
-    assessment_item_id: UUID
+    item_id: UUID
+    item_kind: CheckingItemKind = CheckingItemKind.ASSESSMENT
     def __post_init__(self):
         object.__setattr__(self, "check_run_id", _canonical_uuid(self.check_run_id))
-        object.__setattr__(self, "assessment_item_id", _canonical_uuid(self.assessment_item_id))
+        object.__setattr__(self, "item_id", _canonical_uuid(self.item_id))
+        if not isinstance(self.item_kind, CheckingItemKind):
+            try: object.__setattr__(self,"item_kind",CheckingItemKind(self.item_kind))
+            except ValueError as exc: raise ProviderBoundaryError("invalid execution key") from exc
+
+    @property
+    def assessment_item_id(self) -> UUID:
+        """Compatibility alias for checker contracts; not a persistence column choice."""
+        return self.item_id
 
 
 @dataclass(frozen=True)

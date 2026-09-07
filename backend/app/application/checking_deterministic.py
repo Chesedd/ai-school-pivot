@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP, localcontext
 from enum import Enum
 from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
+from app.application.checking_items import InvalidCheckingItemIdentity, snapshot_item_key
 
 from app.application.checking_routing import (
     ROUTING_CONTRACT_VERSION, Checker, CheckerOutcome, CheckerRequest,
@@ -535,7 +536,9 @@ def _validate_request(request: CheckerRequest) -> None:
     if not isinstance(request.item, Mapping) or not isinstance(request.decision, RoutingDecision):
         raise DeterministicExecutionError("invalid_execution_request")
     decision=request.decision
-    if decision.routing_contract_version != ROUTING_CONTRACT_VERSION or _uuid(request.item.get("assessment_item_id")) != decision.assessment_item_id or _uuid(request.item.get("task_version_id")) != decision.task_version_id:
+    try: item_id=str(snapshot_item_key(request.item).item_id)
+    except InvalidCheckingItemIdentity: item_id=""
+    if decision.routing_contract_version != ROUTING_CONTRACT_VERSION or item_id != decision.assessment_item_id or _uuid(request.item.get("task_version_id")) != decision.task_version_id:
         raise DeterministicExecutionError("execution_identity_mismatch")
     expected={RoutingDisposition.READY:(False,True),RoutingDisposition.UNANSWERED:(True,False),RoutingDisposition.INSUFFICIENT_RUBRIC:(False,False),RoutingDisposition.MANUAL_REQUIRED:(False,False)}[decision.disposition]
     if (decision.unanswered,decision.execution_required)!=expected:
