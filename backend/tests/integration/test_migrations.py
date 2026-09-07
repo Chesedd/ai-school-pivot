@@ -124,6 +124,33 @@ async def test_clean_database_upgrades_to_head_with_observability_columns():
         await engine.dispose()
 
 
+async def test_clean_online_upgrade_installs_c10a_vertical_schema():
+    """A fresh online upgrade produces the sole expected head and vertical tables."""
+    engine = create_async_engine(URL)
+    expected = {
+        "class_groups", "class_group_teachers", "classroom_audit_log",
+        "class_notes", "student_notes", "remediation_plans",
+        "remediation_plan_signals", "remediation_plan_items", "remediation_events",
+        "student_submissions", "student_answers", "check_runs", "check_results",
+        "check_findings", "model_runs", "checker_events",
+    }
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(sa.text("DROP SCHEMA public CASCADE"))
+            await connection.execute(sa.text("CREATE SCHEMA public"))
+        alembic("upgrade", "head")
+        await assert_database_at_repository_head(engine)
+        assert repository_head() == "20260907_04"
+        async with engine.connect() as connection:
+            tables = set((await connection.execute(sa.text(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema='public' AND table_name = ANY(:names)"
+            ), {"names": list(expected)})).scalars())
+        assert tables == expected
+    finally:
+        await engine.dispose()
+
+
 def supported_baseline_metadata() -> sa.MetaData:
     """Return the affected portion of the schema as it was at 20260823_02."""
     metadata = sa.MetaData()
