@@ -8,11 +8,13 @@ from app.application.assessments import (AddAssessmentItemCommand, AssessmentSer
     ChangeAssessmentItemPointsCommand, CreateAssessmentCommand,
     CreateAssignmentCommand, PublishAssessmentCommand, ReorderAssessmentItemsCommand, UpdateAssessmentCommand)
 from app.application.content_bank import ActorContext
-from app.application.capabilities import ASSESSMENT_CREATE, ASSESSMENT_MANAGE
+from app.application.capabilities import ASSESSMENT_CREATE, ASSESSMENT_MANAGE, ASSESSMENT_RESULTS_READ
+from app.application.classroom_results import ClassroomAssessmentResultsService, ResultActor
 from app.application.principal import Principal
 from app.application.object_access import object_access_scope
 from app.db.session import async_session_factory
 from app.infrastructure.assessment_repository import SQLAlchemyAssessmentUnitOfWork
+from app.infrastructure.classroom_results_repository import SQLAlchemyClassroomResultsReadRepository
 from app.presentation.assessment_schemas import (AssessmentCreateRequest, AssessmentItemCreateRequest,
     AssessmentItemOrderRequest, AssessmentItemPatchRequest, AssessmentItemResponse,
     AssessmentClassGroupPage, AssessmentListPage, AssessmentPatchRequest, AssessmentResponse,
@@ -35,6 +37,31 @@ def actor_for(capability: str):
 
 manage_actor = actor_for(ASSESSMENT_MANAGE)
 create_actor = actor_for(ASSESSMENT_CREATE)
+
+def results_principal(principal: Principal = Depends(require_capability(ASSESSMENT_RESULTS_READ))):
+    return principal
+
+@router.get("/assignments/{assignment_id}/results")
+async def assignment_results(assignment_id: UUID, principal: Annotated[Principal, Depends(results_principal)],
+        offset: Annotated[int, Query(ge=0)] = 0, limit: Annotated[int, Query(ge=1, le=100)] = 50):
+    async with async_session_factory() as session:
+        scope=object_access_scope(principal)
+        return await ClassroomAssessmentResultsService(SQLAlchemyClassroomResultsReadRepository(session)).assignment_results(assignment_id,ResultActor(principal.user_id,scope.unrestricted),offset,limit)
+
+@router.get("/assignments/{assignment_id}/students/{student_id}/results")
+async def student_assignment_result(assignment_id: UUID, student_id: UUID,
+        principal: Annotated[Principal, Depends(results_principal)], attempt_no: Annotated[int | None, Query(ge=1)] = None):
+    async with async_session_factory() as session:
+        scope=object_access_scope(principal)
+        return await ClassroomAssessmentResultsService(SQLAlchemyClassroomResultsReadRepository(session)).student_result(assignment_id,student_id,ResultActor(principal.user_id,scope.unrestricted),attempt_no)
+
+@router.get("/class-groups/{class_group_id}/students/{student_id}/assignment-results")
+async def student_assignment_history(class_group_id: UUID, student_id: UUID,
+        principal: Annotated[Principal, Depends(results_principal)], offset: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int, Query(ge=1, le=100)] = 50):
+    async with async_session_factory() as session:
+        scope=object_access_scope(principal)
+        return await ClassroomAssessmentResultsService(SQLAlchemyClassroomResultsReadRepository(session)).student_history(class_group_id,student_id,ResultActor(principal.user_id,scope.unrestricted),offset,limit)
 
 @router.get("/class-groups", response_model=AssessmentClassGroupPage)
 async def list_class_groups(context: Annotated[ActorContext, Depends(manage_actor)],

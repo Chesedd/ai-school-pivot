@@ -21,6 +21,7 @@ from app.application.image_solving_api import ImageSolvingApiError
 from app.application.classroom_administration import ClassroomError
 from app.application.classroom_access import ClassroomAccessError
 from app.application.classroom_notes import ClassroomNotesError
+from app.application.classroom_results import ClassroomResultsError
 from app.presentation.image_solving_routes import router as image_solving_router
 from app.presentation.image_artifact_routes import router as image_artifact_router
 from app.presentation.auth_routes import router as auth_router
@@ -49,6 +50,10 @@ app.include_router(authoring_router)
 app.include_router(image_solving_router)
 app.include_router(image_artifact_router)
 app.include_router(catalog_proposal_router)
+
+@app.exception_handler(ClassroomResultsError)
+async def classroom_results_error(_: Request, exc: ClassroomResultsError) -> JSONResponse:
+    return error_response(exc.code, str(exc), [], exc.status)
 
 @app.exception_handler(CatalogResolutionError)
 async def catalog_resolution_error(_: Request, exc: CatalogResolutionError) -> JSONResponse:
