@@ -7,13 +7,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from app.application.checking import InvalidPersistenceCommand
-from app.application.checking_handoff import CheckingHandoff, CheckingHandoffItem
+from app.application.checking_handoff import (CheckingHandoff, CheckingHandoffItem,
+    RemediationCheckingHandoff, RemediationCheckingHandoffItem)
 from app.application.checking_intake import SubmissionNotFound, SubmissionNotSubmitted, InvalidCheckingInput
 from app.infrastructure.assessment_models import AssessmentItem, AssignmentParticipant, StudentAnswer, StudentSubmission
 from app.infrastructure.checking_models import CheckRun
 from app.infrastructure.checking_repository import CheckingRepository
 from app.infrastructure.models import (AcceptedAnswer, ChoiceScoringPolicy, ExpectedSolution, Rubric,
     TaskErrorLink, TaskSkillLink, TaskVersion)
+from app.infrastructure.remediation_models import RemediationPlanItem
 
 
 class SQLAlchemyCheckingIntakeUnitOfWork:
@@ -28,6 +30,24 @@ class SQLAlchemyCheckingIntakeUnitOfWork:
         sub=await self.session.scalar(select(StudentSubmission).where(StudentSubmission.id==submission_id).with_for_update())
         if sub is None: raise SubmissionNotFound("submission not found")
         if sub.status!="submitted" or sub.submitted_at is None: raise SubmissionNotSubmitted("submission is not submitted")
+        if sub.remediation_plan_id is not None:
+            rows=(await self.session.execute(select(RemediationPlanItem,TaskVersion,StudentAnswer)
+                .join(TaskVersion,TaskVersion.id==RemediationPlanItem.task_version_id)
+                .outerjoin(StudentAnswer,(StudentAnswer.submission_id==sub.id)&
+                    (StudentAnswer.remediation_plan_item_id==RemediationPlanItem.id))
+                .where(RemediationPlanItem.remediation_plan_id==sub.remediation_plan_id)
+                .order_by(RemediationPlanItem.position,RemediationPlanItem.id))).all()
+            items=[]
+            for item,version,answer in rows:
+                rubric=await self.session.scalar(select(Rubric).where(Rubric.task_version_id==version.id))
+                if rubric is None or not rubric.max_score.is_finite() or rubric.max_score <= 0:
+                    from app.application.checking_intake import HistoricalMethodologyNotFound
+                    raise HistoricalMethodologyNotFound("positive historical rubric is missing")
+                items.append(RemediationCheckingHandoffItem(item.id,item.task_version_id,item.position,
+                    rubric.max_score,version.answer_format,answer.raw_answer if answer else None,
+                    answer.normalized_answer if answer else None))
+            return RemediationCheckingHandoff(sub.id,sub.submitted_at,tuple(items))
+        if sub.assignment_participant_id is None: raise InvalidCheckingInput("submission has no execution source")
         participant=await self.session.get(AssignmentParticipant,sub.assignment_participant_id)
         rows=(await self.session.execute(select(AssessmentItem,StudentAnswer).outerjoin(StudentAnswer,
             (StudentAnswer.submission_id==sub.id)&(StudentAnswer.assessment_item_id==AssessmentItem.id))

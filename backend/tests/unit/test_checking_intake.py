@@ -6,9 +6,11 @@ from uuid import UUID
 
 import pytest
 
-from app.application.checking_handoff import CheckingHandoff, CheckingHandoffItem
+from app.application.checking_handoff import (CheckingHandoff, CheckingHandoffItem,
+    RemediationCheckingHandoff, RemediationCheckingHandoffItem)
 from app.application.checking_intake import (CheckingIntakeRequest, CheckingIntakeService,
-    InvalidCheckingInput, build_snapshot, canonical_json_bytes, canonical_run_request, sha256_hex)
+    HistoricalMethodologyNotFound, InvalidCheckingInput, build_remediation_snapshot,
+    build_snapshot, canonical_json_bytes, canonical_run_request, sha256_hex)
 
 SID=UUID("00000000-0000-0000-0000-000000000001")
 IID=UUID("00000000-0000-0000-0000-000000000002")
@@ -85,6 +87,30 @@ def test_answers_are_forwarded_and_unanswered_retained():
     raw={"values":[2,1],"text":" A "}; normalized={"stored":True}
     item=build_snapshot(*data(raw,normalized))["items"][0]
     assert item["raw_answer"] is raw and item["normalized_answer"] is normalized
+
+
+def test_remediation_snapshot_has_distinct_contract_identity_and_rubric_points():
+    second=UUID(int=9)
+    handoff=RemediationCheckingHandoff(SID,datetime(2026,8,10,12,tzinfo=timezone.utc),(
+        RemediationCheckingHandoffItem(second,VID,2,Decimal("2.50"),"short_text",None,None),
+        RemediationCheckingHandoffItem(IID,VID,1,Decimal("2.50"),"short_text","x",{"text":"x"}),))
+    _,methods=data(); methods[VID]["rubric"]={"id":UUID(int=8),"grading_mode":"points",
+        "max_score":Decimal("2.50"),"notes":None,"items":[]}
+    snapshot=build_remediation_snapshot(handoff,methods)
+    assert snapshot["snapshot_schema_version"]=="checking_input_remediation_v1"
+    assert snapshot["source_contract_versions"]["remediation_checking_handoff"]=="v1"
+    assert [x["remediation_plan_item_id"] for x in snapshot["items"]]==[str(IID),str(second)]
+    assert all("assessment_item_id" not in x and x["task_version_id"]==str(VID) for x in snapshot["items"])
+    assert snapshot["items"][0]["points"]=="2.50"
+    assert snapshot["items"][1]["raw_answer"] is None and snapshot["items"][1]["normalized_answer"] is None
+
+
+def test_remediation_snapshot_rejects_missing_or_nonpositive_historical_rubric():
+    handoff=RemediationCheckingHandoff(SID,datetime(2026,8,10,12,tzinfo=timezone.utc),(
+        RemediationCheckingHandoffItem(IID,VID,0,Decimal("2.50"),"short_text",None,None),))
+    _,methods=data()
+    with pytest.raises(HistoricalMethodologyNotFound,match="rubric"):
+        build_remediation_snapshot(handoff,methods)
 
 
 def test_half_present_answer_rejected():

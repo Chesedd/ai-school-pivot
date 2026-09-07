@@ -37,3 +37,21 @@ class CheckingHandoff:
         return {"submission_id": str(self.submission_id),
                 "submitted_at": self.submitted_at.isoformat().replace("+00:00", "Z"),
                 "items": [item.as_dict() for item in self.items]}
+
+
+@dataclass(frozen=True)
+class RemediationCheckingHandoffItem:
+    remediation_plan_item_id: UUID
+    task_version_id: UUID
+    position: int
+    points: Decimal
+    answer_format: str
+    raw_answer: Any | None
+    normalized_answer: Any | None
+
+
+@dataclass(frozen=True)
+class RemediationCheckingHandoff:
+    submission_id: UUID
+    submitted_at: datetime
+    items: tuple[RemediationCheckingHandoffItem, ...]

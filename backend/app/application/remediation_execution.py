@@ -11,6 +11,9 @@ from app.application.answer_validation import normalize_answer
 from app.infrastructure.assessment_models import StudentAnswer, StudentSubmission
 from app.infrastructure.models import ChoiceOption, TaskVersion
 from app.infrastructure.remediation_models import RemediationPlan, RemediationPlanItem
+from app.application.checking_intake import CheckingIntakeRequest, CheckingIntakeService
+from app.application.checking_routing import ROUTING_CONTRACT_VERSION
+from app.infrastructure.checking_intake_repository import SQLAlchemyCheckingIntakeUnitOfWorkFactory
 
 
 class RemediationExecutionService:
@@ -194,16 +197,27 @@ class RemediationExecutionService:
             if submission is None:
                 raise RemediationError("remediation_submission_not_found", 404)
             if submission.status == "submitted":
-                return await self._materialize(session, plan, submission)
-            # Assessment permits partial submissions; only persisted item ownership is checked.
-            answer_targets = list(await session.scalars(select(
-                StudentAnswer.remediation_plan_item_id).where(
-                    StudentAnswer.submission_id == submission.id).with_for_update()))
-            valid_targets = set(await session.scalars(select(RemediationPlanItem.id).where(
-                RemediationPlanItem.remediation_plan_id == plan.id)))
-            if any(target not in valid_targets for target in answer_targets):
-                raise RemediationError("remediation_item_not_found", 404)
-            submission.status = "submitted"
-            submission.submitted_at = now
-            await session.flush()
-            return await self._materialize(session, plan, submission)
+                result=await self._materialize(session, plan, submission)
+                submission_id=submission.id
+            else:
+                # Assessment permits partial submissions; only persisted item ownership is checked.
+                answer_targets = list(await session.scalars(select(
+                    StudentAnswer.remediation_plan_item_id).where(
+                        StudentAnswer.submission_id == submission.id).with_for_update()))
+                valid_targets = set(await session.scalars(select(RemediationPlanItem.id).where(
+                    RemediationPlanItem.remediation_plan_id == plan.id)))
+                if any(target not in valid_targets for target in answer_targets):
+                    raise RemediationError("remediation_item_not_found", 404)
+                submission.status = "submitted"
+                submission.submitted_at = now
+                await session.flush()
+                result=await self._materialize(session, plan, submission)
+                submission_id=submission.id
+        # Match the existing post-submit boundary: submission is durable before
+        # Checking intake. A bounded intake failure is surfaced without rolling it back.
+        intake=CheckingIntakeService(SQLAlchemyCheckingIntakeUnitOfWorkFactory(self.factory))
+        await intake.create(CheckingIntakeRequest(submission_id,
+            f"remediation:{plan_id}:submission:{submission_id}:initial",
+            ROUTING_CONTRACT_VERSION,"checking_checker_set_v1","checking_confidence_v1",
+            "checking_prompt_model_policy_v1"))
+        return result

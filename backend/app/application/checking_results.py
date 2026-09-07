@@ -12,6 +12,7 @@ from typing import Any, Protocol
 from uuid import UUID
 
 from app.application.checking_routing import CheckerOutcome, CheckerResultDraft, CheckerType, ResultReason
+from app.application.checking_items import InvalidCheckingItemIdentity, snapshot_item_key
 
 RESULT_PERSISTENCE_VERSION = "checking_result_persistence_v1"
 FINDING_SCHEMA_VERSION = "checking_finding_v1"
@@ -154,7 +155,9 @@ def _finding(item: Mapping[str,Any], raw: Mapping[str,Any], confidence: Decimal)
 
 def prepare_result(snapshot_item: Mapping[str,Any], draft: CheckerResultDraft, policy: ConfidenceGatePolicy) -> PreparedCheckingResult:
     aid=_uuid(draft.assessment_item_id); tid=_uuid(draft.task_version_id)
-    if snapshot_item.get("assessment_item_id")!=str(aid) or snapshot_item.get("task_version_id")!=str(tid): raise InvalidCheckingResult("result_identity_mismatch")
+    try: snapshot_id=snapshot_item_key(snapshot_item).item_id
+    except InvalidCheckingItemIdentity: raise InvalidCheckingResult("result_identity_mismatch") from None
+    if snapshot_id!=aid or snapshot_item.get("task_version_id")!=str(tid): raise InvalidCheckingResult("result_identity_mismatch")
     try: points=Decimal(snapshot_item["points"])
     except Exception: raise InvalidCheckingResult("invalid_frozen_points") from None
     if type(draft.max_score) is not Decimal or draft.max_score!=points: raise InvalidCheckingResult("points_mismatch")

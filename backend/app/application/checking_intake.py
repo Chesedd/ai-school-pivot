@@ -10,10 +10,11 @@ from typing import Any, Protocol
 from uuid import UUID
 
 from app.application.checking import CreateRunCommand
-from app.application.checking_handoff import CheckingHandoff
+from app.application.checking_handoff import CheckingHandoff, RemediationCheckingHandoff
 from app.application.checking_routing import ROUTING_CONTRACT_VERSION
 
 SNAPSHOT_SCHEMA_VERSION = "checking_input_v1"
+REMEDIATION_SNAPSHOT_SCHEMA_VERSION = "checking_input_remediation_v1"
 HANDOFF_VERSION = 1
 
 
@@ -38,7 +39,7 @@ class CheckingIntakeRequest:
 class CheckingIntakeUnitOfWork(Protocol):
     async def __aenter__(self): ...
     async def __aexit__(self, exc_type, exc, tb): ...
-    async def load_locked_handoff(self, submission_id: UUID) -> CheckingHandoff: ...
+    async def load_locked_handoff(self, submission_id: UUID) -> CheckingHandoff | RemediationCheckingHandoff: ...
     async def load_methodologies(self, version_ids: tuple[UUID, ...]) -> dict[UUID, dict[str, Any]]: ...
     async def validate_supersedes(self, run_id: UUID, submission_id: UUID) -> None: ...
     async def create_run(self, command: CreateRunCommand): ...
@@ -137,9 +138,42 @@ def build_snapshot(handoff: CheckingHandoff, methodologies: dict[UUID, dict[str,
         "submission_id":str(handoff.submission_id),"submitted_at":_json_value(handoff.submitted_at),"items":result}
 
 
-def canonical_run_request(request: CheckingIntakeRequest, fingerprint: str) -> dict[str, Any]:
+def build_remediation_snapshot(handoff: RemediationCheckingHandoff,
+                               methodologies: dict[UUID, dict[str, Any]]) -> dict[str, Any]:
+    result=[]; seen:set[UUID]=set()
+    for item in sorted(handoff.items,key=lambda x:(x.position,x.remediation_plan_item_id)):
+        if item.remediation_plan_item_id in seen: raise InvalidCheckingInput("duplicate handoff item identity")
+        seen.add(item.remediation_plan_item_id)
+        if not item.points.is_finite() or item.points <= 0: raise InvalidCheckingInput("invalid rubric max score")
+        if (item.raw_answer is None) != (item.normalized_answer is None):
+            raise InvalidCheckingInput("raw and normalized answer presence differs")
+        source=methodologies.get(item.task_version_id)
+        if source is None: raise HistoricalMethodologyNotFound("historical task version is missing")
+        methodology=_methodology(source)
+        rubric=methodology.get("rubric")
+        try: rubric_max=Decimal(str(rubric["max_score"]))
+        except (TypeError, KeyError, ValueError): raise HistoricalMethodologyNotFound("positive historical rubric is missing") from None
+        if not rubric_max.is_finite() or rubric_max <= 0 or rubric_max != item.points:
+            raise HistoricalMethodologyNotFound("positive historical rubric is missing")
+        if item.answer_format != methodology["answer_format"]: raise InvalidCheckingInput("answer format mismatch")
+        provenance={"rubric_item_ids":[str(x["id"]) for x in rubric.get("items",())],
+            "typical_error_ids":[str(x["id"]) for x in methodology["typical_errors"]],
+            "skill_ids":[str(x["id"]) for x in methodology["skills"]]}
+        result.append({"remediation_plan_item_id":str(item.remediation_plan_item_id),
+            "task_version_id":str(item.task_version_id),"position":item.position,
+            "points":format(item.points,".2f"),"answer_format":item.answer_format,
+            "raw_answer":item.raw_answer,"normalized_answer":item.normalized_answer,
+            "methodology":methodology,**provenance})
+    return {"snapshot_schema_version":REMEDIATION_SNAPSHOT_SCHEMA_VERSION,"handoff_version":HANDOFF_VERSION,
+        "routing_contract_version":ROUTING_CONTRACT_VERSION,
+        "source_contract_versions":{"remediation_checking_handoff":"v1","content_bank_methodology":"typed_v1"},
+        "submission_id":str(handoff.submission_id),"submitted_at":_json_value(handoff.submitted_at),"items":result}
+
+
+def canonical_run_request(request: CheckingIntakeRequest, fingerprint: str,
+                          snapshot_schema_version: str = SNAPSHOT_SCHEMA_VERSION) -> dict[str, Any]:
     return {"submission_id":str(request.submission_id),"input_fingerprint":fingerprint,
-        "snapshot_schema_version":SNAPSHOT_SCHEMA_VERSION,"routing_version":request.routing_version,
+        "snapshot_schema_version":snapshot_schema_version,"routing_version":request.routing_version,
         "checker_set_version":request.checker_set_version,"threshold_policy_version":request.threshold_policy_version,
         "prompt_model_policy_version":request.prompt_model_policy_version,
         "supersedes_run_id":str(request.supersedes_run_id) if request.supersedes_run_id else None}
@@ -154,10 +188,14 @@ class CheckingIntakeService:
         async with self.uow_factory() as uow:
             handoff=await uow.load_locked_handoff(request.submission_id)
             methods=await uow.load_methodologies(tuple(x.task_version_id for x in handoff.items))
-            snapshot=_json_value(build_snapshot(handoff,methods)); fingerprint=sha256_hex(snapshot)
+            if isinstance(handoff, RemediationCheckingHandoff):
+                snapshot=_json_value(build_remediation_snapshot(handoff,methods))
+            else:
+                snapshot=_json_value(build_snapshot(handoff,methods))
+            schema_version=snapshot["snapshot_schema_version"]; fingerprint=sha256_hex(snapshot)
             if request.supersedes_run_id: await uow.validate_supersedes(request.supersedes_run_id,request.submission_id)
-            request_hash=sha256_hex(canonical_run_request(request,fingerprint))
+            request_hash=sha256_hex(canonical_run_request(request,fingerprint,schema_version))
             run=await uow.create_run(CreateRunCommand(request.submission_id,request.request_key,request_hash,HANDOFF_VERSION,
-                snapshot,fingerprint,SNAPSHOT_SCHEMA_VERSION,request.routing_version,request.checker_set_version,
+                snapshot,fingerprint,schema_version,request.routing_version,request.checker_set_version,
                 request.threshold_policy_version,request.prompt_model_policy_version,request.supersedes_run_id))
             await uow.commit(); return run
