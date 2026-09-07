@@ -1,0 +1,21 @@
+import {request} from "./api";
+
+export type ClassStatus="active"|"archived"|"all";
+export type StudentStatus=ClassStatus;
+export type AdminClassGroup={id:string;name:string;grade_id:string|null;grade_number:number|null;grade_name:string|null;external_ref:string|null;created_at:string;archived_at:string|null;is_configuration_complete:boolean;active_student_count:number;assigned_teacher_count:number};
+export type AdminClassTeacher={user_id:string;display_name:string;is_active:boolean};
+export type AdminClassStudent={id:string;display_name:string;external_ref:string|null;class_group_id:string;archived_at:string|null};
+export type ClassInput={name:string;grade_id:string;external_ref:string|null};
+const root="/api/admin/class-groups",enc=encodeURIComponent,json=(method:string,value?:unknown):RequestInit=>({method,headers:value===undefined?undefined:{"Content-Type":"application/json"},body:value===undefined?undefined:JSON.stringify(value)});
+export const listClasses=(status:ClassStatus="active")=>request<AdminClassGroup[]>(`${root}?status=${status}`);
+export const getClassGroup=(id:string)=>request<AdminClassGroup>(`${root}/${enc(id)}`);
+export const createClass=(value:ClassInput)=>request<AdminClassGroup>(root,json("POST",value));
+export const updateClass=(id:string,value:Partial<ClassInput>)=>request<AdminClassGroup>(`${root}/${enc(id)}`,json("PATCH",value));
+export const archiveClass=(id:string)=>request<AdminClassGroup>(`${root}/${enc(id)}/archive`,json("POST"));
+export const listClassTeachers=(id:string)=>request<AdminClassTeacher[]>(`${root}/${enc(id)}/teachers`);
+export const assignClassTeacher=(id:string,userId:string)=>request<void>(`${root}/${enc(id)}/teachers/${enc(userId)}`,json("PUT"));
+export const unassignClassTeacher=(id:string,userId:string)=>request<void>(`${root}/${enc(id)}/teachers/${enc(userId)}`,{method:"DELETE"});
+export const listClassStudents=(id:string,status:StudentStatus="active")=>request<AdminClassStudent[]>(`${root}/${enc(id)}/students?status=${status}`);
+export const createClassStudent=(id:string,value:{display_name:string;external_ref:string|null})=>request<AdminClassStudent>(`${root}/${enc(id)}/students`,json("POST",value));
+export const moveClassStudent=(id:string,studentId:string,value:{target_class_group_id:string;expected_current_class_group_id:string})=>request<AdminClassStudent>(`${root}/${enc(id)}/students/${enc(studentId)}/move`,json("POST",value));
+export const archiveClassStudent=(id:string,studentId:string)=>request<AdminClassStudent>(`${root}/${enc(id)}/students/${enc(studentId)}/archive`,json("POST"));
