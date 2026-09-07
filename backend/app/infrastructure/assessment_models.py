@@ -28,6 +28,7 @@ class ClassGroup(IdMixin, Base):
     name: Mapped[str] = mapped_column(String(120)); external_ref: Mapped[str | None] = mapped_column(String(120), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=clock); created_by: Mapped[UUID] = mapped_column(uuid_type)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    grade_id: Mapped[UUID | None] = mapped_column(ForeignKey("grades.id", ondelete="RESTRICT", onupdate="RESTRICT", name="fk_class_groups_grade_id_grades"), nullable=True)
 
 
 class Student(IdMixin, Base):

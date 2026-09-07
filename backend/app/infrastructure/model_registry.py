@@ -11,4 +11,5 @@ def register_all_models() -> None:
     from app.infrastructure import auth_models  # noqa: F401
     from app.infrastructure import authoring_models  # noqa: F401
     from app.infrastructure import checking_models  # noqa: F401
+    from app.infrastructure import classroom_models  # noqa: F401
     from app.infrastructure import image_solving_models  # noqa: F401

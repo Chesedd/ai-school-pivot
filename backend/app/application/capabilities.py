@@ -1,6 +1,7 @@
 """Central, static role-to-capability policy for coarse authorization."""
 
 USERS_MANAGE = "users.manage"
+CLASSROOM_ADMIN = "classroom.admin"
 CATALOG_MANAGE = "catalog.manage"
 CATALOG_PROPOSE = "catalog.propose"
 DIAGNOSTICS_READ = "diagnostics.read"
@@ -22,6 +23,7 @@ STUDENT_RESULTS_READ = "student.results.read"
 ALL_CAPABILITIES = frozenset(
     {
         USERS_MANAGE,
+        CLASSROOM_ADMIN,
         CATALOG_MANAGE,
         CATALOG_PROPOSE,
         DIAGNOSTICS_READ,

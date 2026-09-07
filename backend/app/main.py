@@ -18,10 +18,12 @@ from app.presentation.attachment_routes import router as attachment_router
 from app.presentation.authoring_routes import router as authoring_router
 from app.application.authoring_api import AuthoringApiError
 from app.application.image_solving_api import ImageSolvingApiError
+from app.application.classroom_administration import ClassroomError
 from app.presentation.image_solving_routes import router as image_solving_router
 from app.presentation.image_artifact_routes import router as image_artifact_router
 from app.presentation.auth_routes import router as auth_router
 from app.presentation.admin_user_routes import router as admin_user_router
+from app.presentation.admin_classroom_routes import router as admin_classroom_router
 from app.application.user_administration import AdministrationError
 from app.application.catalog_proposals import CatalogProposalError
 from app.application.catalog_resolution import CatalogResolutionError
@@ -34,6 +36,7 @@ settings = get_settings()
 app.add_middleware(CORSMiddleware, allow_origins=list(settings.allowed_origins), allow_credentials=True, allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"], allow_headers=["Content-Type", "Authorization", "Idempotency-Key", "X-Filename"])
 app.include_router(auth_router)
 app.include_router(admin_user_router)
+app.include_router(admin_classroom_router)
 app.include_router(router)
 app.include_router(assessment_router)
 app.include_router(student_assessment_router)
@@ -54,6 +57,10 @@ async def catalog_proposal_error(_: Request, exc: CatalogProposalError) -> JSONR
 @app.exception_handler(AdministrationError)
 async def administration_error(_: Request, exc: AdministrationError) -> JSONResponse:
     return error_response(exc.code, exc.code.replace("_", " ").capitalize() + ".", [], exc.status)
+
+@app.exception_handler(ClassroomError)
+async def classroom_error(_: Request, exc: ClassroomError) -> JSONResponse:
+    return error_response(exc.code, str(exc), [], exc.status)
 
 @app.exception_handler(ImageSolvingApiError)
 async def image_solving_error(_: Request, exc: ImageSolvingApiError) -> JSONResponse:
