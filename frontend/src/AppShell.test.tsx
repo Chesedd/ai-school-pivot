@@ -7,6 +7,8 @@ const json=(body:unknown)=>new Response(JSON.stringify(body),{status:200,headers
 afterEach(()=>{cleanup();vi.restoreAllMocks();history.replaceState({},"","/")});
 
 describe("Content Bank application shell",()=>{
+ it("shows Classes only with classroom.admin and protects direct navigation",()=>{const base={user_id:"u",login:"u",display_name:"User",roles:["teacher"],student_id:null};history.replaceState({},"","/admin/classes");const view=render(<App principal={{...base,capabilities:["classroom.admin"]}}/>);expect(screen.getByRole("link",{name:"Классы"}).getAttribute("aria-current")).toBe("page");view.rerender(<App principal={{...base,capabilities:["users.manage"]}}/>);expect(screen.queryByRole("link",{name:"Классы"})).toBeNull();expect(screen.getByRole("heading",{name:"Нет доступа"})).toBeTruthy()});
+ it("does not expose Classes to student principals",()=>{history.replaceState({},"","/student/assignments");vi.spyOn(apiClient,"listStudentAssignments").mockResolvedValue({items:[],total:0,offset:0,limit:20});render(<App principal={{user_id:"s",login:"s",display_name:"Student",roles:["student"],student_id:"s",capabilities:["student.assignments.read"]}}/>);expect(screen.queryByRole("link",{name:"Классы"})).toBeNull()});
  it("provides a skip link, semantic navigation, active item, and one page heading",async()=>{
   history.replaceState({},"","/content-bank");
   vi.spyOn(globalThis,"fetch").mockImplementation(()=>Promise.resolve(json({items:[]})));
