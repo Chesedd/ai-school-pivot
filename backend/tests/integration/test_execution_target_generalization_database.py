@@ -5,6 +5,8 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from tests.integration.c10a_postgres import require_disposable_postgres
+
 URL = os.environ.get("TEST_DATABASE_URL", "")
 pytestmark = [pytest.mark.asyncio, pytest.mark.skipif(not URL, reason="TEST_DATABASE_URL is required")]
 
@@ -15,7 +17,7 @@ def _async_url(url: str) -> str:
 
 async def test_execution_target_constraints_and_partial_uniqueness_are_installed():
     """Verify the migrated database, rather than merely ORM declarations."""
-    engine = create_async_engine(_async_url(URL))
+    engine = create_async_engine(require_disposable_postgres())
     expected_checks = {
         "ck_student_submissions_execution_target_xor": "num_nonnulls(assignment_participant_id, remediation_plan_id) = 1",
         "ck_student_answers_execution_item_xor": "num_nonnulls(assessment_item_id, remediation_plan_item_id) = 1",
