@@ -58,6 +58,15 @@ class PublishAssessmentCommand:
 
 
 @dataclass(frozen=True)
+class CreateAssignmentCommand:
+    assessment_id: UUID
+    class_group_id: UUID
+    start_at: datetime
+    due_at: datetime
+    max_attempts: int
+
+
+@dataclass(frozen=True)
 class AssessmentItemRecord:
     id: UUID
     task_version_id: UUID
@@ -119,6 +128,13 @@ class AssignmentSummary:
 
 
 @dataclass(frozen=True)
+class ClassAssignmentSummary:
+    id: UUID; assessment_id: UUID; assessment_title: str; class_group_id: UUID
+    status: str; start_at: datetime; due_at: datetime; max_attempts: int
+    participant_count: int; created_at: datetime; closed_at: datetime | None
+
+
+@dataclass(frozen=True)
 class HistoricalTaskVersion:
     version_id: UUID
     task_id: UUID
@@ -154,6 +170,8 @@ class AssessmentRepository(Protocol):
     async def append_audit(self, assessment_id: UUID, event: str, actor_id: UUID, details: dict[str, object]): ...
     async def list_class_groups(self, offset: int, limit: int): ...
     async def list_assignments(self, assessment_id: UUID, offset: int, limit: int): ...
+    async def list_assignments_for_class(self, class_group_id: UUID, status: str, offset: int,
+                                         limit: int, object_scope): ...
 
 
 class AssessmentUnitOfWork(Protocol):
@@ -225,6 +243,16 @@ class AssessmentService:
                 actor.actor_id, actor.object_scope.unrestricted)
             return await self.uow.repository.list_assignments(
                 assessment_id, offset, limit, class_ids)
+
+    async def list_class_assignments(self, class_group_id: UUID, status: str, offset: int,
+                                     limit: int, actor: ActorContext):
+        async with self.uow:
+            access = getattr(self.uow, "classroom_access", None)
+            if access is not None and not await access.can_access_class(
+                    class_group_id, actor.actor_id, actor.object_scope.unrestricted):
+                raise AssessmentError("class_group_not_found", "Группа не найдена.", 404)
+            return await self.uow.repository.list_assignments_for_class(
+                class_group_id, status, offset, limit, actor.object_scope)
 
     async def get(self, assessment_id: UUID, actor: ActorContext):
         async with self.uow:
@@ -410,6 +438,40 @@ class AssessmentService:
             result = PublicationRecord(await self.uow.repository.get(command.assessment_id), assignment)
             await self.uow.commit()
             return result
+
+    async def create_assignment(self, command: CreateAssignmentCommand, actor: ActorContext):
+        """Create another occurrence without mutating its published definition."""
+        async with self.uow:
+            assessment = await self._get(command.assessment_id, actor, lock=True)
+            if assessment is None:
+                raise AssessmentError("assessment_not_found", "Работа не найдена.", 404)
+            if assessment.status != "published":
+                raise AssessmentError("assessment_not_published", "Работа ещё не опубликована.")
+            composition = await self.uow.repository.lock_composition(command.assessment_id)
+            version_ids = tuple(item.task_version_id for variant in composition for item in variant.items)
+            if not await self.uow.content_bank.lock_publication_usage(version_ids):
+                raise AssessmentError("invalid_task_version", "Одно из заданий больше нельзя использовать для нового назначения.")
+            access = getattr(self.uow, "classroom_access", None)
+            if access is not None and not await access.can_access_class(
+                    command.class_group_id, actor.actor_id, actor.object_scope.unrestricted,
+                    require_active=True, require_configured=True, lock=True):
+                raise AssessmentError("class_group_not_found", "Группа не найдена.", 404)
+            students = await self.uow.repository.lock_group_students(command.class_group_id)
+            if students is None:
+                raise AssessmentError("class_group_not_found", "Группа не найдена.", 404)
+            if not students:
+                raise AssessmentError("class_group_empty", "В классе нет активных учеников.", 422)
+            now = await self.uow.repository.database_clock()
+            if command.due_at <= now:
+                raise AssessmentError("publication_requirements_not_met", "Срок выполнения уже истёк.", 422,
+                                      [{"field": "due_at", "code": "due_at_not_future", "message": "due_at должен быть позже текущего времени базы данных."}])
+            assignment = await self.uow.repository.create_assignment(command, actor.actor_id, students)
+            await self.uow.repository.append_audit(assignment.id, "assignment_created", actor.actor_id,
+                {"assessment_id": str(command.assessment_id), "class_group_id": str(command.class_group_id),
+                 "start_at": command.start_at.isoformat(), "due_at": command.due_at.isoformat(),
+                 "max_attempts": command.max_attempts, "participant_count": len(students)}, "assignment")
+            await self.uow.commit()
+            return assignment
 
     async def get_assignment(self, assignment_id: UUID, actor: ActorContext):
         async with self.uow:

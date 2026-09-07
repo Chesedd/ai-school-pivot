@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query, Response
 
 from app.application.assessments import (AddAssessmentItemCommand, AssessmentService,
     ChangeAssessmentItemPointsCommand, CreateAssessmentCommand,
-    PublishAssessmentCommand, ReorderAssessmentItemsCommand, UpdateAssessmentCommand)
+    CreateAssignmentCommand, PublishAssessmentCommand, ReorderAssessmentItemsCommand, UpdateAssessmentCommand)
 from app.application.content_bank import ActorContext
 from app.application.capabilities import ASSESSMENT_CREATE, ASSESSMENT_MANAGE
 from app.application.principal import Principal
@@ -16,7 +16,7 @@ from app.infrastructure.assessment_repository import SQLAlchemyAssessmentUnitOfW
 from app.presentation.assessment_schemas import (AssessmentCreateRequest, AssessmentItemCreateRequest,
     AssessmentItemOrderRequest, AssessmentItemPatchRequest, AssessmentItemResponse,
     AssessmentClassGroupPage, AssessmentListPage, AssessmentPatchRequest, AssessmentResponse,
-    TeacherAssignmentPage, VariantCreateRequest, VariantResponse)
+    ClassAssignmentPage, TeacherAssignmentPage, VariantCreateRequest, VariantResponse)
 from app.presentation.assessment_schemas import (AssignmentResponse, EmptyRequest,
     PublicationResponse, PublishAssessmentRequest)
 from app.presentation.auth_dependencies import require_capability, require_trusted_origin
@@ -46,6 +46,12 @@ async def list_assessment_assignments(assessment_id: UUID,
         context: Annotated[ActorContext, Depends(manage_actor)], offset: Annotated[int, Query(ge=0)] = 0,
         limit: Annotated[int, Query(ge=1, le=100)] = 20):
     return await service().list_assignments(assessment_id, offset, limit, context)
+
+@router.get("/class-groups/{class_group_id}/assignments", response_model=ClassAssignmentPage)
+async def list_class_assignments(class_group_id: UUID,
+        context: Annotated[ActorContext, Depends(manage_actor)], status: Literal["open", "closed", "all"] = "all",
+        offset: Annotated[int, Query(ge=0)] = 0, limit: Annotated[int, Query(ge=1, le=100)] = 50):
+    return await service().list_class_assignments(class_group_id, status, offset, limit, context)
 
 
 def assessment_view(row):
@@ -140,6 +146,14 @@ async def publish_and_assign(assessment_id: UUID, payload: PublishAssessmentRequ
         assessment_id, payload.class_group_id, payload.start_at, payload.due_at, payload.max_attempts), context)
     response.headers["Location"] = f"/api/assessment-core/assignments/{result.assignment.id}"
     return {"assessment": assessment_view(result.assessment), "assignment": result.assignment}
+
+@router.post("/assessments/{assessment_id}/assignments", response_model=AssignmentResponse, status_code=201)
+async def create_assignment(assessment_id: UUID, payload: PublishAssessmentRequest, response: Response,
+                            context: Annotated[ActorContext, Depends(manage_actor)]):
+    result = await service().create_assignment(CreateAssignmentCommand(
+        assessment_id, payload.class_group_id, payload.start_at, payload.due_at, payload.max_attempts), context)
+    response.headers["Location"] = f"/api/assessment-core/assignments/{result.id}"
+    return result
 
 
 @router.get("/assignments/{assignment_id}", response_model=AssignmentResponse)
