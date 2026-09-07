@@ -181,3 +181,46 @@ class AssignmentResponse(StrictModel):
 class PublicationResponse(StrictModel):
     assessment: AssessmentResponse
     assignment: AssignmentResponse
+
+# Strict read contracts for the C7 result projections.
+class ResultFindingResponse(StrictModel):
+    finding_id: UUID; check_result_id: UUID; finding_type: str; rubric_item_id: UUID | None
+    typical_error_id: UUID | None; skill_id: UUID | None; snapshot_title: str | None; snapshot_code: str | None
+    snapshot_criterion: str | None; severity: str; confidence: Decimal
+class ItemCheckResultResponse(StrictModel):
+    check_result_id: UUID; result_status: str; checker_type: str; score_suggested: Decimal | None
+    max_score: Decimal; confidence: Decimal; summary: str; teacher_summary: str | None
+    needs_human_review: bool; review_reason: str | None; model_limitations: str | None
+    findings: list[ResultFindingResponse]
+class StudentItemResultResponse(StrictModel):
+    assessment_item_id: UUID; position: int; task_version_id: UUID; task_title: str | None
+    task_statement: str; student_answer: object | None; attachment_count: int; check_result: ItemCheckResultResponse | None
+class DiagnosticAggregateResponse(StrictModel):
+    id: UUID | None; snapshot_code: str | None; snapshot_title: str | None; finding_count: int
+    max_severity: str; max_confidence: Decimal; requires_human_review: bool
+class DiagnosticsResponse(StrictModel):
+    skills: list[DiagnosticAggregateResponse]; typical_errors: list[DiagnosticAggregateResponse]
+class SubmissionAttemptResponse(StrictModel):
+    submission_id: UUID; attempt_no: int; status: str; started_at: datetime; submitted_at: datetime | None
+class StudentAssignmentResultResponse(StrictModel):
+    assignment_id: UUID; assignment_participant_id: UUID; student_id: UUID; student_display_name: str
+    student_archived: bool; is_current_class_member: bool; assessment_id: UUID; assessment_title: str; class_group_id: UUID; class_group_name: str; current_attempt_no: int | None; current_attempt_status: str | None
+    attempts: list[SubmissionAttemptResponse]; selected_submission_id: UUID | None; selected_attempt_no: int | None
+    latest_check_run_id: UUID | None; latest_check_run_status: str | None; failure_code: str | None; check_status: str; suggested_score_total: Decimal | None
+    max_score_total: Decimal | None; suggested_percent: Decimal | None; items: list[StudentItemResultResponse]; diagnostics: DiagnosticsResponse
+class ParticipantResultResponse(StrictModel):
+    assignment_participant_id: UUID; student_id: UUID; student_display_name: str; is_current_class_member: bool
+    student_archived: bool; assigned_variant_id: UUID | None; assigned_variant_name: str | None; activity_status: str; current_attempt_no: int | None; current_attempt_status: str | None; submitted_attempt_count: int
+    latest_submitted_attempt_no: int | None; latest_submitted_at: datetime | None; latest_check_run_status: str | None
+    check_status: str; suggested_score_total: Decimal | None; max_score_total: Decimal | None; review_required_count: int
+    skill_finding_count: int; typical_error_finding_count: int; latest_submission_id: UUID | None; latest_check_run_id: UUID | None; suggested_percent: Decimal | None
+class AssignmentResultsResponse(StrictModel):
+    assignment_id: UUID; assessment_id: UUID; assessment_title: str; class_group_id: UUID; class_group_name: str
+    assignment_status: str; start_at: datetime; due_at: datetime; participant_count: int; not_started_count: int
+    in_progress_count: int; submitted_count: int; checking_count: int; checked_count: int; review_required_count: int
+    check_failed_count: int; items: list[ParticipantResultResponse]; offset: int; limit: int
+class StudentHistoryItemResponse(StrictModel):
+    assignment_id: UUID; assessment_id: UUID; assessment_title: str; assignment_status: str; start_at: datetime; due_at: datetime; check_status: str; current_attempt_no: int | None; current_attempt_status: str | None
+    latest_submitted_attempt_no: int | None; suggested_score_total: Decimal | None; max_score_total: Decimal | None; review_required: bool
+class StudentAssignmentHistoryResponse(StrictModel):
+    items: list[StudentHistoryItemResponse]; total: int; offset: int; limit: int
