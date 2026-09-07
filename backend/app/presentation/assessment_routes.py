@@ -20,7 +20,7 @@ from app.presentation.assessment_schemas import (AssessmentCreateRequest, Assess
     AssessmentClassGroupPage, AssessmentListPage, AssessmentPatchRequest, AssessmentResponse,
     ClassAssignmentPage, TeacherAssignmentPage, VariantCreateRequest, VariantResponse)
 from app.presentation.assessment_schemas import (AssignmentResponse, EmptyRequest,
-    PublicationResponse, PublishAssessmentRequest)
+    PublicationResponse, PublishAssessmentRequest, AssignmentResultsResponse, StudentAssignmentResultResponse, StudentAssignmentHistoryResponse)
 from app.presentation.auth_dependencies import require_capability, require_trusted_origin
 
 router = APIRouter(prefix="/api/assessment-core", dependencies=[Depends(require_trusted_origin)])
@@ -41,21 +41,21 @@ create_actor = actor_for(ASSESSMENT_CREATE)
 def results_principal(principal: Principal = Depends(require_capability(ASSESSMENT_RESULTS_READ))):
     return principal
 
-@router.get("/assignments/{assignment_id}/results")
+@router.get("/assignments/{assignment_id}/results", response_model=AssignmentResultsResponse)
 async def assignment_results(assignment_id: UUID, principal: Annotated[Principal, Depends(results_principal)],
         offset: Annotated[int, Query(ge=0)] = 0, limit: Annotated[int, Query(ge=1, le=100)] = 50):
     async with async_session_factory() as session:
         scope=object_access_scope(principal)
         return await ClassroomAssessmentResultsService(SQLAlchemyClassroomResultsReadRepository(session)).assignment_results(assignment_id,ResultActor(principal.user_id,scope.unrestricted),offset,limit)
 
-@router.get("/assignments/{assignment_id}/students/{student_id}/results")
+@router.get("/assignments/{assignment_id}/students/{student_id}/results", response_model=StudentAssignmentResultResponse)
 async def student_assignment_result(assignment_id: UUID, student_id: UUID,
         principal: Annotated[Principal, Depends(results_principal)], attempt_no: Annotated[int | None, Query(ge=1)] = None):
     async with async_session_factory() as session:
         scope=object_access_scope(principal)
         return await ClassroomAssessmentResultsService(SQLAlchemyClassroomResultsReadRepository(session)).student_result(assignment_id,student_id,ResultActor(principal.user_id,scope.unrestricted),attempt_no)
 
-@router.get("/class-groups/{class_group_id}/students/{student_id}/assignment-results")
+@router.get("/class-groups/{class_group_id}/students/{student_id}/assignment-results", response_model=StudentAssignmentHistoryResponse)
 async def student_assignment_history(class_group_id: UUID, student_id: UUID,
         principal: Annotated[Principal, Depends(results_principal)], offset: Annotated[int, Query(ge=0)] = 0,
         limit: Annotated[int, Query(ge=1, le=100)] = 50):

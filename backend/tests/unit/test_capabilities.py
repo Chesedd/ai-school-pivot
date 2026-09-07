@@ -11,13 +11,15 @@ def test_teacher_has_exact_b1_grants():
         "image_solving.use", "assessment.create", "assessment.manage", "assessment.results.read",
         "catalog.propose",
         "classroom.use", "classroom.notes.manage",
+        "remediation.manage",
     }
     assert not {"users.manage", "catalog.manage", "content.approve", "content.archive"} & ROLE_CAPABILITIES["teacher"]
 
 
 def test_student_has_only_student_workflow_grants():
     assert ROLE_CAPABILITIES["student"] == {
-        "student.assignments.read", "student.attempts.submit", "student.results.read"
+        "student.assignments.read", "student.attempts.submit", "student.results.read",
+        "student.remediations.read",
     }
 
 

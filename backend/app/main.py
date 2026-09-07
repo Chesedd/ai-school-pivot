@@ -22,6 +22,7 @@ from app.application.classroom_administration import ClassroomError
 from app.application.classroom_access import ClassroomAccessError
 from app.application.classroom_notes import ClassroomNotesError
 from app.application.classroom_results import ClassroomResultsError
+from app.application.remediation import RemediationError
 from app.presentation.image_solving_routes import router as image_solving_router
 from app.presentation.image_artifact_routes import router as image_artifact_router
 from app.presentation.auth_routes import router as auth_router
@@ -32,6 +33,7 @@ from app.application.user_administration import AdministrationError
 from app.application.catalog_proposals import CatalogProposalError
 from app.application.catalog_resolution import CatalogResolutionError
 from app.presentation.catalog_proposal_routes import router as catalog_proposal_router
+from app.presentation.remediation_routes import router as remediation_router
 
 
 app = FastAPI()
@@ -50,6 +52,11 @@ app.include_router(authoring_router)
 app.include_router(image_solving_router)
 app.include_router(image_artifact_router)
 app.include_router(catalog_proposal_router)
+app.include_router(remediation_router)
+
+@app.exception_handler(RemediationError)
+async def remediation_error(_: Request, exc: RemediationError) -> JSONResponse:
+    return error_response(exc.code, exc.code.replace("_", " ").capitalize()+".", [], exc.status)
 
 @app.exception_handler(ClassroomResultsError)
 async def classroom_results_error(_: Request, exc: ClassroomResultsError) -> JSONResponse:
