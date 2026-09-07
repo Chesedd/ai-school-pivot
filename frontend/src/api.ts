@@ -99,6 +99,10 @@ export const listAssessmentAssignments=(id:string,offset=0,limit=20,signal?:Abor
 export const publishAndAssignAssessment=(id:string,value:{class_group_id:string;start_at:string;due_at:string;max_attempts:number}):Promise<PublicationResponse>=>request(`${assessmentRoot}/${enc(id)}/publish-and-assign`,body("POST",value));
 export const getTeacherAssignment=(id:string,signal?:AbortSignal):Promise<TeacherAssignment>=>request(`/api/assessment-core/assignments/${enc(id)}`,{signal});
 export const closeTeacherAssignment=(id:string):Promise<TeacherAssignment>=>request(`/api/assessment-core/assignments/${enc(id)}/close`,body("POST",{}));
+export type ClassAssignmentSummary={id:string;assessment_id:string;assessment_title:string;class_group_id:string;status:"open"|"closed";start_at:string;due_at:string;max_attempts:number;participant_count:number;created_at:string;closed_at:string|null};
+export type ClassAssignmentPage={items:ClassAssignmentSummary[];total:number;offset:number;limit:number};
+export const listClassAssignments=(classId:string,status:"all"|"open"|"closed"="all",offset=0,limit=50,signal?:AbortSignal):Promise<ClassAssignmentPage>=>request(`/api/assessment-core/class-groups/${enc(classId)}/assignments?${new URLSearchParams({status,offset:String(offset),limit:String(limit)})}`,{signal});
+export const createPublishedAssessmentAssignment=(id:string,value:{class_group_id:string;start_at:string;due_at:string;max_attempts:number}):Promise<TeacherAssignment>=>request(`${assessmentRoot}/${enc(id)}/assignments`,body("POST",value));
 
 export type StudentAssignmentSummary={assignment_id:string;assessment_id:string;title:string;status:"open"|"closed";start_at:string;due_at:string;max_attempts:number;assigned_variant_id:string|null;attempt_count:number};
 export type StudentAssignmentPage={items:StudentAssignmentSummary[];total:number;offset:number;limit:number};

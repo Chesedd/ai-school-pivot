@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
-from app.application.assessments import (AssignmentRecord, AssignmentSummary, AssessmentItemRecord,
+from app.application.assessments import (AssignmentRecord, AssignmentSummary, ClassAssignmentSummary, AssessmentItemRecord,
     AssessmentRecord, AssessmentVariantRecord, ClassGroupSummary, CreateAssessmentCommand, HistoricalTaskVersion)
 from app.infrastructure.assessment_models import (Assignment, AssignmentParticipant, Assessment, AssessmentAuditLog,
     AssessmentItem, AssessmentVariant, ClassGroup, Student)
@@ -157,6 +157,26 @@ class SQLAlchemyAssessmentRepository:
         return {"items": [AssignmentSummary(a.id, a.assessment_id, a.class_group_id, name, a.status,
                     a.start_at, a.due_at, a.max_attempts, count, a.created_at, a.closed_at)
                 for a, name, count in rows], "total": total, "offset": offset, "limit": limit}
+
+    async def list_assignments_for_class(self, class_group_id, status, offset, limit, object_scope):
+        counts = (select(AssignmentParticipant.assignment_id, func.count().label("participant_count"))
+                  .group_by(AssignmentParticipant.assignment_id).subquery())
+        base = (select(Assignment).join(Assessment, Assessment.id == Assignment.assessment_id)
+                .where(Assignment.class_group_id == class_group_id))
+        if status != "all": base = base.where(Assignment.status == status)
+        if not object_scope.unrestricted: base = base.where(Assessment.created_by == object_scope.actor_id)
+        total = await self.session.scalar(select(func.count()).select_from(base.subquery())) or 0
+        query = (select(Assignment, Assessment.title, func.coalesce(counts.c.participant_count, 0))
+                 .join(Assessment, Assessment.id == Assignment.assessment_id)
+                 .outerjoin(counts, counts.c.assignment_id == Assignment.id)
+                 .where(Assignment.class_group_id == class_group_id))
+        if status != "all": query = query.where(Assignment.status == status)
+        if not object_scope.unrestricted: query = query.where(Assessment.created_by == object_scope.actor_id)
+        rows = (await self.session.execute(query.order_by(Assignment.created_at.desc(), Assignment.id.desc())
+                                           .offset(offset).limit(limit))).all()
+        return {"items": [ClassAssignmentSummary(a.id, a.assessment_id, title, a.class_group_id,
+                    a.status, a.start_at, a.due_at, a.max_attempts, count, a.created_at, a.closed_at)
+                    for a, title, count in rows], "total": total, "offset": offset, "limit": limit}
 
     async def get(self, assessment_id: UUID):
         row = (await self.session.execute(select(Assessment).options(*self._options()).where(Assessment.id == assessment_id))).scalar_one_or_none()

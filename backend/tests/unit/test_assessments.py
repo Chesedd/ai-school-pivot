@@ -284,3 +284,34 @@ async def test_close_open_audits_and_repeated_close_is_rejected():
     with pytest.raises(AssessmentError) as error:
         await AssessmentService(uow).close_assignment(published.assignment.id, actor)
     assert error.value.code == "invalid_status_transition"
+
+async def test_published_assessment_creates_additional_assignment_without_republishing():
+    from app.application.assessments import CreateAssignmentCommand
+    uow = PublicationUow(status="published"); uow.classroom_access = ClassroomAccessDouble()
+    repo = uow.repository; repo.row.published_at = NOW; repo.row.published_by = repo.actor_id
+    command = publication_command(repo)
+    created = await AssessmentService(uow).create_assignment(CreateAssignmentCommand(
+        command.assessment_id, command.class_group_id, command.start_at, command.due_at,
+        command.max_attempts), ActorContext(repo.actor_id))
+    assert created.id == repo.assignment.id and created.participant_ids == repo.students
+    assert repo.row.published_at == NOW and repo.row.published_by == repo.actor_id
+    assert [event[2] for event in repo.audit] == ["assignment_created"]
+    assert uow.validated == [(repo.composition[0].items[0].task_version_id,)]
+    assert uow.commits == 1
+
+
+async def test_additional_assignment_rejects_draft_empty_and_foreign_class_atomically():
+    from app.application.assessments import CreateAssignmentCommand
+    for status, students, allowed, code in [
+        ("draft", None, True, "assessment_not_published"),
+        ("published", (), True, "class_group_empty"),
+        ("published", None, False, "class_group_not_found"),
+    ]:
+        uow = PublicationUow(status=status, students=students); uow.classroom_access = ClassroomAccessDouble(allowed)
+        command = publication_command(uow.repository)
+        with pytest.raises(AssessmentError) as error:
+            await AssessmentService(uow).create_assignment(CreateAssignmentCommand(
+                command.assessment_id, command.class_group_id, command.start_at,
+                command.due_at, command.max_attempts), ActorContext(uow.repository.actor_id))
+        assert error.value.code == code
+        assert uow.repository.assignment is None and not uow.repository.audit and uow.commits == 0
