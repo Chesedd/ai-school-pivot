@@ -20,6 +20,7 @@ from app.application.authoring_api import AuthoringApiError
 from app.application.image_solving_api import ImageSolvingApiError
 from app.application.classroom_administration import ClassroomError
 from app.application.classroom_access import ClassroomAccessError
+from app.application.classroom_notes import ClassroomNotesError
 from app.presentation.image_solving_routes import router as image_solving_router
 from app.presentation.image_artifact_routes import router as image_artifact_router
 from app.presentation.auth_routes import router as auth_router
@@ -67,6 +68,10 @@ async def classroom_error(_: Request, exc: ClassroomError) -> JSONResponse:
 
 @app.exception_handler(ClassroomAccessError)
 async def classroom_access_error(_: Request, exc: ClassroomAccessError) -> JSONResponse:
+    return error_response(exc.code, str(exc), [], exc.status)
+
+@app.exception_handler(ClassroomNotesError)
+async def classroom_notes_error(_: Request, exc: ClassroomNotesError) -> JSONResponse:
     return error_response(exc.code, str(exc), [], exc.status)
 
 @app.exception_handler(ImageSolvingApiError)

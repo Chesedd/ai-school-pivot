@@ -1,13 +1,14 @@
 """SQLAlchemy adapter for the Classroom application port."""
 from uuid import UUID
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.classroom_administration import ClassView, StudentView, TeacherView
 from app.application.classroom_access import TeacherClassSummary, TeacherStudentSummary
+from app.application.classroom_notes import NoteRecord
 from app.infrastructure.assessment_models import ClassGroup, Student
 from app.infrastructure.auth_models import User, UserRole
-from app.infrastructure.classroom_models import ClassGroupTeacher, ClassroomAuditLog
+from app.infrastructure.classroom_models import ClassGroupTeacher, ClassroomAuditLog, ClassNote, StudentNote
 from app.infrastructure.models import Grade
 
 class SQLAlchemyClassroomRepository:
@@ -177,3 +178,78 @@ class SQLAlchemyClassroomAccessRepository:
                                            .offset(offset).limit(limit))).all()
         return {"items": [(group.id, group.name, count) for group, count in rows],
                 "total": total, "offset": offset, "limit": limit}
+
+    async def get_accessible_student(self, class_group_id, student_id, actor_id, unrestricted):
+        query = select(Student).join(ClassGroup, ClassGroup.id == Student.class_group_id).where(
+            ClassGroup.id == class_group_id, Student.id == student_id)
+        query = self._membership(query, actor_id, unrestricted)
+        row = await self.session.scalar(query)
+        return None if row is None else TeacherStudentSummary(
+            row.id, row.display_name, row.external_ref, row.archived_at)
+
+
+class SQLAlchemyClassroomNotesRepository:
+    """Applies author privacy and all path identifiers inside SQL queries."""
+    def __init__(self, session: AsyncSession): self.session = session
+
+    async def class_state(self, class_id, actor, unrestricted):
+        q = select(ClassGroup.archived_at).where(ClassGroup.id == class_id)
+        if not unrestricted:
+            q = q.join(ClassGroupTeacher, ClassGroupTeacher.class_group_id == ClassGroup.id).where(
+                ClassGroupTeacher.teacher_user_id == actor)
+        row = (await self.session.execute(q)).first()
+        return None if row is None else row[0] is not None
+
+    async def student_state(self, class_id, student_id, actor, unrestricted, historical=False):
+        q = select(Student.archived_at).where(Student.id == student_id, Student.class_group_id == class_id)
+        row = (await self.session.execute(q)).first()
+        if row is None and historical:
+            # Administrators can inspect the immutable historical class snapshot
+            # after a student moves, but this never makes the destination teacher
+            # eligible to see the old note.
+            row = (await self.session.execute(select(Student.archived_at).join(
+                StudentNote, StudentNote.student_id == Student.id).where(
+                    Student.id == student_id, StudentNote.class_group_id == class_id).limit(1))).first()
+        return None if row is None else row[0] is not None
+
+    @staticmethod
+    def model(kind): return ClassNote if kind == "class" else StudentNote
+    @staticmethod
+    def record(row):
+        note, name = row
+        return NoteRecord(note.id, note.body, note.teacher_user_id, name, note.class_group_id,
+                          note.created_at, note.updated_at, getattr(note, "student_id", None))
+    def query(self, kind, class_id, student_id, actor, unrestricted, *, delete_override=False):
+        model = self.model(kind)
+        q = select(model, User.display_name).join(User, User.id == model.teacher_user_id).where(
+            model.class_group_id == class_id)
+        if kind == "student": q = q.where(model.student_id == student_id)
+        if not unrestricted or not delete_override: q = q.where(model.teacher_user_id == actor)
+        return q
+    async def list_notes(self, kind, class_id, student_id, actor, unrestricted, offset, limit):
+        base = self.query(kind, class_id, student_id, actor, unrestricted, delete_override=unrestricted)
+        total = await self.session.scalar(select(func.count()).select_from(base.subquery())) or 0
+        model = self.model(kind)
+        rows = (await self.session.execute(base.order_by(model.created_at.desc(), model.id.desc()).offset(offset).limit(limit))).all()
+        return {"items": [self.record(x) for x in rows], "total": total, "offset": offset, "limit": limit}
+    async def get_note(self, kind, class_id, student_id, note_id, actor, unrestricted, delete=False):
+        q = self.query(kind, class_id, student_id, actor, unrestricted, delete_override=delete or unrestricted).where(self.model(kind).id == note_id)
+        row = (await self.session.execute(q)).first()
+        return self.record(row) if row else None
+    async def create_note(self, kind, class_id, student_id, actor, body):
+        model = self.model(kind); values = dict(class_group_id=class_id, teacher_user_id=actor, body=body)
+        if kind == "student": values["student_id"] = student_id
+        note = model(**values); self.session.add(note); await self.session.flush()
+        name = await self.session.scalar(select(User.display_name).where(User.id == actor))
+        return self.record((note, name))
+    async def update_note(self, kind, note_id, actor, body, expected):
+        model = self.model(kind)
+        result = await self.session.execute(update(model).where(model.id == note_id,
+            model.teacher_user_id == actor, model.updated_at == expected).values(
+                body=body, updated_at=func.clock_timestamp()).returning(model.id))
+        if result.scalar_one_or_none() is None: return None
+        row = (await self.session.execute(select(model, User.display_name).join(
+            User, User.id == model.teacher_user_id).where(model.id == note_id))).first()
+        return self.record(row)
+    async def delete_note(self, kind, note_id):
+        await self.session.execute(delete(self.model(kind)).where(self.model(kind).id == note_id))
