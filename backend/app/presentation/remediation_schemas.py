@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Literal, Annotated
 from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -33,3 +34,31 @@ class RemediationExecutionResponse(Strict):
  remediation_id:UUID; title:str; instructions:str|None; plan_status:Literal["assigned","cancelled"]; due_at:datetime|None; execution_status:Literal["not_started","in_progress","submitted","cancelled","expired"]; submission_id:UUID|None; submission_status:Literal["draft","submitted"]|None; attempt_no:int|None; items:list[RemediationExecutionItem]
 class RemediationAnswerResponse(Strict):
  remediation_plan_item_id:UUID; raw_answer:Any; normalized_answer:Any; created_at:datetime; updated_at:datetime
+
+ExecutionStatus=Literal["not_started","in_progress","submitted","checking","checked","review_required","check_failed","cancelled","expired"]
+class StudentResultItem(Strict):
+ remediation_plan_item_id:UUID; position:int; task_version_id:UUID; task_title:str|None; task_statement:str
+ student_raw_answer:Any|None; task_type:str; answer_format:str; difficulty:int
+ choice_options:list[RemediationChoiceOption]; result_status:str|None; score_suggested:Decimal|None
+ max_score:Decimal|None; student_feedback:str|None
+class StudentResultExecution(Strict):
+ remediation_id:UUID; title:str; instructions:str|None; plan_status:Literal["assigned","cancelled"]
+ due_at:datetime|None; execution_status:ExecutionStatus; submission_id:UUID|None
+ submission_status:Literal["draft","submitted"]|None; attempt_no:int|None; started_at:datetime|None
+ submitted_at:datetime|None; check_run_id:UUID|None; check_run_status:str|None; items:list[StudentResultItem]
+class RemediationFindingResult(Strict):
+ finding_id:UUID; finding_type:str; rubric_item_id:UUID|None; typical_error_id:UUID|None; skill_id:UUID|None
+ snapshot_code:str|None; snapshot_title:str|None; snapshot_criterion:str|None; severity:str; confidence:Decimal
+class RemediationCheckResult(Strict):
+ check_result_id:UUID; result_status:str; checker_type:str; score_suggested:Decimal|None; max_score:Decimal
+ confidence:Decimal; summary:str; teacher_summary:str|None; needs_human_review:bool
+ review_reason:str|None; model_limitations:str|None
+class TeacherRemediationResultItem(Strict):
+ remediation_plan_item_id:UUID; position:int; task_version_id:UUID; task_title:str|None; task_statement:str
+ student_raw_answer:Any|None; check_result:RemediationCheckResult|None; findings:list[RemediationFindingResult]
+class TeacherRemediationResult(Strict):
+ remediation_id:UUID; plan_status:Literal["draft","assigned","cancelled"]; execution_status:ExecutionStatus
+ student_id:UUID; student_display_name:str; submission_id:UUID|None; submission_status:str|None
+ started_at:datetime|None; submitted_at:datetime|None; check_run_id:UUID|None; check_run_status:str|None
+ failure_code:str|None; suggested_score_total:Decimal|None; max_score_total:Decimal|None
+ suggested_percent:Decimal|None; review_required_count:int; items:list[TeacherRemediationResultItem]

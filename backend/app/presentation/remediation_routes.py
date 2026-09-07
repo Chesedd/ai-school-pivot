@@ -4,6 +4,7 @@ from fastapi import APIRouter,Depends,Query,Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.capabilities import REMEDIATION_MANAGE,STUDENT_REMEDIATIONS_READ,STUDENT_REMEDIATIONS_EXECUTE
 from app.application.remediation_execution import RemediationExecutionService
+from app.application.remediation_results import RemediationResultsService
 from app.application.principal import Principal
 from app.db.session import get_session
 from app.infrastructure.remediation_repository import RemediationRepository
@@ -21,6 +22,9 @@ async def create(body:CreateRemediation,response:Response,p:Principal=Depends(re
  v=await r.create(p.user_id,admin(p),body);await s.commit();response.headers['Location']=f"/api/remediations/{v['id']}";return v
 @router.get("/remediations/{id}",response_model=RemediationPlanResponse)
 async def get(id:UUID,p:Principal=Depends(require_capability(REMEDIATION_MANAGE)),r:RemediationRepository=Depends(repo)):return await r.view(await r.owned(id,p.user_id,admin(p)))
+@router.get("/remediations/{id}/result",response_model=TeacherRemediationResult)
+async def remediation_result(id:UUID,p:Principal=Depends(require_capability(REMEDIATION_MANAGE)),s:AsyncSession=Depends(get_session)):
+ return await RemediationResultsService(s).teacher_result(id,p.user_id,admin(p))
 @router.patch("/remediations/{id}",response_model=RemediationPlanResponse)
 async def update(id:UUID,body:UpdateRemediation,p:Principal=Depends(require_capability(REMEDIATION_MANAGE)),r:RemediationRepository=Depends(repo),s:AsyncSession=Depends(get_session)):v=await r.update(id,p.user_id,admin(p),body);await s.commit();return v
 @router.post("/remediations/{id}/assign",response_model=RemediationPlanResponse)
@@ -36,9 +40,9 @@ async def student_detail(id:UUID,student_id:UUID=Depends(require_student_identit
 
 def execution_service(): return RemediationExecutionService(async_session_factory)
 
-@router.get("/student/remediations/{id}/execution",response_model=RemediationExecutionResponse)
-async def execution(id:UUID,student_id:UUID=Depends(require_student_identity),_:Principal=Depends(require_capability(STUDENT_REMEDIATIONS_EXECUTE))):
- return await execution_service().get_execution(id,student_id)
+@router.get("/student/remediations/{id}/execution",response_model=StudentResultExecution)
+async def execution(id:UUID,student_id:UUID=Depends(require_student_identity),_:Principal=Depends(require_capability(STUDENT_REMEDIATIONS_EXECUTE)),s:AsyncSession=Depends(get_session)):
+ return await RemediationResultsService(s).student_execution(id,student_id)
 
 @router.post("/student/remediations/{id}/start",response_model=RemediationExecutionResponse)
 async def start_execution(id:UUID,payload:EmptyRequest,response:Response,student_id:UUID=Depends(require_student_identity),_:Principal=Depends(require_capability(STUDENT_REMEDIATIONS_EXECUTE))):
