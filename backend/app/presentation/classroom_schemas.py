@@ -27,3 +27,25 @@ class TeacherStudentResponse(BaseModel):
     external_ref: str | None
     archived_at: datetime | None
 
+class NoteResponse(BaseModel):
+    id: UUID
+    body: str
+    teacher_user_id: UUID
+    teacher_display_name: str
+    class_group_id: UUID
+    student_id: UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+
+class NotePage(BaseModel):
+    items: list[NoteResponse]
+    total: int
+    offset: int
+    limit: int
+
+class NoteCreate(BaseModel):
+    body: str
+
+class NoteUpdate(BaseModel):
+    body: str
+    expected_updated_at: datetime

@@ -43,6 +43,8 @@ class ClassroomAccessRepository(Protocol):
                                    unrestricted: bool) -> TeacherClassDetail | None: ...
     async def list_accessible_students(self, class_group_id: UUID, actor_id: UUID,
                                        unrestricted: bool, status: ClassroomStatus): ...
+    async def get_accessible_student(self, class_group_id: UUID, student_id: UUID,
+                                     actor_id: UUID, unrestricted: bool): ...
     async def can_access_class(self, class_group_id: UUID, actor_id: UUID, unrestricted: bool,
                                *, require_active: bool = False,
                                require_configured: bool = False, lock: bool = False) -> bool: ...
@@ -73,4 +75,12 @@ class ClassroomAccessService:
             class_group_id, actor_id, unrestricted, status)
         if value is None:
             raise ClassroomAccessError()
+        return value
+
+    async def get_student(self, class_group_id: UUID, student_id: UUID, actor_id: UUID,
+                          unrestricted: bool):
+        value = await self.repository.get_accessible_student(
+            class_group_id, student_id, actor_id, unrestricted)
+        if value is None:
+            raise ClassroomAccessError("student_not_found")
         return value

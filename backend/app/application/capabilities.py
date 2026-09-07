@@ -3,6 +3,7 @@
 USERS_MANAGE = "users.manage"
 CLASSROOM_ADMIN = "classroom.admin"
 CLASSROOM_USE = "classroom.use"
+CLASSROOM_NOTES_MANAGE = "classroom.notes.manage"
 CATALOG_MANAGE = "catalog.manage"
 CATALOG_PROPOSE = "catalog.propose"
 DIAGNOSTICS_READ = "diagnostics.read"
@@ -26,6 +27,7 @@ ALL_CAPABILITIES = frozenset(
         USERS_MANAGE,
         CLASSROOM_ADMIN,
         CLASSROOM_USE,
+        CLASSROOM_NOTES_MANAGE,
         CATALOG_MANAGE,
         CATALOG_PROPOSE,
         DIAGNOSTICS_READ,
@@ -60,6 +62,7 @@ ROLE_CAPABILITIES: dict[str, frozenset[str]] = {
             ASSESSMENT_MANAGE,
             ASSESSMENT_RESULTS_READ,
             CLASSROOM_USE,
+            CLASSROOM_NOTES_MANAGE,
         }
     ),
     "student": frozenset(
