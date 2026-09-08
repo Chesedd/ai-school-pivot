@@ -206,7 +206,7 @@ async def test_full_classroom_product_vertical():
         intake = CheckingIntakeService(SQLAlchemyCheckingIntakeUnitOfWorkFactory(factory))
         source_run = await intake.create(CheckingIntakeRequest(
             submitted["id"], "vertical-assessment", "routing-v1", "deterministic-v1",
-            "confidence-v1", "no-provider-v1",
+            "checking_confidence_v1", "no-provider-v1",
         ))
         source_final = await _finish_deterministically(factory, source_run)
         assert source_final.status == "completed"
