@@ -192,7 +192,7 @@ async def test_full_classroom_product_vertical():
         answer, status = await assessment_execution.save_answer(
             attempt["id"], ids["assessment_item"], student_a.id, "forty-two", None
         )
-        assert status == 201 and answer["normalized_answer"] == "forty-two"
+        assert status == 201 and answer["normalized_answer"] == {"text": "forty-two"}
         submitted, status = await assessment_execution.submit(
             attempt["id"], student_a.id, "vertical-submit"
         )

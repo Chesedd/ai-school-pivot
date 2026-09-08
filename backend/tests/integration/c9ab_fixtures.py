@@ -16,22 +16,16 @@ async def seed_execution_world(connection, *, plans=2):
         for item in range(2):
             for name in ("task", "version", "plan_item"):
                 ids[f"{name}_{n}_{item}"] = uuid4()
-    await connection.execute(text("""
-      INSERT INTO users(id,login,normalized_login,display_name,password_hash)
-      VALUES (:owner,'c9ab-owner','c9ab-owner','C9AB Owner','hash');
-      INSERT INTO class_groups(id,name,created_by) VALUES
-        (:group_a,'C9AB 7A',:owner),(:group_b,'C9AB 7B',:owner);
-      INSERT INTO subjects(id,code,name,normalized_name) VALUES
-        (:subject,'c9ab','C9AB','c9ab');
-      INSERT INTO grades(id,number,name,normalized_name) VALUES
-        (:grade,7,'C9AB Grade 7','c9ab grade 7');
-      INSERT INTO topics(id,subject_id,grade_id,code,name,normalized_name) VALUES
-        (:topic,:subject,:grade,'c9ab','C9AB Topic','c9ab topic');
-      INSERT INTO assessments(id,title,created_by) VALUES
-        (:assessment,'C9AB Assessment',:owner);
-      INSERT INTO assessment_variants(id,assessment_id,name,position) VALUES
-        (:variant,:assessment,'A',1)
-    """), ids)
+    for sql in (
+        "INSERT INTO users(id,login,normalized_login,display_name,password_hash) VALUES (:owner,'c9ab-owner','c9ab-owner','C9AB Owner','hash')",
+        "INSERT INTO class_groups(id,name,created_by) VALUES (:group_a,'C9AB 7A',:owner),(:group_b,'C9AB 7B',:owner)",
+        "INSERT INTO subjects(id,code,name,normalized_name) VALUES (:subject,'c9ab','C9AB','c9ab')",
+        "INSERT INTO grades(id,number,name,normalized_name) VALUES (:grade,7,'C9AB Grade 7','c9ab grade 7')",
+        "INSERT INTO topics(id,subject_id,grade_id,code,name,normalized_name) VALUES (:topic,:subject,:grade,'c9ab','C9AB Topic','c9ab topic')",
+        "INSERT INTO assessments(id,title,created_by) VALUES (:assessment,'C9AB Assessment',:owner)",
+        "INSERT INTO assessment_variants(id,assessment_id,name,position) VALUES (:variant,:assessment,'A',1)",
+    ):
+        await connection.execute(text(sql), ids)
     for n in range(plans):
         values = {**ids, "student": ids[f"student_{n}"], "assignment": ids[f"assignment_{n}"],
             "user": ids[f"user_{n}"], "participant": ids[f"participant_{n}"], "submission": ids[f"source_submission_{n}"],
