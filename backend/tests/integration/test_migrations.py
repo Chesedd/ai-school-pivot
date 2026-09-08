@@ -124,6 +124,59 @@ async def test_clean_database_upgrades_to_head_with_observability_columns():
         await engine.dispose()
 
 
+async def test_assessment_foundation_is_isolated_from_later_remediation_schema():
+    """The Phase 3.1 migration replays its own historical Assessment schema."""
+    engine = create_async_engine(URL)
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(sa.text("DROP SCHEMA public CASCADE"))
+            await connection.execute(sa.text("CREATE SCHEMA public"))
+
+        alembic("upgrade", "20260808_02")
+        async with engine.connect() as connection:
+            historical_columns = set((await connection.execute(sa.text("""
+                SELECT table_name, column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND (
+                    (table_name = 'student_submissions'
+                     AND column_name = 'remediation_plan_id')
+                    OR
+                    (table_name = 'student_answers'
+                     AND column_name = 'remediation_plan_item_id')
+                  )
+            """))).all())
+            revision = await connection.scalar(
+                sa.text("SELECT version_num FROM alembic_version")
+            )
+
+        assert revision == "20260808_02"
+        assert historical_columns == set()
+
+        alembic("upgrade", "head")
+        await assert_database_at_repository_head(engine)
+        async with engine.connect() as connection:
+            current_columns = set((await connection.execute(sa.text("""
+                SELECT table_name, column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND (
+                    (table_name = 'student_submissions'
+                     AND column_name = 'remediation_plan_id')
+                    OR
+                    (table_name = 'student_answers'
+                     AND column_name = 'remediation_plan_item_id')
+                  )
+            """))).all())
+
+        assert current_columns == {
+            ("student_submissions", "remediation_plan_id"),
+            ("student_answers", "remediation_plan_item_id"),
+        }
+    finally:
+        await engine.dispose()
+
+
 async def test_clean_online_upgrade_installs_c10a_vertical_schema():
     """A fresh online upgrade produces the sole expected head and vertical tables."""
     engine = create_async_engine(URL)

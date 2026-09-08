@@ -84,50 +84,53 @@ async def test_full_classroom_product_vertical():
         )}
         # Fixture SQL: auth has no convenient in-process password/role bootstrap;
         # Content Bank and the immutable published Assessment graph are prerequisites.
-        await connection.execute(text("""
-          INSERT INTO users(id,login,normalized_login,display_name,password_hash) VALUES
+        fixture_statements = (
+          """INSERT INTO users(id,login,normalized_login,display_name,password_hash) VALUES
             (:admin,'vertical-admin','vertical-admin','Admin','hash'),
             (:teacher_a,'vertical-teacher-a','vertical-teacher-a','Teacher A','hash'),
             (:teacher_b,'vertical-teacher-b','vertical-teacher-b','Teacher B','hash'),
             (:student_a_user,'vertical-student-a','vertical-student-a','Student A','hash'),
-            (:student_b_user,'vertical-student-b','vertical-student-b','Student B','hash');
-          INSERT INTO user_roles(user_id,role) VALUES
+            (:student_b_user,'vertical-student-b','vertical-student-b','Student B','hash')""",
+          """INSERT INTO user_roles(user_id,role) VALUES
             (:admin,'admin'),(:teacher_a,'teacher'),(:teacher_b,'teacher'),
-            (:student_a_user,'student'),(:student_b_user,'student');
-          INSERT INTO grades(id,number,name,normalized_name)
-            VALUES (:grade,7,'Vertical Grade 7','vertical grade 7');
-          INSERT INTO subjects(id,code,name,normalized_name)
-            VALUES (:subject,'vertical-subject','Vertical Subject','vertical subject');
-          INSERT INTO topics(id,subject_id,grade_id,code,name,normalized_name)
-            VALUES (:topic,:subject,:grade,'vertical-topic','Vertical Topic','vertical topic');
-          INSERT INTO subtopics(id,topic_id,code,name,normalized_name)
-            VALUES (:subtopic,:topic,'vertical-subtopic','Vertical Subtopic','vertical subtopic');
-          INSERT INTO skills(id,subtopic_id,code,name,normalized_name)
-            VALUES (:skill,:subtopic,'vertical-skill','Vertical Skill','vertical skill');
-          INSERT INTO tasks(id,subject_id,grade_id,topic_id,subtopic_id,created_by) VALUES
+            (:student_a_user,'student'),(:student_b_user,'student')""",
+          """INSERT INTO grades(id,number,name,normalized_name)
+            VALUES (:grade,7,'Vertical Grade 7','vertical grade 7')""",
+          """INSERT INTO subjects(id,code,name,normalized_name)
+            VALUES (:subject,'vertical-subject','Vertical Subject','vertical subject')""",
+          """INSERT INTO topics(id,subject_id,grade_id,code,name,normalized_name)
+            VALUES (:topic,:subject,:grade,'vertical-topic','Vertical Topic','vertical topic')""",
+          """INSERT INTO subtopics(id,topic_id,code,name,normalized_name)
+            VALUES (:subtopic,:topic,'vertical-subtopic','Vertical Subtopic','vertical subtopic')""",
+          """INSERT INTO skills(id,subtopic_id,code,name,normalized_name)
+            VALUES (:skill,:subtopic,'vertical-skill','Vertical Skill','vertical skill')""",
+          """INSERT INTO tasks(id,subject_id,grade_id,topic_id,subtopic_id,created_by) VALUES
             (:source_task,:subject,:grade,:topic,:subtopic,:teacher_a),
-            (:candidate_task,:subject,:grade,:topic,:subtopic,:teacher_a);
-          INSERT INTO task_versions(id,task_id,version_no,title,statement,task_type,
+            (:candidate_task,:subject,:grade,:topic,:subtopic,:teacher_a)""",
+          """INSERT INTO task_versions(id,task_id,version_no,title,statement,task_type,
             answer_format,difficulty,status,created_by,approved_by,approved_at) VALUES
             (:source_version,:source_task,1,'Source exact','Type forty-two','problem',
              'short_text',40,'approved',:teacher_a,:teacher_a,clock_timestamp()),
             (:candidate_version,:candidate_task,1,'Candidate exact','Type forty-two again','problem',
-             'short_text',40,'approved',:teacher_a,:teacher_a,clock_timestamp());
-          INSERT INTO accepted_answers(id,task_version_id,answer_value,value_kind,canonical_text,
+             'short_text',40,'approved',:teacher_a,:teacher_a,clock_timestamp())""",
+          """INSERT INTO accepted_answers(id,task_version_id,answer_value,value_kind,canonical_text,
             normalization_policy_code,normalization_policy_version)
             VALUES
               (:accepted,:source_version,'forty-two','text','forty-two','exact_text_v1',1),
               (:candidate_accepted,:candidate_version,'forty-two','text','forty-two',
-               'exact_text_v1',1);
-          INSERT INTO task_skill_links(task_version_id,skill_id,weight,is_primary) VALUES
-            (:source_version,:skill,1,true),(:candidate_version,:skill,1,true);
-          INSERT INTO assessments(id,title,status,created_by,published_at,published_by)
-            VALUES (:assessment,'Vertical Assessment','published',:teacher_a,clock_timestamp(),:teacher_a);
-          INSERT INTO assessment_variants(id,assessment_id,name,position)
-            VALUES (:variant,:assessment,'A',1);
-          INSERT INTO assessment_items(id,variant_id,task_version_id,position,points)
-            VALUES (:assessment_item,:variant,:source_version,1,1);
-        """), ids)
+               'exact_text_v1',1)""",
+          """INSERT INTO task_skill_links(task_version_id,skill_id,weight,is_primary) VALUES
+            (:source_version,:skill,1,true),(:candidate_version,:skill,1,true)""",
+          """INSERT INTO assessments(id,title,status,created_by,published_at,published_by)
+            VALUES (:assessment,'Vertical Assessment','published',:teacher_a,
+                    clock_timestamp(),:teacher_a)""",
+          """INSERT INTO assessment_variants(id,assessment_id,name,position)
+            VALUES (:variant,:assessment,'A',1)""",
+          """INSERT INTO assessment_items(id,variant_id,task_version_id,position,points)
+            VALUES (:assessment_item,:variant,:source_version,1,1)""",
+        )
+        for statement in fixture_statements:
+            await connection.execute(text(statement), ids)
 
         factory = async_sessionmaker(bind=connection, expire_on_commit=False)
         # Real Classroom administration creates 7A, memberships, and both students.
