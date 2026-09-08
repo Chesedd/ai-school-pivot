@@ -95,6 +95,43 @@ def _draft(ids, key, *, title="Focused remediation"):
     )
 
 
+@pytest.mark.parametrize("availability", ["eligible", "unapproved", "archived"])
+async def test_assign_locks_eligible_rows_and_rejects_unavailable_content(availability):
+    """Send locks concrete TaskVersion and Task rows rather than an aggregate."""
+    async with rolled_back_connection() as connection:
+        ids = await seed_execution_world(connection, plans=1)
+        await connection.execute(text(
+            "INSERT INTO class_group_teachers(class_group_id,teacher_user_id) "
+            "VALUES (:group_a,:owner)"), ids)
+        session = AsyncSession(bind=connection, expire_on_commit=False)
+        repository = RemediationRepository(session)
+        created = await repository.create(
+            ids["owner"], False, _draft(ids, f"availability-{availability}"))
+
+        if availability == "unapproved":
+            await connection.execute(text(
+                "UPDATE task_versions SET status='draft' WHERE id=:version_0_0"), ids)
+        elif availability == "archived":
+            await connection.execute(text(
+                "UPDATE tasks SET archived_at=clock_timestamp() WHERE id=:task_0_0"), ids)
+
+        if availability == "eligible":
+            assigned = await repository.assign(created["id"], ids["owner"], False, False)
+            assert assigned["status"] == "assigned"
+            assert assigned["assigned_at"] is not None
+            assert await connection.scalar(text(
+                "SELECT count(*) FROM remediation_events WHERE remediation_plan_id=:id "
+                "AND event_type='plan_assigned'"), {"id": created["id"]}) == 1
+        else:
+            with pytest.raises(RemediationError, match="remediation_task_unavailable"):
+                await repository.assign(created["id"], ids["owner"], False, False)
+            assert (await repository.owned(created["id"], ids["owner"], False)).status == "draft"
+            assert await connection.scalar(text(
+                "SELECT count(*) FROM remediation_events WHERE remediation_plan_id=:id "
+                "AND event_type='plan_assigned'"), {"id": created["id"]}) == 0
+        await session.close()
+
+
 async def test_real_draft_idempotency_cas_send_and_move_after_send():
     """C8 lifecycle acceptance through the existing application repository boundary."""
     async with rolled_back_connection() as connection:

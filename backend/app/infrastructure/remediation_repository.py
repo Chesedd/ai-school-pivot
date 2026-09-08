@@ -60,8 +60,9 @@ class RemediationRepository:
   row=await self.source(actor,False,plan.source_assignment_id,plan.student_id,plan.source_submission_id,plan.source_check_run_id,plan.source_assignment_participant_id)
   run=row[3]; items=(await self.s.scalars(select(RemediationPlanItem).where(RemediationPlanItem.remediation_plan_id==id))).all()
   if not items:raise RemediationError("remediation_empty")
-  eligible=await self.s.scalar(select(func.count()).select_from(TaskVersion).join(Task).where(TaskVersion.id.in_([x.task_version_id for x in items]),TaskVersion.status=="approved",Task.archived_at.is_(None)).with_for_update())
-  if eligible!=len(items):raise RemediationError("remediation_task_unavailable")
+  item_ids=[x.task_version_id for x in items]
+  eligible_rows=(await self.s.execute(select(TaskVersion.id,Task.id).join(Task,Task.id==TaskVersion.task_id).where(TaskVersion.id.in_(item_ids),TaskVersion.status=="approved",Task.archived_at.is_(None)).with_for_update(of=(TaskVersion,Task)))).all()
+  if len(eligible_rows)!=len(item_ids):raise RemediationError("remediation_task_unavailable")
   if run.status=="completed_with_review_required" and not ack:raise RemediationError("remediation_review_ack_required")
   now=utcnow(); plan.status="assigned";plan.assigned_at=now;plan.updated_at=now;plan.review_acknowledged_at=now if run.status=="completed_with_review_required" else None;self.s.add(RemediationEvent(remediation_plan_id=id,event_type="plan_assigned",actor_user_id=actor,details={"item_count":len(items)}));await self.s.flush();return await self.view(plan)
  async def cancel(self,id,actor,admin):
