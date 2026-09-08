@@ -20,6 +20,7 @@ def test_student_has_only_student_workflow_grants():
     assert ROLE_CAPABILITIES["student"] == {
         "student.assignments.read", "student.attempts.submit", "student.results.read",
         "student.remediations.read",
+        "student.remediations.execute",
     }
 
 
