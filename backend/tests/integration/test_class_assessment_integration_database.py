@@ -2,6 +2,11 @@
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import async_sessionmaker
+from datetime import datetime, timedelta, timezone
+from app.application.assessments import AssessmentService, CreateAssignmentCommand
+from app.application.content_bank import ActorContext
+from app.infrastructure.assessment_repository import SQLAlchemyAssessmentUnitOfWork
 from tests.integration.c10a_postgres import assert_constraints, rolled_back_connection
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -71,3 +76,50 @@ async def test_occurrences_reuse_assessment_and_snapshot_roster_without_backfill
         assert old == {ids["s1"], ids["s2"], ids["s3"]}
         assert new == {ids["s1"], ids["s4"]}
         assert ids["s4"] not in old
+
+
+async def test_real_assignment_application_flow_snapshots_each_current_roster():
+    """C6 acceptance: the application operation, not fixture SQL, makes snapshots."""
+    from uuid import uuid4
+
+    async with rolled_back_connection() as connection:
+        ids = {name: uuid4() for name in
+               ("teacher", "group_a", "group_b", "assessment", "a", "b", "c", "d")}
+        await connection.execute(text("""
+          INSERT INTO users(id,login,normalized_login,display_name,password_hash)
+            VALUES (:teacher,'c10d3-app-owner','c10d3-app-owner','Teacher A','hash');
+          INSERT INTO class_groups(id,name,created_by) VALUES
+            (:group_a,'Application 7A',:teacher),(:group_b,'Application 7B',:teacher);
+          INSERT INTO students(id,class_group_id,display_name) VALUES
+            (:a,:group_a,'A'),(:b,:group_a,'B'),(:c,:group_a,'C');
+          INSERT INTO assessments(id,title,status,created_by,published_at,published_by)
+            VALUES (:assessment,'Published X','published',:teacher,clock_timestamp(),:teacher)
+        """), ids)
+        factory = async_sessionmaker(bind=connection, expire_on_commit=False)
+        service = AssessmentService(SQLAlchemyAssessmentUnitOfWork(factory))
+        actor = ActorContext(ids["teacher"])
+        now = datetime.now(timezone.utc)
+
+        first = await service.create_assignment(CreateAssignmentCommand(
+            ids["assessment"], ids["group_a"], now, now + timedelta(days=1), 1), actor)
+        assert first.assessment_id == ids["assessment"]
+        assert first.class_group_id == ids["group_a"]
+        assert set(first.student_ids) == {ids["a"], ids["b"], ids["c"]}
+
+        await connection.execute(text("""
+          UPDATE students SET class_group_id=:group_b WHERE id=:b;
+          UPDATE students SET archived_at=clock_timestamp() WHERE id=:c;
+          INSERT INTO students(id,class_group_id,display_name) VALUES (:d,:group_a,'D')
+        """), ids)
+        second = await service.create_assignment(CreateAssignmentCommand(
+            ids["assessment"], ids["group_a"], now, now + timedelta(days=2), 1), actor)
+
+        assert second.id != first.id
+        old = set((await connection.execute(text(
+            "SELECT student_id FROM assignment_participants WHERE assignment_id=:id"),
+            {"id": first.id})).scalars())
+        new = set((await connection.execute(text(
+            "SELECT student_id FROM assignment_participants WHERE assignment_id=:id"),
+            {"id": second.id})).scalars())
+        assert old == {ids["a"], ids["b"], ids["c"]}
+        assert new == {ids["a"], ids["d"]}
