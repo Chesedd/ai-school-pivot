@@ -36,7 +36,7 @@ async def _insert_result(connection, ids, **targets):
         confidence_policy_version,confidence_details,score_suggested,max_score,confidence,
         summary,needs_human_review,validated_result)
       VALUES (:id,:source_run_0,:assessment_item_id,:remediation_plan_item_id,:version_0,
-        'deterministic','v1','v1','correct','exact','v1',
+        'exact','v1','v1','correct','exact','v1',
         '{"effective":"1.0000"}',1,1,1,'correct',false,'{}')
     """), values)
     return values["id"]
@@ -67,7 +67,7 @@ async def test_execution_targets_enforce_row_xor_and_partial_uniqueness():
 
         assessment_result = await _insert_result(connection, common, remediation_plan_item_id=None)
         remediation_result = await _insert_result(connection, common, assessment_item_id=None)
-        result_sql = """INSERT INTO check_results(id,check_run_id,assessment_item_id,remediation_plan_item_id,task_version_id,checker_type,checker_version,schema_version,result_status,reason_code,confidence_policy_version,confidence_details,score_suggested,max_score,confidence,summary,needs_human_review,validated_result) VALUES (:id,:source_run_0,:assessment_item_id,:remediation_plan_item_id,:version_0,'deterministic','v1','v1','correct','exact','v1','{\"effective\":\"1.0000\"}',1,1,1,'correct',false,'{}')"""
+        result_sql = """INSERT INTO check_results(id,check_run_id,assessment_item_id,remediation_plan_item_id,task_version_id,checker_type,checker_version,schema_version,result_status,reason_code,confidence_policy_version,confidence_details,score_suggested,max_score,confidence,summary,needs_human_review,validated_result) VALUES (:id,:source_run_0,:assessment_item_id,:remediation_plan_item_id,:version_0,'exact','v1','v1','correct','exact','v1','{\"effective\":\"1.0000\"}',1,1,1,'correct',false,'{}')"""
         for targets in ({"assessment_item_id": None, "remediation_plan_item_id": None}, common,
                         {"assessment_item_id": ids["assessment_item_0"], "remediation_plan_item_id": None},
                         {"assessment_item_id": None, "remediation_plan_item_id": ids["plan_item_0_0"]}):
@@ -83,7 +83,7 @@ async def test_execution_targets_enforce_row_xor_and_partial_uniqueness():
                         {"assessment_item_id": None, "remediation_plan_item_id": ids["plan_item_0_0"]}):
             await _rejected(connection, model_sql, {**common, **targets, "id": uuid4(), "prompt": prompt, "result": None, "attempt": 1})
 
-        event_sql = "INSERT INTO checker_events(id,check_run_id,assessment_item_id,remediation_plan_item_id,event_type,details) VALUES (:id,:source_run_0,:assessment_item_id,:remediation_plan_item_id,'routing_decision','{}')"
+        event_sql = "INSERT INTO checker_events(id,check_run_id,assessment_item_id,remediation_plan_item_id,event_type,details) VALUES (:id,:source_run_0,:assessment_item_id,:remediation_plan_item_id,'result_recorded','{}')"
         for targets in ({"assessment_item_id": None, "remediation_plan_item_id": None},
                         {"assessment_item_id": ids["assessment_item_0"], "remediation_plan_item_id": None},
                         {"assessment_item_id": None, "remediation_plan_item_id": ids["plan_item_0_0"]}):
@@ -119,10 +119,10 @@ async def test_exact_20260907_03_to_20260907_04_preserves_assessment_execution_r
             ids = await seed_execution_world(c, plans=1)
             ids.update({name: uuid4() for name in ("answer", "result", "prompt", "model", "event")})
             await c.execute(text("INSERT INTO student_answers(id,submission_id,assessment_item_id,raw_answer,normalized_answer) VALUES (:answer,:source_submission_0,:assessment_item_0,'\"old\"','\"old\"')"), ids)
-            await c.execute(text("""INSERT INTO check_results(id,check_run_id,assessment_item_id,task_version_id,checker_type,checker_version,schema_version,result_status,reason_code,confidence_policy_version,confidence_details,score_suggested,max_score,confidence,summary,needs_human_review,validated_result) VALUES (:result,:source_run_0,:assessment_item_0,:version_0,'deterministic','v1','v1','correct','exact','v1','{"effective":"1.0000"}',1,1,1,'old',false,'{}')"""), ids)
+            await c.execute(text("""INSERT INTO check_results(id,check_run_id,assessment_item_id,task_version_id,checker_type,checker_version,schema_version,result_status,reason_code,confidence_policy_version,confidence_details,score_suggested,max_score,confidence,summary,needs_human_review,validated_result) VALUES (:result,:source_run_0,:assessment_item_0,:version_0,'exact','v1','v1','correct','exact','v1','{"effective":"1.0000"}',1,1,1,'old',false,'{}')"""), ids)
             await c.execute(text("INSERT INTO prompt_versions(id,name,semantic_version,template_hash,output_schema_version,template_text) VALUES (:prompt,'old','v1','ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff','v1','old')"), ids)
             await c.execute(text("""INSERT INTO model_runs(id,check_run_id,assessment_item_id,prompt_version_id,check_result_id,provider_id,model_id,settings_snapshot,request_fingerprint,attempt_no,timeout_ms) VALUES (:model,:source_run_0,:assessment_item_0,:prompt,:result,'provider','model','{}','eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',1,1000)"""), ids)
-            await c.execute(text("INSERT INTO checker_events(id,check_run_id,check_result_id,assessment_item_id,event_type,details) VALUES (:event,:source_run_0,:result,:assessment_item_0,'routing_decision','{}')"), ids)
+            await c.execute(text("INSERT INTO checker_events(id,check_run_id,check_result_id,assessment_item_id,event_type,details) VALUES (:event,:source_run_0,:result,:assessment_item_0,'result_recorded','{}')"), ids)
         _alembic("upgrade", "20260907_04")
         async with engine.connect() as c:
             expectations = (("student_submissions", "source_submission_0", "assignment_participant_id"),
