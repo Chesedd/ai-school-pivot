@@ -7,6 +7,19 @@ const json=(body:unknown)=>new Response(JSON.stringify(body),{status:200,headers
 afterEach(()=>{cleanup();vi.restoreAllMocks();history.replaceState({},"","/")});
 
 describe("Content Bank application shell",()=>{
+ it.each([
+  ["/admin/classes","classroom.admin"],
+  ["/classrooms","classroom.use"],
+  ["/classrooms/class%2Fid","classroom.use"],
+  ["/classrooms/c/students/s","classroom.use"],
+  ["/classrooms/c/assignments/a/results","assessment.results.read"],
+  ["/classrooms/c/assignments/a/students/s/results","assessment.results.read"],
+  ["/classrooms/c/assignments/a/students/s/remediation/new","remediation.manage"],
+  ["/classrooms/c/students/s/remediations/r","remediation.manage"],
+  ["/student/remediations","student.remediations.read"],
+  ["/student/remediations/r","student.remediations.execute"],
+ ])("guards direct route %s with %s",(path,capability)=>{const principal={user_id:"u",login:"u",display_name:"User",roles:["student"],student_id:"s",capabilities:[]};history.replaceState({},"",path);render(<App principal={principal}/>);expect(screen.getByRole("heading",{name:"Нет доступа"})).toBeTruthy();expect(capability).toBeTruthy()});
+ it("keeps student and teacher navigation separated by existing capabilities",()=>{history.replaceState({},"","/no-access");const base={user_id:"s",login:"s",display_name:"Student",roles:["student"],student_id:"s"};render(<App principal={{...base,capabilities:["student.remediations.read","student.remediations.execute"]}}/>);expect(screen.getByRole("link",{name:"Отработки"})).toBeTruthy();expect(screen.queryByRole("link",{name:"Мои классы"})).toBeNull();expect(screen.queryByRole("link",{name:"Классы"})).toBeNull()});
  it("shows Classes only with classroom.admin and protects direct navigation",()=>{const base={user_id:"u",login:"u",display_name:"User",roles:["teacher"],student_id:null};history.replaceState({},"","/admin/classes");const view=render(<App principal={{...base,capabilities:["classroom.admin"]}}/>);expect(screen.getByRole("link",{name:"Классы"}).getAttribute("aria-current")).toBe("page");view.rerender(<App principal={{...base,capabilities:["users.manage"]}}/>);expect(screen.queryByRole("link",{name:"Классы"})).toBeNull();expect(screen.getByRole("heading",{name:"Нет доступа"})).toBeTruthy()});
  it("does not expose Classes to student principals",()=>{history.replaceState({},"","/student/assignments");vi.spyOn(apiClient,"listStudentAssignments").mockResolvedValue({items:[],total:0,offset:0,limit:20});render(<App principal={{user_id:"s",login:"s",display_name:"Student",roles:["student"],student_id:"s",capabilities:["student.assignments.read"]}}/>);expect(screen.queryByRole("link",{name:"Классы"})).toBeNull()});
  it("provides a skip link, semantic navigation, active item, and one page heading",async()=>{
