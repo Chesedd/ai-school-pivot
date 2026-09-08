@@ -209,7 +209,7 @@ async def test_full_classroom_product_vertical():
             "checking_confidence_v1", "no-provider-v1",
         ))
         source_final = await _finish_deterministically(factory, source_run)
-        assert source_final.status == "completed"
+        assert source_final.run_status == "completed"
         source_result = (await connection.execute(text("""
           SELECT assessment_item_id,remediation_plan_item_id,result_status::text,score_suggested
           FROM check_results WHERE check_run_id=:run
@@ -289,7 +289,7 @@ async def test_full_classroom_product_vertical():
           SELECT * FROM check_runs WHERE submission_id=:submission
         """), {"submission": remediation_submit["submission_id"]})).mappings().one()
         remediation_final = await _finish_deterministically(factory, remediation_run)
-        assert remediation_final.status == "completed"
+        assert remediation_final.run_status == "completed"
 
         persisted = (await connection.execute(text("""
           SELECT attempt_no,assignment_participant_id FROM student_submissions
