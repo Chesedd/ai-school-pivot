@@ -334,9 +334,30 @@ def supported_baseline_metadata() -> sa.MetaData:
     )
     # These tables already existed at the supported revision and are required
     # by the later account migration's student_user_links foreign key.
-    from app.infrastructure.assessment_models import ClassGroup, Student
-    ClassGroup.__table__.to_metadata(metadata)
-    Student.__table__.to_metadata(metadata)
+    class_groups = sa.Table(
+        "class_groups", metadata,
+        sa.Column("id", sa.Uuid(), server_default=sa.text("gen_random_uuid()"), primary_key=True),
+        sa.Column("name", sa.String(120), nullable=False),
+        sa.Column("external_ref", sa.String(120)),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("clock_timestamp()"), nullable=False),
+        sa.Column("created_by", sa.Uuid(), nullable=False),
+        sa.Column("archived_at", sa.DateTime(timezone=True)),
+        sa.CheckConstraint("name = btrim(name) AND char_length(name) BETWEEN 1 AND 120", name="ck_class_groups_name_valid"),
+    )
+    sa.Index("uq_class_groups_external_ref", class_groups.c.external_ref, unique=True, postgresql_where=sa.text("external_ref IS NOT NULL"))
+    sa.Index("ix_class_groups_active", class_groups.c.archived_at, class_groups.c.id)
+    students = sa.Table(
+        "students", metadata,
+        sa.Column("id", sa.Uuid(), server_default=sa.text("gen_random_uuid()"), primary_key=True),
+        sa.Column("class_group_id", sa.Uuid(), sa.ForeignKey(class_groups.c.id, name="fk_students_class_group_id_class_groups", ondelete="RESTRICT", onupdate="RESTRICT"), nullable=False),
+        sa.Column("display_name", sa.String(120), nullable=False),
+        sa.Column("external_ref", sa.String(120)),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("clock_timestamp()"), nullable=False),
+        sa.Column("archived_at", sa.DateTime(timezone=True)),
+        sa.CheckConstraint("display_name = btrim(display_name) AND char_length(display_name) BETWEEN 1 AND 120", name="ck_students_display_name_valid"),
+    )
+    sa.Index("uq_students_group_external_ref", students.c.class_group_id, students.c.external_ref, unique=True, postgresql_where=sa.text("external_ref IS NOT NULL"))
+    sa.Index("ix_students_group_active", students.c.class_group_id, students.c.archived_at, students.c.id)
     session_status = postgresql.ENUM(
         "draft", "generating", "ready", "confirmed", "rejected", "expired",
         name="authoring_session_status",
