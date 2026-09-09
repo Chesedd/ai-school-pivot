@@ -43,7 +43,7 @@ async def test_source_substitution_is_rejected_as_one_coherent_chain():
     """Individually valid foreign IDs must not compose a valid remediation source."""
     async with rolled_back_connection() as connection:
         ids = await seed_execution_world(connection)
-        await connection.execute(text("INSERT INTO class_group_teachers(class_group_id,teacher_user_id) VALUES (:group_a,:owner)"), ids)
+        await connection.execute(text("INSERT INTO class_group_teachers(class_group_id,teacher_user_id,assigned_by) VALUES (:group_a,:owner,:owner)"), ids)
         session = AsyncSession(bind=connection, expire_on_commit=False)
         repository = RemediationRepository(session)
         valid = (ids["assignment_0"], ids["student_0"], ids["source_submission_0"],
@@ -66,7 +66,7 @@ async def test_source_substitution_is_rejected_as_one_coherent_chain():
 async def test_cancel_and_owner_privacy_are_idempotent_and_preserve_source():
     async with rolled_back_connection() as connection:
         ids = await seed_execution_world(connection)
-        await connection.execute(text("INSERT INTO class_group_teachers(class_group_id,teacher_user_id) VALUES (:group_a,:owner)"), ids)
+        await connection.execute(text("INSERT INTO class_group_teachers(class_group_id,teacher_user_id,assigned_by) VALUES (:group_a,:owner,:owner)"), ids)
         session = AsyncSession(bind=connection, expire_on_commit=False)
         repository = RemediationRepository(session)
         before = await connection.scalar(text("SELECT count(*) FROM assignment_participants WHERE id=:participant_0"), ids)
@@ -101,8 +101,8 @@ async def test_assign_locks_eligible_rows_and_rejects_unavailable_content(availa
     async with rolled_back_connection() as connection:
         ids = await seed_execution_world(connection, plans=1)
         await connection.execute(text(
-            "INSERT INTO class_group_teachers(class_group_id,teacher_user_id) "
-            "VALUES (:group_a,:owner)"), ids)
+            "INSERT INTO class_group_teachers(class_group_id,teacher_user_id,assigned_by) "
+            "VALUES (:group_a,:owner,:owner)"), ids)
         session = AsyncSession(bind=connection, expire_on_commit=False)
         repository = RemediationRepository(session)
         created = await repository.create(
@@ -137,7 +137,7 @@ async def test_real_draft_idempotency_cas_send_and_move_after_send():
     async with rolled_back_connection() as connection:
         ids = await seed_execution_world(connection, plans=1)
         await connection.execute(text(
-            "INSERT INTO class_group_teachers(class_group_id,teacher_user_id) VALUES (:group_a,:owner)"), ids)
+            "INSERT INTO class_group_teachers(class_group_id,teacher_user_id,assigned_by) VALUES (:group_a,:owner,:owner)"), ids)
         session = AsyncSession(bind=connection, expire_on_commit=False)
         repository = RemediationRepository(session)
 
@@ -184,7 +184,7 @@ async def test_real_send_requires_review_acknowledgement_and_rejects_pre_send_mo
     async with rolled_back_connection() as connection:
         ids = await seed_execution_world(connection, plans=1)
         await connection.execute(text(
-            "INSERT INTO class_group_teachers(class_group_id,teacher_user_id) VALUES (:group_a,:owner)"), ids)
+            "INSERT INTO class_group_teachers(class_group_id,teacher_user_id,assigned_by) VALUES (:group_a,:owner,:owner)"), ids)
         session = AsyncSession(bind=connection, expire_on_commit=False)
         repository = RemediationRepository(session)
 
@@ -223,32 +223,43 @@ async def test_real_candidate_search_eligibility_ranking_and_manual_mode():
             "irrelevant_version", "wrong_subject_task", "wrong_subject_version", "wrong_grade_task",
             "wrong_grade_version", "unapproved_task", "unapproved_version", "inactive_task",
             "inactive_version")})
-        await connection.execute(text("""
-          INSERT INTO class_group_teachers(class_group_id,teacher_user_id) VALUES (:group_a,:owner);
-          INSERT INTO subtopics(id,topic_id,code,name,normalized_name)
+        fixture_statements = (
+          """INSERT INTO class_group_teachers(class_group_id,teacher_user_id,assigned_by)
+            VALUES (:group_a,:owner,:owner)""",
+          """INSERT INTO subtopics(id,topic_id,code,name,normalized_name)
             VALUES (:subtopic,:topic,'candidate-sub','Candidate Sub','candidate sub');
-          INSERT INTO skills(id,subtopic_id,code,name,normalized_name)
+          """,
+          """INSERT INTO skills(id,subtopic_id,code,name,normalized_name)
             VALUES (:skill,:subtopic,'candidate-skill','Candidate Skill','candidate skill');
-          INSERT INTO typical_errors(id,skill_id,code,title,description,severity)
+          """,
+          """INSERT INTO typical_errors(id,skill_id,code,title,description,severity)
             VALUES (:error,:skill,'candidate-error','Exact error','Exact error','major');
-          INSERT INTO check_results(id,check_run_id,assessment_item_id,task_version_id,checker_type,
+          """,
+          """INSERT INTO check_results(id,check_run_id,assessment_item_id,task_version_id,checker_type,
             checker_version,schema_version,result_status,reason_code,confidence_policy_version,
             confidence_details,score_suggested,max_score,confidence,summary,needs_human_review,
             validated_result)
           VALUES (:result,:source_run_0,:assessment_item_0,:version_0,'exact','v1','v1','incorrect',
             'incorrect','v1','{"effective":"1.0000"}',0,1,1,'Incorrect',false,'{}');
-          INSERT INTO check_findings(id,check_result_id,finding_type,typical_error_id,skill_id,
+          """,
+          """INSERT INTO check_findings(id,check_result_id,finding_type,typical_error_id,skill_id,
             snapshot_code,snapshot_title,severity,confidence,evidence)
           VALUES (:finding,:result,'typical_error',:error,:skill,'candidate-error','Exact error',
             'major',1,'[]');
-          INSERT INTO subjects(id,code,name,normalized_name)
+          """,
+          """INSERT INTO subjects(id,code,name,normalized_name)
             VALUES (:wrong_subject,'wrong-subject','Wrong Subject','wrong subject');
-          INSERT INTO grades(id,number,name,normalized_name)
+          """,
+          """INSERT INTO grades(id,number,name,normalized_name)
             VALUES (:wrong_grade,8,'Wrong Grade','wrong grade');
-          INSERT INTO topics(id,subject_id,grade_id,code,name,normalized_name) VALUES
+          """,
+          """INSERT INTO topics(id,subject_id,grade_id,code,name,normalized_name) VALUES
             (:wrong_topic,:wrong_subject,:grade,'wrong-topic','Wrong Topic','wrong topic'),
             (:wrong_grade_topic,:subject,:wrong_grade,'wrong-grade-topic','Wrong Grade Topic','wrong grade topic')
-        """), ids)
+          """,
+        )
+        for statement in fixture_statements:
+            await connection.execute(text(statement), ids)
         candidates = (
             ("te", "Candidate TE", ids["subject"], ids["grade"], ids["topic"], "approved", False, 40),
             ("primary", "Candidate Primary Manual Needle", ids["subject"], ids["grade"], ids["topic"], "approved", False, 40),
@@ -264,24 +275,32 @@ async def test_real_candidate_search_eligibility_ranking_and_manual_mode():
                       "title": title, "candidate_subject": subject, "candidate_grade": grade,
                       "candidate_topic": topic, "status": status, "difficulty": difficulty,
                       "inactive": inactive}
-            await connection.execute(text("""
+            task_statements = (
+              """
               INSERT INTO tasks(id,subject_id,grade_id,topic_id,created_by,archived_at)
                 VALUES (:task_id,:candidate_subject,:candidate_grade,:candidate_topic,:owner,
-                  CASE WHEN :inactive THEN clock_timestamp() END);
-              INSERT INTO task_versions(id,task_id,version_no,title,statement,task_type,answer_format,
+                  CASE WHEN :inactive THEN clock_timestamp() END)
+              """,
+              """INSERT INTO task_versions(id,task_id,version_no,title,statement,task_type,answer_format,
                 difficulty,status,created_by,approved_by,approved_at)
                 VALUES (:version_id,:task_id,1,:title,:title,'problem','short_text',:difficulty,:status,
                   :owner,CASE WHEN :status='approved' THEN :owner END,
                   CASE WHEN :status='approved' THEN clock_timestamp() END)
-            """), values)
-        await connection.execute(text("""
-          INSERT INTO task_error_links(task_version_id,typical_error_id)
-            VALUES (:te_version,:error);
-          INSERT INTO task_skill_links(task_version_id,skill_id,weight,is_primary) VALUES
+              """,
+            )
+            for statement in task_statements:
+                await connection.execute(text(statement), values)
+        link_statements = (
+          """INSERT INTO task_error_links(task_version_id,typical_error_id)
+            VALUES (:te_version,:error)""",
+          """INSERT INTO task_skill_links(task_version_id,skill_id,weight,is_primary) VALUES
             (:primary_version,:skill,1,true),(:secondary_version,:skill,.5,false),
             (:wrong_subject_version,:skill,1,true),(:wrong_grade_version,:skill,1,true),
             (:unapproved_version,:skill,1,true),(:inactive_version,:skill,1,true)
-        """), ids)
+          """,
+        )
+        for statement in link_statements:
+            await connection.execute(text(statement), ids)
         session = AsyncSession(bind=connection, expire_on_commit=False)
         repository = RemediationRepository(session)
         base = dict(assignment_id=ids["assignment_0"], student_id=ids["student_0"],
