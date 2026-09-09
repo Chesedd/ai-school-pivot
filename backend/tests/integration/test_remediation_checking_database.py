@@ -42,23 +42,17 @@ async def _no_sleep(_): pass
 
 async def _submitted_world(connection, *, llm=False):
     ids = await seed_execution_world(connection)
-    ids.update({"accepted": uuid4(), "rubric": uuid4(), "rubric_item": uuid4(),
+    ids.update({"accepted": uuid4(),
                 "skill": uuid4(), "error": uuid4()})
-    # Item zero is historical exact-match.  Item one can be switched to the normal
-    # LLM rubric route; otherwise its absent methodology exercises manual-required.
+    # Item zero adds exact-match methodology. Item one's shared historical rubric
+    # can be routed through the LLM checker when requested by the scenario.
     await connection.execute(text("""
       INSERT INTO accepted_answers(id,task_version_id,answer_value,value_kind,canonical_text,
         normalization_policy_code,normalization_policy_version)
       VALUES (:accepted,:version_0_0,'forty-two','text','forty-two','exact_text_v1',1)
     """), ids)
-    if llm:
-        await connection.execute(text("""
-          INSERT INTO rubrics(id,task_version_id,grading_mode,max_score,notes)
-            VALUES (:rubric,:version_0_1,'points',3,'historical rubric');
-          INSERT INTO rubric_items(id,rubric_id,order_index,criterion,max_points)
-            VALUES (:rubric_item,:rubric,0,'historical criterion',3)
-        """), ids)
-    factory = async_sessionmaker(bind=connection, expire_on_commit=False)
+    factory = async_sessionmaker(bind=connection, expire_on_commit=False,
+                                 join_transaction_mode="create_savepoint")
     execution = RemediationExecutionService(factory)
     await execution.start(ids["plan_0"], ids["student_0"])
     await execution.save_answer(ids["plan_0"], ids["plan_item_0_0"], ids["student_0"], "forty-two")
@@ -105,7 +99,7 @@ async def test_submit_deterministic_persistence_events_and_replay_have_remediati
           SELECT assessment_item_id,remediation_plan_item_id,task_version_id,max_score,result_status::text
           FROM check_results WHERE check_run_id=:run ORDER BY remediation_plan_item_id
         """), {"run": run["id"]})).mappings().all()
-        assert len(rows) == 2 and final.status == "completed_with_review_required"
+        assert len(rows) == 2 and final.run_status == "completed_with_review_required"
         assert all(row["assessment_item_id"] is None for row in rows)
         exact = next(row for row in rows if row["remediation_plan_item_id"] == ids["plan_item_0_0"])
         assert (exact["task_version_id"], exact["max_score"], exact["result_status"]) == (
@@ -183,4 +177,4 @@ async def test_fake_llm_uses_shared_prompt_provider_retry_and_model_identity(scr
           WHERE r.check_run_id=:run
         """), {"run": run["id"]})).one()
         assert finding == (ids["rubric_item"], ids["plan_item_0_1"])
-        assert final.status in {"completed", "completed_with_review_required"}
+        assert final.run_status in {"completed", "completed_with_review_required"}

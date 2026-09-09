@@ -11,10 +11,12 @@ async def seed_execution_world(connection, *, plans=2):
         "variant", "subject", "grade", "topic")}
     for n in range(plans):
         for name in ("user", "student", "assignment", "participant", "source_submission",
-                     "source_run", "task", "version", "assessment_item", "plan"):
+                     "source_run", "task", "version", "assessment_item", "plan",
+                     "expected_solution", "rubric", "rubric_item"):
             ids[f"{name}_{n}"] = uuid4()
         for item in range(2):
-            for name in ("task", "version", "plan_item"):
+            for name in ("task", "version", "plan_item", "expected_solution", "rubric",
+                         "rubric_item"):
                 ids[f"{name}_{n}_{item}"] = uuid4()
     for sql in (
         "INSERT INTO users(id,login,normalized_login,display_name,password_hash) VALUES (:owner,'c9ab-owner','c9ab-owner','C9AB Owner','hash')",
@@ -39,6 +41,9 @@ async def seed_execution_world(connection, *, plans=2):
           "INSERT INTO student_user_links(user_id,student_id) VALUES (:user,:student)",
           "INSERT INTO tasks(id,subject_id,grade_id,topic_id,created_by) VALUES (:task,:subject,:grade,:topic,:owner)",
           "INSERT INTO task_versions(id,task_id,version_no,title,statement,task_type,answer_format,difficulty,status,created_by,approved_by,approved_at) VALUES (:version,:task,1,'Source','Source statement','problem','short_text',40,'approved',:owner,:owner,clock_timestamp())",
+          "INSERT INTO expected_solutions(id,task_version_id,solution_text,final_answer) VALUES (:expected_solution,:version,'Source solution','source answer')",
+          "INSERT INTO rubrics(id,task_version_id,max_score,grading_mode,notes) VALUES (:rubric,:version,1,'points','Source rubric')",
+          "INSERT INTO rubric_items(id,rubric_id,criterion,max_points,required,order_index) VALUES (:rubric_item,:rubric,'Source criterion',1,true,0)",
           "INSERT INTO assessment_items(id,variant_id,task_version_id,position,points) VALUES (:assessment_item,:variant,:version,:position,1)",
           "INSERT INTO assignments(id,assessment_id,class_group_id,start_at,due_at,created_by) VALUES (:assignment,:assessment,:group_a,clock_timestamp()-interval '1 hour',clock_timestamp()+interval '1 day',:owner)",
           "INSERT INTO assignment_participants(id,assignment_id,student_id,assigned_variant_id,variant_assigned_at) VALUES (:participant,:assignment,:student,:variant,clock_timestamp())",
@@ -49,8 +54,18 @@ async def seed_execution_world(connection, *, plans=2):
             await connection.execute(text(sql), values)
         for item in range(2):
             v = {**values, "task": ids[f"task_{n}_{item}"], "version": ids[f"version_{n}_{item}"],
-                 "plan_item": ids[f"plan_item_{n}_{item}"], "item_position": item}
+                 "plan_item": ids[f"plan_item_{n}_{item}"], "item_position": item,
+                 "expected_solution": ids[f"expected_solution_{n}_{item}"],
+                 "rubric": ids[f"rubric_{n}_{item}"],
+                 "rubric_item": ids[f"rubric_item_{n}_{item}"],
+                 "max_score": 1 if item == 0 else 3}
             await connection.execute(text("INSERT INTO tasks(id,subject_id,grade_id,topic_id,created_by) VALUES (:task,:subject,:grade,:topic,:owner)"), v)
             await connection.execute(text("INSERT INTO task_versions(id,task_id,version_no,title,statement,task_type,answer_format,difficulty,status,created_by,approved_by,approved_at) VALUES (:version,:task,1,'Practice','Practice statement','problem','short_text',40,'approved',:owner,:owner,clock_timestamp())"), v)
+            await connection.execute(text("INSERT INTO expected_solutions(id,task_version_id,solution_text,final_answer) VALUES (:expected_solution,:version,'Practice solution','practice answer')"), v)
+            await connection.execute(text("INSERT INTO rubrics(id,task_version_id,max_score,grading_mode,notes) VALUES (:rubric,:version,:max_score,'points','Practice rubric')"), v)
+            await connection.execute(text("INSERT INTO rubric_items(id,rubric_id,criterion,max_points,required,order_index) VALUES (:rubric_item,:rubric,'Practice criterion',:max_score,true,0)"), v)
             await connection.execute(text("INSERT INTO remediation_plan_items(id,remediation_plan_id,position,task_version_id,selection_source) VALUES (:plan_item,:plan,:item_position,:version,'manual')"), v)
+    # Convenient canonical aliases used by the single LLM-rubric checking scenario.
+    ids["rubric"] = ids["rubric_0_1"]
+    ids["rubric_item"] = ids["rubric_item_0_1"]
     return ids
