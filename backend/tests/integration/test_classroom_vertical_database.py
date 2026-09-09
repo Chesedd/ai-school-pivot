@@ -79,7 +79,8 @@ async def test_full_classroom_product_vertical():
             "admin", "teacher_a", "teacher_b", "student_a_user", "student_b_user",
             "grade", "subject", "topic", "subtopic", "skill", "source_task",
             "source_version", "candidate_task", "candidate_version", "accepted",
-            "candidate_accepted",
+            "candidate_accepted", "source_solution", "candidate_solution", "source_rubric",
+            "candidate_rubric", "source_rubric_item", "candidate_rubric_item",
             "assessment", "variant", "assessment_item",
         )}
         # Fixture SQL: auth has no convenient in-process password/role bootstrap;
@@ -119,6 +120,17 @@ async def test_full_classroom_product_vertical():
               (:accepted,:source_version,'forty-two','text','forty-two','exact_text_v1',1),
               (:candidate_accepted,:candidate_version,'forty-two','text','forty-two',
                'exact_text_v1',1)""",
+          """INSERT INTO expected_solutions(
+            id,task_version_id,solution_text,final_answer,solution_steps_json) VALUES
+              (:source_solution,:source_version,'forty-two','forty-two','[]'),
+              (:candidate_solution,:candidate_version,'forty-two','forty-two','[]')""",
+          """INSERT INTO rubrics(id,task_version_id,max_score,grading_mode) VALUES
+              (:source_rubric,:source_version,1,'points'),
+              (:candidate_rubric,:candidate_version,1,'points')""",
+          """INSERT INTO rubric_items(
+            id,rubric_id,criterion,max_points,required,order_index) VALUES
+              (:source_rubric_item,:source_rubric,'Answer is exactly forty-two',1,true,0),
+              (:candidate_rubric_item,:candidate_rubric,'Answer is exactly forty-two',1,true,0)""",
           """INSERT INTO task_skill_links(task_version_id,skill_id,weight,is_primary) VALUES
             (:source_version,:skill,1,true),(:candidate_version,:skill,1,true)""",
           """INSERT INTO assessments(id,title,status,created_by,published_at,published_by)

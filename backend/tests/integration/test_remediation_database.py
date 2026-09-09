@@ -3,12 +3,13 @@
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.application.remediation import RemediationError
+from app.infrastructure.auth_models import User
 from app.infrastructure.remediation_repository import RemediationRepository
-from app.presentation.remediation_schemas import CreateRemediation, ItemInput, UpdateRemediation
+from app.presentation.remediation_schemas import CandidateSearch, CreateRemediation, ItemInput, UpdateRemediation
 from tests.integration.c10a_postgres import assert_constraints, assert_tables, rolled_back_connection
 from tests.integration.c9ab_fixtures import seed_execution_world
-from app.presentation.remediation_schemas import CandidateSearch
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -28,6 +29,13 @@ async def test_provenance_chain_and_selected_finding_task_constraints_exist():
 
 async def test_lifecycle_cas_privacy_and_candidate_inputs_are_persisted():
     async with rolled_back_connection() as connection:
+        metadata = User.__table__.metadata
+        for table_name, column_name in (
+            ("remediation_plans", "owner_user_id"),
+            ("remediation_events", "actor_user_id"),
+        ):
+            foreign_key = next(iter(metadata.tables[table_name].c[column_name].foreign_keys))
+            assert foreign_key.column is User.__table__.c.id
         columns = set((await connection.execute(text("""
           SELECT column_name FROM information_schema.columns WHERE table_name='remediation_plans'
         """))).scalars())
@@ -49,7 +57,12 @@ async def test_source_substitution_is_rejected_as_one_coherent_chain():
         valid = (ids["assignment_0"], ids["student_0"], ids["source_submission_0"],
                  ids["source_run_0"], ids["participant_0"])
         row = await repository.source(ids["owner"], False, *valid)
-        assert (row[0].id, row[1].id, row[2].id, row[3].id, row[4].id) == valid
+        assignment, participant, submission, run, student, _assessment = row
+        assert assignment.id == ids["assignment_0"]
+        assert participant.id == ids["participant_0"]
+        assert submission.id == ids["source_submission_0"]
+        assert run.id == ids["source_run_0"]
+        assert student.id == ids["student_0"]
         substitutions = (
             (ids["assignment_0"], ids["student_0"], ids["source_submission_0"], ids["source_run_0"], ids["participant_1"]),
             (ids["assignment_0"], ids["student_0"], ids["source_submission_1"], ids["source_run_0"], ids["participant_0"]),
@@ -189,7 +202,8 @@ async def test_real_send_requires_review_acknowledgement_and_rejects_pre_send_mo
         repository = RemediationRepository(session)
 
         await connection.execute(text(
-            "UPDATE check_runs SET status='completed_with_review_required' WHERE id=:source_run_0"), ids)
+            "UPDATE check_runs SET status='completed_with_review_required', "
+            "row_version=row_version + 1 WHERE id=:source_run_0"), ids)
         review = await repository.create(ids["owner"], False, _draft(ids, "review-K"))
         with pytest.raises(RemediationError, match="remediation_review_ack_required"):
             await repository.assign(review["id"], ids["owner"], False, False)
@@ -198,7 +212,8 @@ async def test_real_send_requires_review_acknowledgement_and_rejects_pre_send_mo
         assert acknowledged["review_acknowledged_at"] is not None
 
         await connection.execute(text(
-            "UPDATE check_runs SET status='completed' WHERE id=:source_run_0"), ids)
+            "UPDATE check_runs SET status='completed', row_version=row_version + 1 "
+            "WHERE id=:source_run_0"), ids)
         moved = await repository.create(ids["owner"], False, _draft(ids, "move-K"))
         event_count = await connection.scalar(text("SELECT count(*) FROM remediation_events"))
         await connection.execute(text(
@@ -233,7 +248,7 @@ async def test_real_candidate_search_eligibility_ranking_and_manual_mode():
             VALUES (:skill,:subtopic,'candidate-skill','Candidate Skill','candidate skill');
           """,
           """INSERT INTO typical_errors(id,skill_id,code,title,description,severity)
-            VALUES (:error,:skill,'candidate-error','Exact error','Exact error','major');
+            VALUES (:error,:skill,'candidate-error','Exact error','Exact error','high');
           """,
           """INSERT INTO check_results(id,check_run_id,assessment_item_id,task_version_id,checker_type,
             checker_version,schema_version,result_status,reason_code,confidence_policy_version,
