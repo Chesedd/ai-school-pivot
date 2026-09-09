@@ -19,7 +19,7 @@ async def _world(connection, *, status="completed", scores=("2.00", "3.00")):
     ids = await seed_execution_world(connection)
     ids.update({name: uuid4() for name in ("submission", "run", "result_0", "result_1",
                                             "finding", "teacher_b")})
-    await connection.execute(text("""
+    fixture_sql = """
       INSERT INTO class_group_teachers(class_group_id,teacher_user_id,assigned_by)
         VALUES (:group_a,:owner,:owner);
       INSERT INTO users(id,login,normalized_login,display_name,password_hash)
@@ -29,8 +29,8 @@ async def _world(connection, *, status="completed", scores=("2.00", "3.00")):
       INSERT INTO student_submissions(id,remediation_plan_id,attempt_no,status,started_at,submitted_at)
         VALUES (:submission,:plan_0,1,'submitted',clock_timestamp(),clock_timestamp());
       INSERT INTO student_answers(submission_id,remediation_plan_item_id,raw_answer,normalized_answer)
-        VALUES (:submission,:plan_item_0_0,'\"student-secret-answer\"','{"text":"student-secret-answer"}'),
-               (:submission,:plan_item_0_1,'\"second answer\"','{"text":"second answer"}');
+        VALUES (:submission,:plan_item_0_0,'\"student-secret-answer\"',CAST(:answer0 AS jsonb)),
+               (:submission,:plan_item_0_1,'\"second answer\"',CAST(:answer1 AS jsonb));
       INSERT INTO check_runs(id,submission_id,request_key,request_hash,handoff_version,input_snapshot,
         input_fingerprint,snapshot_schema_version,routing_version,checker_set_version,
         threshold_policy_version,prompt_model_policy_version,status,attempt_no,started_at,finished_at)
@@ -44,19 +44,28 @@ async def _world(connection, *, status="completed", scores=("2.00", "3.00")):
         teacher_summary,needs_human_review,review_reason,model_limitations,validated_result)
       VALUES (:result_0,:run,:plan_item_0_0,:version_0_0,'exact','v1','v1',
         CASE WHEN :score0 IS NULL THEN 'manual_required' ELSE 'correct' END::checking_result_status,
-        'historical_result','v1','{"effective":"1.0000"}',CAST(:score0 AS numeric),2,1,
+        'historical_result','v1',CAST(:confidence AS jsonb),CAST(:score0 AS numeric),2,1,
         'bounded summary','safe student feedback','private teacher summary',:review,
-        CASE WHEN :review THEN 'teacher_confirmation' ELSE NULL END,'private model limitation','{"safe":true}'),
+        CASE WHEN :review THEN 'teacher_confirmation' ELSE NULL END,'private model limitation',CAST(:validated AS jsonb)),
        (:result_1,:run,:plan_item_0_1,:version_0_1,'exact','v1','v1',
         CASE WHEN :score1 IS NULL THEN 'manual_required' ELSE 'correct' END::checking_result_status,
-        'historical_result','v1','{"effective":"1.0000"}',CAST(:score1 AS numeric),3,1,
-        'second summary','second safe feedback','second teacher summary',false,NULL,NULL,'{"safe":true}');
+        'historical_result','v1',CAST(:confidence AS jsonb),CAST(:score1 AS numeric),3,1,
+        'second summary','second safe feedback','second teacher summary',false,NULL,NULL,CAST(:validated AS jsonb));
       INSERT INTO check_findings(id,check_result_id,finding_type,snapshot_code,snapshot_title,
         snapshot_criterion,severity,confidence,evidence)
         VALUES (:finding,:result_0,'general','historical-code','Historical title','Historical criterion',
-        'minor',.75,'{"private_provider_evidence":"must-not-project"}')
-    """), {**ids, "status": status, "score0": scores[0], "score1": scores[1],
-             "review": status == "completed_with_review_required"})
+        'minor',.75,CAST(:evidence AS jsonb))
+    """
+    values = {**ids, "status": status, "score0": scores[0], "score1": scores[1],
+              "review": status == "completed_with_review_required",
+              "answer0": json.dumps({"text": "student-secret-answer"}),
+              "answer1": json.dumps({"text": "second answer"}),
+              "confidence": json.dumps({"effective": "1.0000"}),
+              "validated": json.dumps({"safe": True}),
+              "evidence": json.dumps({"private_provider_evidence": "must-not-project"})}
+    for statement in fixture_sql.split(";"):
+        if statement.strip():
+            await connection.execute(text(statement), values)
     return ids, AsyncSession(bind=connection, expire_on_commit=False)
 
 

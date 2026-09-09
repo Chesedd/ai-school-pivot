@@ -13,14 +13,17 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 async def test_private_notes_idor_cas_reassignment_and_move_snapshot():
     async with rolled_back_connection() as connection:
         v = {key: uuid4() for key in ("admin","a","b","grade","source","destination","student")}
-        await connection.execute(text("""
+        fixture_sql = """
           INSERT INTO users(id,login,normalized_login,display_name,password_hash) VALUES
             (:admin,'notes-admin','notes-admin','Admin','x'),(:a,'notes-a','notes-a','A','x'),(:b,'notes-b','notes-b','B','x');
           INSERT INTO grades(id,number,name,normalized_name) VALUES (:grade,7,'Notes grade','notes grade');
           INSERT INTO class_groups(id,name,grade_id,created_by) VALUES (:source,'Notes A',:grade,:admin),(:destination,'Notes B',:grade,:admin);
           INSERT INTO class_group_teachers(class_group_id,teacher_user_id,assigned_by) VALUES (:source,:a,:admin),(:source,:b,:admin);
           INSERT INTO students(id,class_group_id,display_name) VALUES (:student,:source,'Student');
-        """), v)
+        """
+        for statement in fixture_sql.split(";"):
+            if statement.strip():
+                await connection.execute(text(statement), v)
         session_factory = async_sessionmaker(bind=connection, expire_on_commit=False)
         async with session_factory() as session:
             repo = SQLAlchemyClassroomNotesRepository(session)

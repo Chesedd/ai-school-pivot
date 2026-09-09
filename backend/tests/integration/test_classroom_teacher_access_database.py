@@ -41,6 +41,12 @@ async def database():
     try:
         yield async_sessionmaker(engine, expire_on_commit=False), engine, ids
     finally:
+        async with engine.begin() as connection:
+            await connection.execute(text(
+                "TRUNCATE classroom_audit_log, class_group_teachers, "
+                "assignment_participants, assignments, assessments, student_user_links, "
+                "students, class_groups, auth_sessions, user_roles, users, grades CASCADE"
+            ))
         await engine.dispose()
 
 

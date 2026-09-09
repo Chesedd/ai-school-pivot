@@ -36,7 +36,8 @@ async def test_privileged_accounts_cannot_execute_without_student_identity(role)
 
 async def _service_world(connection):
     ids = await seed_execution_world(connection)
-    factory = async_sessionmaker(bind=connection, expire_on_commit=False)
+    factory = async_sessionmaker(bind=connection, expire_on_commit=False,
+                                 join_transaction_mode="create_savepoint")
     return ids, RemediationExecutionService(factory), factory
 
 

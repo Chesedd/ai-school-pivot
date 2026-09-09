@@ -47,7 +47,7 @@ async def test_occurrences_reuse_assessment_and_snapshot_roster_without_backfill
     async with rolled_back_connection() as connection:
         ids = {name: uuid4() for name in
                ("owner", "group_a", "group_b", "assessment", "a1", "a2", "a3", "s1", "s2", "s3", "s4")}
-        await connection.execute(text("""
+        fixture_sql = """
           INSERT INTO users(id,login,normalized_login,display_name,password_hash)
             VALUES (:owner,'c10d3-owner','c10d3-owner','Owner','hash');
           INSERT INTO class_groups(id,name,created_by) VALUES (:group_a,'7A',:owner),(:group_b,'7B',:owner);
@@ -67,7 +67,10 @@ async def test_occurrences_reuse_assessment_and_snapshot_roster_without_backfill
             (:a3,:assessment,:group_b,clock_timestamp(),clock_timestamp()+interval '1 day',:owner);
           INSERT INTO assignment_participants(assignment_id,student_id) SELECT :a2,id FROM students
             WHERE class_group_id=:group_a AND archived_at IS NULL
-        """), ids)
+        """
+        for statement in fixture_sql.split(";"):
+            if statement.strip():
+                await connection.execute(text(statement), ids)
         rows = (await connection.execute(text("SELECT id,assessment_id,class_group_id FROM assignments ORDER BY id"))).all()
         assert len({row.id for row in rows}) == 3
         assert {row.assessment_id for row in rows} == {ids["assessment"]}
@@ -85,7 +88,7 @@ async def test_real_assignment_application_flow_snapshots_each_current_roster():
     async with rolled_back_connection() as connection:
         ids = {name: uuid4() for name in
                ("teacher", "group_a", "group_b", "assessment", "a", "b", "c", "d")}
-        await connection.execute(text("""
+        fixture_sql = """
           INSERT INTO users(id,login,normalized_login,display_name,password_hash)
             VALUES (:teacher,'c10d3-app-owner','c10d3-app-owner','Teacher A','hash');
           INSERT INTO class_groups(id,name,created_by) VALUES
@@ -94,8 +97,12 @@ async def test_real_assignment_application_flow_snapshots_each_current_roster():
             (:a,:group_a,'A'),(:b,:group_a,'B'),(:c,:group_a,'C');
           INSERT INTO assessments(id,title,status,created_by,published_at,published_by)
             VALUES (:assessment,'Published X','published',:teacher,clock_timestamp(),:teacher)
-        """), ids)
-        factory = async_sessionmaker(bind=connection, expire_on_commit=False)
+        """
+        for statement in fixture_sql.split(";"):
+            if statement.strip():
+                await connection.execute(text(statement), ids)
+        factory = async_sessionmaker(bind=connection, expire_on_commit=False,
+                                     join_transaction_mode="create_savepoint")
         service = AssessmentService(SQLAlchemyAssessmentUnitOfWork(factory))
         actor = ActorContext(ids["teacher"])
         now = datetime.now(timezone.utc)
@@ -106,11 +113,14 @@ async def test_real_assignment_application_flow_snapshots_each_current_roster():
         assert first.class_group_id == ids["group_a"]
         assert set(first.student_ids) == {ids["a"], ids["b"], ids["c"]}
 
-        await connection.execute(text("""
+        fixture_sql = """
           UPDATE students SET class_group_id=:group_b WHERE id=:b;
           UPDATE students SET archived_at=clock_timestamp() WHERE id=:c;
           INSERT INTO students(id,class_group_id,display_name) VALUES (:d,:group_a,'D')
-        """), ids)
+        """
+        for statement in fixture_sql.split(";"):
+            if statement.strip():
+                await connection.execute(text(statement), ids)
         second = await service.create_assignment(CreateAssignmentCommand(
             ids["assessment"], ids["group_a"], now, now + timedelta(days=2), 1), actor)
 
