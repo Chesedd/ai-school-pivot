@@ -132,7 +132,11 @@ async def test_full_classroom_product_vertical():
         for statement in fixture_statements:
             await connection.execute(text(statement), ids)
 
-        factory = async_sessionmaker(bind=connection, expire_on_commit=False)
+        factory = async_sessionmaker(
+            bind=connection,
+            expire_on_commit=False,
+            join_transaction_mode="create_savepoint",
+        )
         # Real Classroom administration creates 7A, memberships, and both students.
         async with factory() as session, session.begin():
             classroom = ClassroomAdministrationService(SQLAlchemyClassroomRepository(session))
@@ -281,6 +285,14 @@ async def test_full_classroom_product_vertical():
         ):
             with pytest.raises(RemediationError, match="remediation_not_found"):
                 await operation()
+
+        victim_state = (await connection.execute(text("""
+          SELECT rp.status::text,ss.id,ss.status::text
+          FROM remediation_plans rp
+          JOIN student_submissions ss ON ss.remediation_plan_id=rp.id
+          WHERE rp.id=:plan
+        """), {"plan": created["id"]})).one()
+        assert victim_state == ("assigned", first["submission_id"], "draft")
 
         remediation_submit = await execution.submit(created["id"], student_a.id)
         remediation_replay = await execution.submit(created["id"], student_a.id)
