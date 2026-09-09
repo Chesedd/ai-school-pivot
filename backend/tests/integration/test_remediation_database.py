@@ -300,10 +300,12 @@ async def test_real_candidate_search_eligibility_ranking_and_manual_mode():
             ("inactive", "Manual Needle Inactive", ids["subject"], ids["grade"], ids["topic"], "approved", True, 40),
         )
         for key, title, subject, grade, topic, status, inactive, difficulty in candidates:
+            is_approved = status == "approved"
             values = {**ids, "task_id": ids[f"{key}_task"], "version_id": ids[f"{key}_version"],
                       "title": title, "candidate_subject": subject, "candidate_grade": grade,
                       "candidate_topic": topic, "status": status, "difficulty": difficulty,
-                      "inactive": inactive, "is_approved": status == "approved"}
+                      "inactive": inactive, "is_approved": is_approved,
+                      "approved_by": ids["owner"] if is_approved else None}
             task_statements = (
               """
               INSERT INTO tasks(id,subject_id,grade_id,topic_id,created_by,archived_at)
@@ -313,7 +315,7 @@ async def test_real_candidate_search_eligibility_ranking_and_manual_mode():
               """INSERT INTO task_versions(id,task_id,version_no,title,statement,task_type,answer_format,
                 difficulty,status,created_by,approved_by,approved_at)
                 VALUES (:version_id,:task_id,1,:title,:title,'problem','short_text',:difficulty,:status,
-                  :owner,CASE WHEN :is_approved THEN :owner END,
+                  :owner,:approved_by,
                   CASE WHEN :is_approved THEN clock_timestamp() END)
               """,
             )
