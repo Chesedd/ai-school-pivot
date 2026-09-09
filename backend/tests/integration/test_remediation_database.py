@@ -94,7 +94,7 @@ async def test_cancel_and_owner_privacy_are_idempotent_and_preserve_source():
         await session.close()
 
 
-def _draft(ids, key, *, title="Focused remediation"):
+def _draft(ids, key, *, title="Focused remediation", source_run_id=None):
     return CreateRemediation(
         creation_key=key,
         student_id=ids["student_0"],
@@ -102,7 +102,7 @@ def _draft(ids, key, *, title="Focused remediation"):
         source_assignment_id=ids["assignment_0"],
         source_assignment_participant_id=ids["participant_0"],
         source_submission_id=ids["source_submission_0"],
-        source_check_run_id=ids["source_run_0"],
+        source_check_run_id=source_run_id or ids["source_run_0"],
         title=title,
         items=[ItemInput(task_version_id=ids["version_0_0"], selection_source="suggested")],
     )
@@ -194,26 +194,40 @@ async def test_real_draft_idempotency_cas_send_and_move_after_send():
 
 
 async def test_real_send_requires_review_acknowledgement_and_rejects_pre_send_move():
+    from uuid import uuid4
+
     async with rolled_back_connection() as connection:
         ids = await seed_execution_world(connection, plans=1)
+        review_run_id = uuid4()
         await connection.execute(text(
             "INSERT INTO class_group_teachers(class_group_id,teacher_user_id,assigned_by) VALUES (:group_a,:owner,:owner)"), ids)
         session = AsyncSession(bind=connection, expire_on_commit=False)
         repository = RemediationRepository(session)
 
-        await connection.execute(text(
-            "UPDATE check_runs SET status='completed_with_review_required', "
-            "row_version=row_version + 1 WHERE id=:source_run_0"), ids)
-        review = await repository.create(ids["owner"], False, _draft(ids, "review-K"))
+        await connection.execute(text("""
+            INSERT INTO check_runs(
+                id,submission_id,request_key,request_hash,handoff_version,input_snapshot,
+                input_fingerprint,snapshot_schema_version,routing_version,checker_set_version,
+                threshold_policy_version,prompt_model_policy_version,status,attempt_no,
+                started_at,finished_at)
+            VALUES (
+                :review_run_id,:source_submission_0,'review-required-source',
+                'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+                1,'{}',
+                'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+                'v1','v1','v1','v1','v1','completed_with_review_required',2,
+                clock_timestamp(),clock_timestamp())
+        """), {**ids, "review_run_id": review_run_id})
+        review = await repository.create(
+            ids["owner"], False,
+            _draft(ids, "review-K", source_run_id=review_run_id),
+        )
         with pytest.raises(RemediationError, match="remediation_review_ack_required"):
             await repository.assign(review["id"], ids["owner"], False, False)
         acknowledged = await repository.assign(review["id"], ids["owner"], False, True)
         assert acknowledged["status"] == "assigned"
         assert acknowledged["review_acknowledged_at"] is not None
 
-        await connection.execute(text(
-            "UPDATE check_runs SET status='completed', row_version=row_version + 1 "
-            "WHERE id=:source_run_0"), ids)
         moved = await repository.create(ids["owner"], False, _draft(ids, "move-K"))
         event_count = await connection.scalar(text("SELECT count(*) FROM remediation_events"))
         await connection.execute(text(
@@ -289,7 +303,7 @@ async def test_real_candidate_search_eligibility_ranking_and_manual_mode():
             values = {**ids, "task_id": ids[f"{key}_task"], "version_id": ids[f"{key}_version"],
                       "title": title, "candidate_subject": subject, "candidate_grade": grade,
                       "candidate_topic": topic, "status": status, "difficulty": difficulty,
-                      "inactive": inactive}
+                      "inactive": inactive, "is_approved": status == "approved"}
             task_statements = (
               """
               INSERT INTO tasks(id,subject_id,grade_id,topic_id,created_by,archived_at)
@@ -299,8 +313,8 @@ async def test_real_candidate_search_eligibility_ranking_and_manual_mode():
               """INSERT INTO task_versions(id,task_id,version_no,title,statement,task_type,answer_format,
                 difficulty,status,created_by,approved_by,approved_at)
                 VALUES (:version_id,:task_id,1,:title,:title,'problem','short_text',:difficulty,:status,
-                  :owner,CASE WHEN :status='approved' THEN :owner END,
-                  CASE WHEN :status='approved' THEN clock_timestamp() END)
+                  :owner,CASE WHEN :is_approved THEN :owner END,
+                  CASE WHEN :is_approved THEN clock_timestamp() END)
               """,
             )
             for statement in task_statements:
