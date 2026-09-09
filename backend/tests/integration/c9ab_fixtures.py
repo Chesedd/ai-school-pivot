@@ -32,7 +32,11 @@ async def seed_execution_world(connection, *, plans=2):
         values = {**ids, "student": ids[f"student_{n}"], "assignment": ids[f"assignment_{n}"],
             "user": ids[f"user_{n}"], "participant": ids[f"participant_{n}"], "submission": ids[f"source_submission_{n}"],
             "run": ids[f"source_run_{n}"], "task": ids[f"task_{n}"],
-            "version": ids[f"version_{n}"], "assessment_item": ids[f"assessment_item_{n}"],
+            "version": ids[f"version_{n}"],
+            "expected_solution": ids[f"expected_solution_{n}"],
+            "rubric": ids[f"rubric_{n}"],
+            "rubric_item": ids[f"rubric_item_{n}"],
+            "assessment_item": ids[f"assessment_item_{n}"],
             "plan": ids[f"plan_{n}"], "display": f"C9AB Student {n}", "position": n + 1,
             "creation_key": f"c9ab-plan-{n}", "due": datetime.now(timezone.utc)+timedelta(days=1)}
         for sql in (

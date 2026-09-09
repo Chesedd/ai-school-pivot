@@ -87,12 +87,18 @@ async def test_real_assignment_application_flow_snapshots_each_current_roster():
 
     async with rolled_back_connection() as connection:
         ids = {name: uuid4() for name in
-               ("teacher", "group_a", "group_b", "assessment", "a", "b", "c", "d")}
+               ("teacher", "grade", "group_a", "group_b", "assessment", "a", "b", "c", "d")}
         fixture_sql = """
           INSERT INTO users(id,login,normalized_login,display_name,password_hash)
             VALUES (:teacher,'c10d3-app-owner','c10d3-app-owner','Teacher A','hash');
-          INSERT INTO class_groups(id,name,created_by) VALUES
-            (:group_a,'Application 7A',:teacher),(:group_b,'Application 7B',:teacher);
+          INSERT INTO user_roles(user_id,role) VALUES (:teacher,'teacher');
+          INSERT INTO grades(id,number,name,normalized_name)
+            VALUES (:grade,7,'Application Grade 7','application grade 7');
+          INSERT INTO class_groups(id,name,grade_id,created_by) VALUES
+            (:group_a,'Application 7A',:grade,:teacher),
+            (:group_b,'Application 7B',:grade,:teacher);
+          INSERT INTO class_group_teachers(class_group_id,teacher_user_id,assigned_by)
+            VALUES (:group_a,:teacher,:teacher);
           INSERT INTO students(id,class_group_id,display_name) VALUES
             (:a,:group_a,'A'),(:b,:group_a,'B'),(:c,:group_a,'C');
           INSERT INTO assessments(id,title,status,created_by,published_at,published_by)
