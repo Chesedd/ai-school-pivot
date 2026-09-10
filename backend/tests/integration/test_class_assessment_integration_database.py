@@ -117,7 +117,8 @@ async def test_real_assignment_application_flow_snapshots_each_current_roster():
             ids["assessment"], ids["group_a"], now, now + timedelta(days=1), 1), actor)
         assert first.assessment_id == ids["assessment"]
         assert first.class_group_id == ids["group_a"]
-        assert set(first.student_ids) == {ids["a"], ids["b"], ids["c"]}
+        assert first.participant_count == 3
+        assert set(first.participant_ids) == {ids["a"], ids["b"], ids["c"]}
 
         fixture_sql = """
           UPDATE students SET class_group_id=:group_b WHERE id=:b;

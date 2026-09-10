@@ -45,7 +45,7 @@ async def seed_execution_world(connection, *, plans=2):
           "INSERT INTO student_user_links(user_id,student_id) VALUES (:user,:student)",
           "INSERT INTO tasks(id,subject_id,grade_id,topic_id,created_by) VALUES (:task,:subject,:grade,:topic,:owner)",
           "INSERT INTO task_versions(id,task_id,version_no,title,statement,task_type,answer_format,difficulty,status,created_by,approved_by,approved_at) VALUES (:version,:task,1,'Source','Source statement','problem','short_text',40,'approved',:owner,:owner,clock_timestamp())",
-          "INSERT INTO expected_solutions(id,task_version_id,solution_text,final_answer) VALUES (:expected_solution,:version,'Source solution','source answer')",
+          "INSERT INTO expected_solutions(id,task_version_id,solution_text,final_answer,solution_steps_json) VALUES (:expected_solution,:version,'Source solution','source answer','[]'::jsonb)",
           "INSERT INTO rubrics(id,task_version_id,max_score,grading_mode,notes) VALUES (:rubric,:version,1,'points','Source rubric')",
           "INSERT INTO rubric_items(id,rubric_id,criterion,max_points,required,order_index) VALUES (:rubric_item,:rubric,'Source criterion',1,true,0)",
           "INSERT INTO assessment_items(id,variant_id,task_version_id,position,points) VALUES (:assessment_item,:variant,:version,:position,1)",
@@ -65,7 +65,7 @@ async def seed_execution_world(connection, *, plans=2):
                  "max_score": 1 if item == 0 else 3}
             await connection.execute(text("INSERT INTO tasks(id,subject_id,grade_id,topic_id,created_by) VALUES (:task,:subject,:grade,:topic,:owner)"), v)
             await connection.execute(text("INSERT INTO task_versions(id,task_id,version_no,title,statement,task_type,answer_format,difficulty,status,created_by,approved_by,approved_at) VALUES (:version,:task,1,'Practice','Practice statement','problem','short_text',40,'approved',:owner,:owner,clock_timestamp())"), v)
-            await connection.execute(text("INSERT INTO expected_solutions(id,task_version_id,solution_text,final_answer) VALUES (:expected_solution,:version,'Practice solution','practice answer')"), v)
+            await connection.execute(text("INSERT INTO expected_solutions(id,task_version_id,solution_text,final_answer,solution_steps_json) VALUES (:expected_solution,:version,'Practice solution','practice answer','[]'::jsonb)"), v)
             await connection.execute(text("INSERT INTO rubrics(id,task_version_id,max_score,grading_mode,notes) VALUES (:rubric,:version,:max_score,'points','Practice rubric')"), v)
             await connection.execute(text("INSERT INTO rubric_items(id,rubric_id,criterion,max_points,required,order_index) VALUES (:rubric_item,:rubric,'Practice criterion',:max_score,true,0)"), v)
             await connection.execute(text("INSERT INTO remediation_plan_items(id,remediation_plan_id,position,task_version_id,selection_source) VALUES (:plan_item,:plan,:item_position,:version,'manual')"), v)
