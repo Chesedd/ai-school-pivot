@@ -81,8 +81,19 @@ async def test_latest_submitted_attempt_and_latest_check_run_are_independent_of_
           VALUES (gen_random_uuid(),:participant_0,2,'draft')
         """), ids)
         await connection.execute(text("""
-          UPDATE check_runs SET status='failed_terminal',attempt_no=2,
-            failure_code='terminal' WHERE id=:source_run_0
+          INSERT INTO check_runs(
+            submission_id,request_key,request_hash,handoff_version,input_snapshot,
+            input_fingerprint,snapshot_schema_version,routing_version,checker_set_version,
+            threshold_policy_version,prompt_model_policy_version,status,attempt_no,
+            started_at,finished_at,failure_code,supersedes_run_id
+          )
+          SELECT submission_id,'classroom-results-rerun',
+            'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+            handoff_version,input_snapshot,input_fingerprint,snapshot_schema_version,
+            routing_version,checker_set_version,threshold_policy_version,
+            prompt_model_policy_version,'failed_terminal',2,clock_timestamp(),
+            clock_timestamp(),'terminal',id
+          FROM check_runs WHERE id=:source_run_0
         """), ids)
         session = AsyncSession(bind=connection, expire_on_commit=False)
         result = await ClassroomAssessmentResultsService(
