@@ -82,7 +82,7 @@ async def _run_checkers(factory, run, provider=None):
                 UUID(decision.assessment_item_id), CheckingItemKind.REMEDIATION),
                 provider_id="fake", model_id="fake-v1",
                 prompt=PromptSpec("checking.llm-rubric", "1.0.0", SYSTEM_MESSAGE,
-                                  OUTPUT_SCHEMA_VERSION), settings={"temperature": 0},
+                                  OUTPUT_SCHEMA_VERSION), settings={"temperature": "0"},
                 confidence_policy=ConfidencePolicy(
                     "confidence_v1", Decimal("0.5"), ("rubric_evidence",)),
                 pricing=Pricing("USD", "test-v1", "test", Decimal("0"), Decimal("0"),
