@@ -42,7 +42,7 @@ async def _no_sleep(_): pass
 
 async def _submitted_world(connection, *, llm=False):
     ids = await seed_execution_world(connection)
-    ids.update({"accepted": uuid4(),
+    ids.update({"accepted": uuid4(), "legacy_accepted": uuid4(),
                 "skill": uuid4(), "error": uuid4()})
     # Item zero adds exact-match methodology. Item one's shared historical rubric
     # can be routed through the LLM checker when requested by the scenario.
@@ -51,6 +51,11 @@ async def _submitted_world(connection, *, llm=False):
         normalization_policy_code,normalization_policy_version)
       VALUES (:accepted,:version_0_0,'forty-two','text','forty-two','exact_text_v1',1)
     """), ids)
+    if not llm:
+        await connection.execute(text("""
+          INSERT INTO accepted_answers(id,task_version_id,answer_value,value_kind)
+          VALUES (:legacy_accepted,:version_0_1,'historical answer','legacy_untyped')
+        """), ids)
     factory = async_sessionmaker(bind=connection, expire_on_commit=False,
                                  join_transaction_mode="create_savepoint")
     execution = RemediationExecutionService(factory)
@@ -78,7 +83,8 @@ async def _run_checkers(factory, run, provider=None):
                 provider_id="fake", model_id="fake-v1",
                 prompt=PromptSpec("checking.llm-rubric", "1.0.0", SYSTEM_MESSAGE,
                                   OUTPUT_SCHEMA_VERSION), settings={"temperature": 0},
-                confidence_policy=ConfidencePolicy("confidence_v1", Decimal("0.5"), ()),
+                confidence_policy=ConfidencePolicy(
+                    "confidence_v1", Decimal("0.5"), ("rubric_evidence",)),
                 pricing=Pricing("USD", "test-v1", "test", Decimal("0"), Decimal("0"),
                                 Decimal("0")))
             checkers = {CheckerType.LLM_RUBRIC: checker}
@@ -154,7 +160,8 @@ async def test_fake_llm_uses_shared_prompt_provider_retry_and_model_identity(scr
                           "message": "bounded rubric finding"}],
             "teacher_summary": "teacher", "student_feedback_draft": "student",
             "model_limitations": []}
-        responses = [ProviderResponse(f"fake-{n}", json.dumps(candidate), ProviderUsage(1, 1, 0))
+        responses = [ProviderResponse(
+            f"fake-{n}", json.dumps(candidate), usage=ProviderUsage(1, 1, 0))
                      if value == "success" else value for n, value in enumerate(script)]
         provider = FakeProvider(responses)
         final = await _run_checkers(factory, run, provider)

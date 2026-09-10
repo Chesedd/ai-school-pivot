@@ -43,12 +43,12 @@ async def _world(connection, *, status="completed", scores=("2.00", "3.00")):
         confidence_details,score_suggested,max_score,confidence,summary,student_feedback_draft,
         teacher_summary,needs_human_review,review_reason,model_limitations,validated_result)
       VALUES (:result_0,:run,:plan_item_0_0,:version_0_0,'exact','v1','v1',
-        CASE WHEN :score0 IS NULL THEN 'manual_required' ELSE 'correct' END::checking_result_status,
+        CASE WHEN CAST(:score0 AS numeric) IS NULL THEN 'manual_required' ELSE 'correct' END::checking_result_status,
         'historical_result','v1',CAST(:confidence AS jsonb),CAST(:score0 AS numeric),2,1,
         'bounded summary','safe student feedback','private teacher summary',:review,
         CASE WHEN :review THEN 'teacher_confirmation' ELSE NULL END,'private model limitation',CAST(:validated AS jsonb)),
        (:result_1,:run,:plan_item_0_1,:version_0_1,'exact','v1','v1',
-        CASE WHEN :score1 IS NULL THEN 'manual_required' ELSE 'correct' END::checking_result_status,
+        CASE WHEN CAST(:score1 AS numeric) IS NULL THEN 'manual_required' ELSE 'correct' END::checking_result_status,
         'historical_result','v1',CAST(:confidence AS jsonb),CAST(:score1 AS numeric),3,1,
         'second summary','second safe feedback','second teacher summary',false,NULL,NULL,CAST(:validated AS jsonb));
       INSERT INTO check_findings(id,check_result_id,finding_type,snapshot_code,snapshot_title,
