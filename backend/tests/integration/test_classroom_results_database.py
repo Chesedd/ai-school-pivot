@@ -45,8 +45,8 @@ async def test_persisted_projection_uses_historical_participant_and_owner_scope(
     async with rolled_back_connection() as connection:
         ids = await seed_execution_world(connection, plans=1)
         await connection.execute(text("""
-          INSERT INTO class_group_teachers(class_group_id,teacher_user_id)
-          VALUES (:group_a,:owner)
+          INSERT INTO class_group_teachers(class_group_id,teacher_user_id,assigned_by)
+          VALUES (:group_a,:owner,:owner)
         """), ids)
         session = AsyncSession(bind=connection, expire_on_commit=False)
         service = ClassroomAssessmentResultsService(SQLAlchemyClassroomResultsReadRepository(session))
@@ -72,7 +72,10 @@ async def test_persisted_projection_uses_historical_participant_and_owner_scope(
 async def test_latest_submitted_attempt_and_latest_check_run_are_independent_of_draft():
     async with rolled_back_connection() as connection:
         ids = await seed_execution_world(connection, plans=1)
-        await connection.execute(text("INSERT INTO class_group_teachers(class_group_id,teacher_user_id) VALUES (:group_a,:owner)"), ids)
+        await connection.execute(text("""
+          INSERT INTO class_group_teachers(class_group_id,teacher_user_id,assigned_by)
+          VALUES (:group_a,:owner,:owner)
+        """), ids)
         await connection.execute(text("""
           INSERT INTO student_submissions(id,assignment_participant_id,attempt_no,status)
           VALUES (gen_random_uuid(),:participant_0,2,'draft')
