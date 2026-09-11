@@ -9,6 +9,14 @@ from sqlalchemy.exc import IntegrityError
 from app.application.checking import (ActiveRunConflict, ConcurrentConflict, CreateRunCommand,
     IdempotencyConflict, InvalidPersistenceCommand, SourceSubmissionNotFound, safe_event_details,
     validate_finding, validate_result, validate_transition)
+from app.infrastructure.model_registry import register_all_models
+
+# Checking's mapped rows reference tables owned by several bounded contexts.  Make
+# the canonical metadata-registration contract part of loading the persistence
+# adapter, rather than relying on whichever application route happened to import
+# those model modules first.
+register_all_models()
+
 from app.infrastructure.assessment_models import StudentSubmission
 from app.infrastructure.checking_models import CostEvent, CheckFinding, CheckResult, CheckRun, CheckerEvent, ModelRun, PromptVersion
 from app.application.checking_provider import (MAX_ATTEMPTS, AttemptDisposition, AttemptState,

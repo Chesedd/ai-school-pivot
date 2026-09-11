@@ -6,7 +6,13 @@ from sqlalchemy import text
 
 
 async def seed_execution_world(connection, *, plans=2):
-    """Create two independent assessment chains and assigned remediation plans."""
+    """Create isolated assessment chains and assigned remediation plans.
+
+    The truncation participates in the caller's transaction.  Consequently a
+    rollback restores any pre-existing fixture world while ensuring these tests
+    never depend on the disposable database having been empty beforehand.
+    """
+    await connection.execute(text("TRUNCATE users, subjects CASCADE"))
     ids = {name: uuid4() for name in ("owner", "group_a", "group_b", "assessment",
         "variant", "subject", "grade", "topic")}
     for n in range(plans):
