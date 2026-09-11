@@ -282,8 +282,8 @@ async def test_publication_readiness_and_strict_time_validation(client, database
     archived_result = await client.post(
         f"/api/assessment-core/assessments/{ready_id}/publish-and-assign",
         json={**payload, "class_group_id": str(archived_group_id)})
-    assert (archived_result.status_code,
-            archived_result.json()["error"]["code"]) == (404, "class_group_not_found")
+    assert archived_result.status_code == 404
+    assert archived_result.json()["error"]["code"] == "class_group_not_found"
 
     actor, _, ready_id, _, _, _ = await publication_fixture(engine, factory)
     empty_group_result = await client.post(
