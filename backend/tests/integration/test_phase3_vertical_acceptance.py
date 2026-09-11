@@ -27,6 +27,7 @@ from tests.integration.auth_helpers import (clear_principal_override, override_p
 
 pytestmark = pytest.mark.asyncio
 RAW = " 001,2300e2 "
+TEACHER_ID = UUID("00000000-0000-4000-8000-000000000001")
 
 
 @pytest_asyncio.fixture
@@ -41,6 +42,11 @@ async def vertical_database(monkeypatch):
             "student_submissions, assignment_participants, assignments, assessment_items, "
             "assessment_variants, assessments, students, class_groups, task_versions, tasks, "
             "topics, grades, subjects CASCADE"))
+        await connection.execute(text(
+            "INSERT INTO users(id,login,normalized_login,display_name,password_hash) "
+            "VALUES (:id,'phase3-test-teacher','phase3-test-teacher',"
+            "'Phase 3 Test Teacher','hash') ON CONFLICT (id) DO NOTHING"),
+            {"id": TEACHER_ID})
     try:
         yield engine, factory
     finally:
@@ -80,7 +86,7 @@ async def approved_number_versions(engine, actor_id):
 async def test_phase3_teacher_student_historical_handoff_vertical(vertical_client, vertical_database):
     client = vertical_client
     engine, factory = vertical_database
-    actor_id = UUID("00000000-0000-4000-8000-000000000001")
+    actor_id = TEACHER_ID
     student_id = UUID("00000000-0000-4000-8000-000000000002")
     student_account_id = uuid4()
     second_student_id = UUID("00000000-0000-4000-8000-000000000003")

@@ -34,6 +34,15 @@ TEACHER_ID = UUID("00000000-0000-4000-8000-000000000001")
 pytestmark = pytest.mark.asyncio
 
 
+async def ensure_test_teacher(connection):
+    """Ensure both columns of explicit classroom grants reference a real user."""
+    await connection.execute(text(
+        "INSERT INTO users(id,login,normalized_login,display_name,password_hash) "
+        "VALUES (:id,'assessment-test-teacher','assessment-test-teacher',"
+        "'Assessment Test Teacher','hash') ON CONFLICT (id) DO NOTHING"),
+        {"id": TEACHER_ID})
+
+
 @pytest_asyncio.fixture
 async def database(monkeypatch):
     engine = create_async_engine(URL)
@@ -41,6 +50,7 @@ async def database(monkeypatch):
     monkeypatch.setattr(assessment_routes, "async_session_factory", factory)
     async with engine.begin() as connection:
         await connection.execute(text("TRUNCATE assessment_audit_log, assessment_idempotency_keys, student_answers, student_submissions, assignment_participants, assignments, assessment_items, assessment_variants, assessments, students, class_groups CASCADE"))
+        await ensure_test_teacher(connection)
     override_principal(app, teacher_principal(TEACHER_ID))
     try:
         yield engine, factory
