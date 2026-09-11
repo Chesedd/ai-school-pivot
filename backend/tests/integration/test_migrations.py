@@ -192,7 +192,6 @@ async def test_clean_online_upgrade_installs_c10a_vertical_schema():
             await connection.execute(sa.text("CREATE SCHEMA public"))
         alembic("upgrade", "head")
         await assert_database_at_repository_head(engine)
-        assert repository_head() == "20260907_04"
         async with engine.connect() as connection:
             tables = set((await connection.execute(sa.text(
                 "SELECT table_name FROM information_schema.tables "

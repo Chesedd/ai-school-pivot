@@ -65,6 +65,19 @@ async def create(client, title="Работа"):
     return response.json()
 
 
+async def configured_teacher_group(session, *, grade_id, name, archived_at=None):
+    """Create a publishable class with the explicit teacher access grant."""
+    group = ClassGroup(name=name, grade_id=grade_id, created_by=TEACHER_ID,
+                       archived_at=archived_at)
+    session.add(group)
+    await session.flush()
+    await session.execute(text(
+        "INSERT INTO class_group_teachers(class_group_id,teacher_user_id,assigned_by) "
+        "VALUES (:group,:teacher,:teacher)"),
+        {"group": group.id, "teacher": TEACHER_ID})
+    return group
+
+
 async def test_teacher_read_catalogues_are_ordered_scoped_and_private(client, database):
     engine, factory = database
     actor_id = TEACHER_ID
@@ -73,10 +86,16 @@ async def test_teacher_read_catalogues_are_ordered_scoped_and_private(client, da
     first_assignment_id, second_assignment_id, foreign_assignment_id = uuid4(), uuid4(), uuid4()
     now = datetime.now(timezone.utc)
     async with engine.begin() as connection:
-        await connection.execute(text("INSERT INTO class_groups(id,name,external_ref,created_by,archived_at) VALUES "
-            "(:a,'A','private-a',:actor,NULL),(:a2,'A','private-a2',:actor,NULL),"
-            "(:b,'B','private-b',:actor,NULL),(:archived,'0 archived','private-x',:actor,clock_timestamp())"),
-            {"a": group_a_id, "a2": group_a2_id, "b": group_b_id, "archived": archived_id, "actor": actor_id})
+        grade_id = await connection.scalar(text("SELECT id FROM grades ORDER BY number LIMIT 1"))
+        await connection.execute(text("INSERT INTO class_groups(id,name,external_ref,grade_id,created_by,archived_at) VALUES "
+            "(:a,'A','private-a',:grade,:actor,NULL),(:a2,'A','private-a2',:grade,:actor,NULL),"
+            "(:b,'B','private-b',:grade,:actor,NULL),(:archived,'0 archived','private-x',:grade,:actor,clock_timestamp())"),
+            {"a": group_a_id, "a2": group_a2_id, "b": group_b_id, "archived": archived_id, "grade": grade_id, "actor": actor_id})
+        await connection.execute(text(
+            "INSERT INTO class_group_teachers(class_group_id,teacher_user_id,assigned_by) VALUES "
+            "(:a,:actor,:actor),(:a2,:actor,:actor),(:b,:actor,:actor),(:archived,:actor,:actor)"),
+            {"a": group_a_id, "a2": group_a2_id, "b": group_b_id,
+             "archived": archived_id, "actor": actor_id})
         students = [{"id": uuid4(), "group": group_a_id, "name": "Active A", "archived": None},
                     {"id": uuid4(), "group": group_a_id, "name": "Archived A", "archived": now},
                     {"id": uuid4(), "group": group_b_id, "name": "Active B1", "archived": None},
@@ -151,8 +170,8 @@ async def test_publish_assignment_snapshot_get_close_and_no_partial_failures(cli
         json={"task_version_id": str(version["version"]), "points": "2.00"})).status_code == 201
     actor_id = TEACHER_ID
     async with factory() as session:
-        group = ClassGroup(name="9А", created_by=actor_id)
-        session.add(group); await session.flush()
+        group = await configured_teacher_group(
+            session, grade_id=version["grade"], name="9А")
         active = Student(class_group_id=group.id, display_name="Active A")
         second_active = Student(class_group_id=group.id, display_name="Active B")
         archived = Student(class_group_id=group.id, display_name="Archived", archived_at=await session.scalar(text("SELECT clock_timestamp()")))
@@ -227,11 +246,14 @@ async def test_publication_readiness_and_strict_time_validation(client, database
     assert empty_result.status_code == 422
     assert empty_result.json()["error"]["details"][0]["code"] == "empty_variant"
 
+    content = await content_version(engine)
     async with factory() as session:
-        archived_group = ClassGroup(name="Archived group", created_by=uuid4(),
+        archived_group = await configured_teacher_group(
+            session, grade_id=content["grade"], name="Archived group",
             archived_at=await session.scalar(text("SELECT clock_timestamp()")))
-        empty_group = ClassGroup(name="Empty group", created_by=uuid4())
-        session.add_all([archived_group, empty_group]); await session.commit()
+        empty_group = await configured_teacher_group(
+            session, grade_id=content["grade"], name="Empty group")
+        await session.commit()
         archived_group_id, empty_group_id = archived_group.id, empty_group.id
     for group_id, expected in ((archived_group_id, "inactive_or_missing_group"),
                                (empty_group_id, "no_active_students")):
@@ -373,8 +395,8 @@ async def publication_fixture(engine, factory, *, students=2):
         from app.infrastructure.assessment_models import AssessmentItem
         session.add(AssessmentItem(variant_id=variant.id, task_version_id=content["version"],
                                    position=1, points=Decimal("1.00")))
-        group = ClassGroup(name=f"Group {uuid4()}", created_by=actor.actor_id)
-        session.add(group); await session.flush()
+        group = await configured_teacher_group(
+            session, grade_id=content["grade"], name=f"Group {uuid4()}")
         pupils = [Student(class_group_id=group.id, display_name=f"Student {index}")
                   for index in range(students)]
         session.add_all(pupils); await session.commit()

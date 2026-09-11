@@ -85,13 +85,19 @@ async def test_phase3_teacher_student_historical_handoff_vertical(vertical_clien
     student_account_id = uuid4()
     second_student_id = UUID("00000000-0000-4000-8000-000000000003")
     group_id = uuid4()
+    tasks = await approved_number_versions(engine, actor_id)
     async with engine.begin() as connection:
-        await connection.execute(text("INSERT INTO class_groups(id,name,created_by) VALUES (:id,'9A vertical',:actor)"),
-                                 {"id": group_id, "actor": actor_id})
+        grade_id = await connection.scalar(text("SELECT grade_id FROM tasks WHERE id=:task"),
+                                           {"task": tasks[0][0]})
+        await connection.execute(text("INSERT INTO class_groups(id,name,grade_id,created_by) "
+                                      "VALUES (:id,'9A vertical',:grade,:actor)"),
+                                 {"id": group_id, "grade": grade_id, "actor": actor_id})
+        await connection.execute(text(
+            "INSERT INTO class_group_teachers(class_group_id,teacher_user_id,assigned_by) "
+            "VALUES (:group,:actor,:actor)"), {"group": group_id, "actor": actor_id})
         await connection.execute(text("INSERT INTO students(id,class_group_id,display_name) VALUES "
             "(:first,:group,'Pilot One'),(:second,:group,'Pilot Two')"),
             {"first": student_id, "second": second_student_id, "group": group_id})
-    tasks = await approved_number_versions(engine, actor_id)
     override_principal(app, teacher_principal(actor_id))
 
     created = await client.post("/api/assessment-core/assessments",
