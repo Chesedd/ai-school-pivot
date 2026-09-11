@@ -45,7 +45,9 @@ async def ensure_test_teacher(connection):
 
 async def ensure_test_grade(connection):
     """Return an existing grade, creating the minimal catalogue row if needed."""
-    grade_id = await connection.scalar(text("SELECT id FROM grades LIMIT 1"))
+    grade_id = await connection.scalar(
+        text("SELECT id FROM grades ORDER BY number, id LIMIT 1")
+    )
     if grade_id is not None:
         return grade_id
     return await connection.scalar(text(
@@ -280,8 +282,8 @@ async def test_publication_readiness_and_strict_time_validation(client, database
     archived_result = await client.post(
         f"/api/assessment-core/assessments/{ready_id}/publish-and-assign",
         json={**payload, "class_group_id": str(archived_group_id)})
-    assert archived_result.status_code == 404
-    assert archived_result.json()["error"]["code"] == "class_group_not_found"
+    assert (archived_result.status_code,
+            archived_result.json()["error"]["code"]) == (404, "class_group_not_found")
 
     actor, _, ready_id, _, _, _ = await publication_fixture(engine, factory)
     empty_group_result = await client.post(
