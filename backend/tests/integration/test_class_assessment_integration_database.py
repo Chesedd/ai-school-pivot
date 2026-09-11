@@ -71,7 +71,9 @@ async def test_occurrences_reuse_assessment_and_snapshot_roster_without_backfill
         for statement in fixture_sql.split(";"):
             if statement.strip():
                 await connection.execute(text(statement), ids)
-        rows = (await connection.execute(text("SELECT id,assessment_id,class_group_id FROM assignments ORDER BY id"))).all()
+        rows = (await connection.execute(text(
+            "SELECT id,assessment_id,class_group_id FROM assignments "
+            "WHERE assessment_id=:assessment ORDER BY id"), ids)).all()
         assert len({row.id for row in rows}) == 3
         assert {row.assessment_id for row in rows} == {ids["assessment"]}
         old = set((await connection.execute(text("SELECT student_id FROM assignment_participants WHERE assignment_id=:a1"), ids)).scalars())

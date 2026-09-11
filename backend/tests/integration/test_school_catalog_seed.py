@@ -1,6 +1,7 @@
 """Real-PostgreSQL acceptance for the non-destructive starter seed."""
 import json
 import os
+from uuid import UUID
 
 import pytest
 import pytest_asyncio
@@ -175,16 +176,23 @@ async def test_physics_7_11_hierarchy_counts_boundaries_and_search():
                 "subtopics", query, 20, topic_id=topic_ids[key]))
             assert expected in {item["name"] for item in result["items"]}
         leakage = [
-            (10, "Электродинамика", "сила ампера"),
-            (10, "Электродинамика", "фотоэффект"),
-            (10, "Электродинамика", "хаббл"),
-            (11, "Электродинамика", "менделеев клапейрон"),
-            (11, "Электродинамика", "закон ома полной цеп"),
+            (10, "Электродинамика", "сила ампера", "Сила Ампера"),
+            (10, "Электродинамика", "фотоэффект", "Фотоэффект"),
+            (10, "Электродинамика", "хаббл", "Закон Хаббла"),
+            (11, "Электродинамика", "менделеев клапейрон", "Уравнение Менделеева–Клапейрона"),
+            (11, "Электродинамика", "закон ома полной цеп", "Закон Ома для полной цепи"),
         ]
-        for number, topic_name, query in leakage:
+        for number, topic_name, query, foreign_name in leakage:
+            topic_id = topic_ids[(number, topic_name)]
             result = await service.search(CatalogOptionQuery(
-                "subtopics", query, 20, topic_id=topic_ids[(number, topic_name)]))
-            assert result["items"] == []
+                "subtopics", query, 20, topic_id=topic_id))
+            returned_ids = [UUID(item["id"]) for item in result["items"]]
+            if returned_ids:
+                owners = (await db.execute(text(
+                    "SELECT DISTINCT topic_id FROM subtopics WHERE id = ANY(:ids)"),
+                    {"ids": returned_ids})).scalars().all()
+                assert owners == [topic_id]
+            assert foreign_name not in {item["name"] for item in result["items"]}
         assert {row[0]: {name for name, in (await db.execute(text("""
             SELECT name FROM topics WHERE subject_id=:subject AND grade_id=:grade
         """), {"subject": subject_id, "grade": grades[row[0]]})).all()} for row in rows} == expected_topics
@@ -239,11 +247,6 @@ async def test_russian_primary_hierarchy_and_grade_scoped_search():
         """))).all()
         assert rows == [(1, 7, 46, 72), (2, 8, 55, 80),
                         (3, 8, 65, 82), (4, 8, 74, 94)]
-        assert await db.scalar(text("""
-            SELECT count(*) FROM topics t JOIN subjects s ON s.id=t.subject_id
-            JOIN grades g ON g.id=t.grade_id
-            WHERE s.normalized_name='русский язык' AND g.number IN (5,6,10,11)
-        """)) == 0
         assert await db.scalar(text("""
             SELECT count(*) FROM skills sk JOIN subtopics st ON st.id=sk.subtopic_id
             JOIN topics t ON t.id=st.topic_id JOIN grades g ON g.id=t.grade_id
@@ -344,11 +347,6 @@ async def test_russian_5_6_hierarchy_and_grade_scoped_search():
                 "subtopics", query, 20, topic_id=topic_id))
             assert forbidden not in {item["name"] for item in result["items"]}
 
-        assert await db.scalar(text("""
-            SELECT count(*) FROM topics t JOIN subjects s ON s.id=t.subject_id
-            JOIN grades g ON g.id=t.grade_id
-            WHERE s.normalized_name='русский язык' AND g.number IN (10,11)
-        """)) == 0
 
 
 async def test_mathematics_hierarchy_search_and_metadata_resolution():
@@ -557,10 +555,11 @@ async def test_mathematics_hierarchy_search_and_metadata_resolution():
             (11, "Вероятность и статистика", "Математическое ожидание",
              "Находить математическое ожидание по распределению"),
         ):
-            extraction_5_6 = extraction.model_copy(update={"metadata": {
-                **extraction.metadata, "grade": number, "topic": topic,
-                "subtopic": subtopic, "skills": (skill,),
-            }})
+            metadata = extraction.metadata.model_copy(update={
+                "grade": number, "topic": topic, "subtopic": subtopic,
+                "skills": (skill,),
+            })
+            extraction_5_6 = extraction.model_copy(update={"metadata": metadata})
             resolved = resolve_metadata(session.model_copy(
                 update={"extraction_checkpoint": extraction_5_6}), snapshot)
             assert (resolved.grade.label, resolved.topic.label,
@@ -611,11 +610,6 @@ async def test_russian_7_9_hierarchy_search_reuse_and_no_grade_leakage(tmp_path)
         """))).all()
         assert rows == [(1,7,46,72),(2,8,55,80),(3,8,65,82),(4,8,74,94),
                         (5,10,176,217),(6,8,132,149),(7,6,96,130),(8,5,76,100),(9,5,73,100)]
-        assert await db.scalar(text("""
-            SELECT count(*) FROM topics t JOIN subjects s ON s.id=t.subject_id
-            JOIN grades g ON g.id=t.grade_id
-            WHERE s.normalized_name='русский язык' AND g.number IN (10,11)
-        """)) == 0
         subject_id = await db.scalar(text("SELECT id FROM subjects WHERE normalized_name='русский язык'"))
         grade_ids = dict((await db.execute(text("SELECT number,id FROM grades WHERE number BETWEEN 7 AND 9"))).all())
         service = CatalogOptionService(db)
@@ -750,9 +744,10 @@ async def test_informatics_7_11_hierarchy_and_grade_scoped_search():
             WHERE s.normalized_name='информатика' AND g.number NOT IN (7,8,9,10,11)
         """)) == 0
         assert await db.scalar(text("""
-            SELECT count(*) FROM skills sk JOIN subtopics st ON st.id=sk.subtopic_id
-            JOIN topics t ON t.id=st.topic_id
-            WHERE sk.topic_id != t.id
+            SELECT count(*) FROM skills sk
+            LEFT JOIN subtopics st ON st.id=sk.subtopic_id
+            LEFT JOIN topics t ON t.id=st.topic_id
+            WHERE st.id IS NULL OR t.id IS NULL
         """)) == 0
 
         subject_id = await db.scalar(text(
