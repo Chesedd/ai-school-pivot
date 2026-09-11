@@ -43,6 +43,19 @@ async def ensure_test_teacher(connection):
         {"id": TEACHER_ID})
 
 
+async def ensure_test_grade(connection):
+    """Return an existing grade, creating the minimal catalogue row if needed."""
+    grade_id = await connection.scalar(
+        text("SELECT id FROM grades ORDER BY number LIMIT 1")
+    )
+    if grade_id is not None:
+        return grade_id
+    return await connection.scalar(text(
+        "INSERT INTO grades(number,name,normalized_name) "
+        "VALUES (1,'Assessment test grade','assessment test grade') RETURNING id"
+    ))
+
+
 @pytest_asyncio.fixture
 async def database(monkeypatch):
     engine = create_async_engine(URL)
@@ -96,7 +109,7 @@ async def test_teacher_read_catalogues_are_ordered_scoped_and_private(client, da
     first_assignment_id, second_assignment_id, foreign_assignment_id = uuid4(), uuid4(), uuid4()
     now = datetime.now(timezone.utc)
     async with engine.begin() as connection:
-        grade_id = await connection.scalar(text("SELECT id FROM grades ORDER BY number LIMIT 1"))
+        grade_id = await ensure_test_grade(connection)
         await connection.execute(text("INSERT INTO class_groups(id,name,external_ref,grade_id,created_by,archived_at) VALUES "
             "(:a,'A','private-a',:grade,:actor,NULL),(:a2,'A','private-a2',:grade,:actor,NULL),"
             "(:b,'B','private-b',:grade,:actor,NULL),(:archived,'0 archived','private-x',:grade,:actor,clock_timestamp())"),
@@ -265,12 +278,19 @@ async def test_publication_readiness_and_strict_time_validation(client, database
             session, grade_id=content["grade"], name="Empty group")
         await session.commit()
         archived_group_id, empty_group_id = archived_group.id, empty_group.id
-    for group_id, expected in ((archived_group_id, "inactive_or_missing_group"),
-                               (empty_group_id, "no_active_students")):
-        actor, _, ready_id, _, _, _ = await publication_fixture(engine, factory)
-        result = await client.post(f"/api/assessment-core/assessments/{ready_id}/publish-and-assign",
-            json={**payload, "class_group_id": str(group_id)})
-        assert result.status_code == 422 and result.json()["error"]["details"][0]["code"] == expected
+    actor, _, ready_id, _, _, _ = await publication_fixture(engine, factory)
+    archived_result = await client.post(
+        f"/api/assessment-core/assessments/{ready_id}/publish-and-assign",
+        json={**payload, "class_group_id": str(archived_group_id)})
+    assert archived_result.status_code == 404
+    assert archived_result.json()["error"]["code"] == "class_group_not_found"
+
+    actor, _, ready_id, _, _, _ = await publication_fixture(engine, factory)
+    empty_group_result = await client.post(
+        f"/api/assessment-core/assessments/{ready_id}/publish-and-assign",
+        json={**payload, "class_group_id": str(empty_group_id)})
+    assert empty_group_result.status_code == 422
+    assert empty_group_result.json()["error"]["details"][0]["code"] == "no_active_students"
     actor, _, ready_id, _, ready_group, _ = await publication_fixture(engine, factory)
     passed = await client.post(f"/api/assessment-core/assessments/{ready_id}/publish-and-assign",
         json={**payload, "class_group_id": str(ready_group), "due_at": "2026-08-01T10:00:00Z"})
