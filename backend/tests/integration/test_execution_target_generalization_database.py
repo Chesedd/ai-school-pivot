@@ -8,7 +8,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from tests.integration.c10a_postgres import require_disposable_postgres, rolled_back_connection
@@ -40,6 +40,100 @@ async def _insert_result(connection, ids, **targets):
         '{"effective":"1.0000"}',1,1,1,'correct',false,'{}')
     """), values)
     return values["id"]
+
+
+async def _terminal_model(connection, ids, prompt, *, attempt=1, **targets):
+    values = {**ids, **targets, "id": uuid4(), "prompt": prompt,
+              "fingerprint": uuid4().hex + uuid4().hex, "attempt": attempt}
+    await connection.execute(text("""
+      INSERT INTO model_runs(id,check_run_id,assessment_item_id,remediation_plan_item_id,
+        prompt_version_id,provider_id,model_id,settings_snapshot,request_fingerprint,
+        attempt_no,timeout_ms,status,finished_at,validated_output)
+      VALUES (:id,:source_run_0,:assessment_item_id,:remediation_plan_item_id,:prompt,
+        'provider','model','{}',:fingerprint,:attempt,1000,'succeeded',clock_timestamp(),'{}')
+    """), values)
+    return values["id"]
+
+
+async def _guard_rejects(connection, sql, values):
+    savepoint = await connection.begin_nested()
+    with pytest.raises(DBAPIError, match="model attempt (identity is immutable|cannot be deleted)"):
+        await connection.execute(text(sql), values)
+    await savepoint.rollback()
+
+
+async def test_model_run_guard_matches_exact_assessment_or_remediation_target():
+    async with rolled_back_connection() as connection:
+        ids = await seed_execution_world(connection)
+        prompt = uuid4()
+        await connection.execute(text("""
+          INSERT INTO prompt_versions(id,name,semantic_version,template_hash,
+            output_schema_version,template_text)
+          VALUES (:id,'guard','v1',:hash,'v1','prompt')
+        """), {"id": prompt, "hash": uuid4().hex + uuid4().hex})
+
+        assessment_result = await _insert_result(connection, ids,
+            assessment_item_id=ids["assessment_item_0"], remediation_plan_item_id=None)
+        remediation_result = await _insert_result(connection, ids,
+            assessment_item_id=None, remediation_plan_item_id=ids["plan_item_0_0"])
+        assessment_model = await _terminal_model(connection, ids, prompt,
+            assessment_item_id=ids["assessment_item_0"], remediation_plan_item_id=None)
+        remediation_model = await _terminal_model(connection, ids, prompt,
+            assessment_item_id=None, remediation_plan_item_id=ids["plan_item_0_0"])
+
+        # The sole post-terminal mutation is NULL -> result for the exact target.
+        await connection.execute(text("UPDATE model_runs SET check_result_id=:r WHERE id=:m"),
+                                 {"r": assessment_result, "m": assessment_model})
+        await connection.execute(text("UPDATE model_runs SET check_result_id=:r WHERE id=:m"),
+                                 {"r": remediation_result, "m": remediation_model})
+
+        # Reassociation and unlinking stay forbidden.
+        for model, result in ((assessment_model, remediation_result),
+                              (remediation_model, assessment_result)):
+            await _guard_rejects(connection,
+                "UPDATE model_runs SET check_result_id=:r WHERE id=:m", {"r": result, "m": model})
+        await _guard_rejects(connection,
+            "UPDATE model_runs SET check_result_id=NULL WHERE id=:m", {"m": remediation_model})
+        await _guard_rejects(connection,
+            "UPDATE model_runs SET error_detail='changed' WHERE id=:m", {"m": remediation_model})
+        await _guard_rejects(connection, "DELETE FROM model_runs WHERE id=:m",
+                             {"m": remediation_model})
+
+        # Cross-kind associations are rejected even while check_result_id is still NULL.
+        cross_assessment = await _terminal_model(connection, ids, prompt,
+            attempt=2, assessment_item_id=ids["assessment_item_0"], remediation_plan_item_id=None)
+        cross_remediation = await _terminal_model(connection, ids, prompt,
+            attempt=2, assessment_item_id=None, remediation_plan_item_id=ids["plan_item_0_0"])
+        for model, result in ((cross_assessment, remediation_result),
+                              (cross_remediation, assessment_result)):
+            await _guard_rejects(connection,
+                "UPDATE model_runs SET check_result_id=:r WHERE id=:m", {"r": result, "m": model})
+
+
+async def test_model_run_guard_rejects_wrong_remediation_target_and_target_mutation():
+    async with rolled_back_connection() as connection:
+        ids = await seed_execution_world(connection)
+        prompt = uuid4()
+        await connection.execute(text("""
+          INSERT INTO prompt_versions(id,name,semantic_version,template_hash,
+            output_schema_version,template_text)
+          VALUES (:id,'guard-target','v1',:hash,'v1','prompt')
+        """), {"id": prompt, "hash": uuid4().hex + uuid4().hex})
+        wrong_result = await _insert_result(connection, ids,
+            assessment_item_id=None, remediation_plan_item_id=ids["plan_item_0_1"])
+        model = await _terminal_model(connection, ids, prompt,
+            assessment_item_id=None, remediation_plan_item_id=ids["plan_item_0_0"])
+
+        await _guard_rejects(connection,
+            "UPDATE model_runs SET check_result_id=:r WHERE id=:m", {"r": wrong_result, "m": model})
+        await _guard_rejects(connection,
+            "UPDATE model_runs SET remediation_plan_item_id=:target WHERE id=:m",
+            {"target": ids["plan_item_0_1"], "m": model})
+        matching_result = await _insert_result(connection, ids,
+            assessment_item_id=None, remediation_plan_item_id=ids["plan_item_0_0"])
+        await _guard_rejects(connection, """
+          UPDATE model_runs SET check_result_id=:r, error_detail='also changed' WHERE id=:m
+        """, {"r": matching_result, "m": model})
 
 
 async def test_execution_targets_enforce_row_xor_and_partial_uniqueness():
@@ -93,7 +187,7 @@ async def test_execution_targets_enforce_row_xor_and_partial_uniqueness():
 
 async def test_schema_metadata_remains_explicit_and_at_expected_head():
     async with rolled_back_connection() as connection:
-        assert await connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260907_04"
+        assert await connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260911_01"
         names = set((await connection.execute(text("SELECT conname FROM pg_constraint WHERE conname LIKE 'ck_%execution_%'"))).scalars())
         assert {"ck_student_submissions_execution_target_xor", "ck_student_answers_execution_item_xor",
                 "ck_check_results_execution_item_xor", "ck_model_runs_execution_item_xor",
