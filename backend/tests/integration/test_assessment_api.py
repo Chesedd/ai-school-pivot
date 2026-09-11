@@ -45,9 +45,7 @@ async def ensure_test_teacher(connection):
 
 async def ensure_test_grade(connection):
     """Return an existing grade, creating the minimal catalogue row if needed."""
-    grade_id = await connection.scalar(
-        text("SELECT id FROM grades ORDER BY number LIMIT 1")
-    )
+    grade_id = await connection.scalar(text("SELECT id FROM grades LIMIT 1"))
     if grade_id is not None:
         return grade_id
     return await connection.scalar(text(
