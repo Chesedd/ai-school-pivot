@@ -28,7 +28,6 @@ class UserResponse(BaseModel):
     last_name: str | None
     is_active: bool
     roles: list[str]
-    student_id: UUID | None
     created_at: datetime
     updated_at: datetime
     @classmethod
@@ -59,7 +58,6 @@ class CreateUserRequest(BaseModel):
     last_name: Annotated[str, Field(min_length=1, max_length=100)]
     password: GeneratedPasswordRequest | ProvidedPasswordRequest = Field(discriminator="mode")
     roles: set[str] = Field(default_factory=set)
-    student_id: UUID | None = None
 
 class UpdateUserRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -77,10 +75,6 @@ class RolesRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     roles: set[str]
 
-class StudentLinkRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    student_id: UUID
-
 class PasswordResetRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     new_password: Annotated[str, Field(min_length=1, max_length=1024)]
@@ -96,7 +90,7 @@ async def create_user(body: CreateUserRequest, response: Response, _: Principal 
     password = body.password.value if isinstance(body.password, ProvidedPasswordRequest) else None
     value = await svc.create(
         first_name=body.first_name, last_name=body.last_name, roles=body.roles,
-        student_id=body.student_id, password_mode=password_mode, password=password,
+        password_mode=password_mode, password=password,
     )
     await session.commit()
     payload = {**value.__dict__, "roles": list(value.roles)}
@@ -115,14 +109,6 @@ async def update_user(user_id: UUID, body: UpdateUserRequest, _: Principal = Dep
 @router.put("/{user_id}/roles", response_model=UserResponse, dependencies=unsafe)
 async def set_roles(user_id: UUID, body: RolesRequest, _: Principal = Depends(managed), svc: UserAdministrationService = Depends(service), session: AsyncSession = Depends(get_session)):
     value = await svc.set_roles(user_id, body.roles); await session.commit(); return UserResponse.from_view(value)
-
-@router.put("/{user_id}/student-link", response_model=UserResponse, dependencies=unsafe)
-async def link_student(user_id: UUID, body: StudentLinkRequest, _: Principal = Depends(managed), svc: UserAdministrationService = Depends(service), session: AsyncSession = Depends(get_session)):
-    value = await svc.link_student(user_id, body.student_id); await session.commit(); return UserResponse.from_view(value)
-
-@router.delete("/{user_id}/student-link", response_model=UserResponse, dependencies=unsafe)
-async def unlink_student(user_id: UUID, _: Principal = Depends(managed), svc: UserAdministrationService = Depends(service), session: AsyncSession = Depends(get_session)):
-    value = await svc.unlink_student(user_id); await session.commit(); return UserResponse.from_view(value)
 
 @router.post("/{user_id}/password-reset", status_code=204, dependencies=unsafe)
 async def reset_password(user_id: UUID, body: PasswordResetRequest, _: Principal = Depends(managed), svc: UserAdministrationService = Depends(service), session: AsyncSession = Depends(get_session)):

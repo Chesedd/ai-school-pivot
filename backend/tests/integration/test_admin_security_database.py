@@ -46,9 +46,9 @@ async def test_concurrent_admin_reductions_leave_one_active_admin(database):
     engine, factory = database
     async with factory() as session:
         first = await service(session).create(login="admin-a", display_name="Admin A",
-            password="acceptance-password-a", roles={"admin"}, student_id=None)
+            password="acceptance-password-a", roles={"admin"})
         second = await service(session).create(login="admin-b", display_name="Admin B",
-            password="acceptance-password-b", roles={"admin"}, student_id=None)
+            password="acceptance-password-b", roles={"admin"})
         await session.commit()
 
     gate = asyncio.Event()
@@ -129,7 +129,7 @@ async def test_generated_credentials_collide_with_inactive_normalized_login(data
     async with factory() as session:
         created = await service(session).create(
             first_name="Иван", last_name="Иванов", password_mode="generated",
-            roles={"student"}, student_id=None,
+            roles={"student"},
         )
         plaintext = created.generated_password
         await session.commit()

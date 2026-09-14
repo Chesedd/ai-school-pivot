@@ -4,9 +4,11 @@ from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from app.application.user_administration import AdministrationError, UserAdministrationService
-from app.presentation.admin_user_routes import CreateUserRequest, PasswordResetRequest
+from app.presentation.admin_user_routes import CreateUserRequest, PasswordResetRequest, UserResponse, router
 
 
 def repository(*, roles=frozenset(), active=True, linked=False, admins=1):
@@ -19,7 +21,7 @@ def repository(*, roles=frozenset(), active=True, linked=False, admins=1):
         count_active_admins=AsyncMock(return_value=admins), lock_admin_invariant=AsyncMock(),
         set_user_active=AsyncMock(), revoke_sessions_for_user=AsyncMock(),
         update_user_identity=AsyncMock(return_value=row), replace_roles=AsyncMock(),
-        update_password_hash=AsyncMock(), remove_student_link=AsyncMock(),
+        update_password_hash=AsyncMock(),
     )
     auth = SimpleNamespace(password_hasher=SimpleNamespace(hash_password=lambda value: "$argon2id$hash"))
     return UserAdministrationService(repo, auth), repo, row
@@ -63,6 +65,22 @@ def test_admin_requests_forbid_secret_and_spoofing_fields():
         CreateUserRequest(first_name="X", last_name="Y", password={"mode": "generated"}, roles=set(), password_hash="leak")
     with pytest.raises(ValueError):
         PasswordResetRequest(new_password="p", actor_id=str(uuid4()))
+    with pytest.raises(ValueError):
+        CreateUserRequest(
+            first_name="X", last_name="Y", password={"mode": "generated"},
+            roles={"student"}, student_id=str(uuid4()),
+        )
+
+
+def test_admin_contract_omits_student_identity_and_legacy_routes():
+    assert "student_id" not in UserResponse.model_fields
+    assert not any(route.path.endswith("/student-link") for route in router.routes)
+    test_app = FastAPI()
+    test_app.include_router(router)
+    user_id = uuid4()
+    with TestClient(test_app) as client:
+        assert client.put(f"/api/admin/users/{user_id}/student-link", json={"student_id": str(uuid4())}).status_code == 404
+        assert client.delete(f"/api/admin/users/{user_id}/student-link").status_code == 404
 
 
 def test_admin_create_request_supports_generated_and_provided_passwords():

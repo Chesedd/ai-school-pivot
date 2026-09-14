@@ -42,8 +42,7 @@ def _service(auth):
         created_at=None, updated_at=None,
     )
     repo = SimpleNamespace(
-        student_exists=AsyncMock(), link_for_student=AsyncMock(return_value=None),
-        replace_roles=AsyncMock(), create_student_link=AsyncMock(),
+        replace_roles=AsyncMock(),
         get_user=AsyncMock(return_value=row), roles_for_user=AsyncMock(return_value=frozenset()),
         link_for_user=AsyncMock(return_value=None),
     )
@@ -61,7 +60,7 @@ async def test_collisions_retry_through_database_arbiter():
     row.id = account.user_id
     result = await service.create(
         first_name="Иван", last_name="Иванов", password="provided",
-        roles=set(), student_id=None,
+        roles=set(),
     )
     assert [call.kwargs["login"] for call in auth.create_account.await_args_list] == [
         "иван.иванов", "иван.иванов-2", "иван.иванов-3",
@@ -79,7 +78,7 @@ async def test_generated_login_retry_is_bounded():
     with pytest.raises(AdministrationError, match="account_already_exists"):
         await service.create(
             first_name="Иван", last_name="Иванов", password="provided",
-            roles=set(), student_id=None,
+            roles=set(),
         )
     assert auth.create_account.await_count == MAX_GENERATED_LOGIN_ATTEMPTS
 

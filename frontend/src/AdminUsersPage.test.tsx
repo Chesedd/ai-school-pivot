@@ -8,7 +8,7 @@ vi.mock("./adminApi", async importOriginal => ({...(await importOriginal<typeof 
 const auth = {principal: {user_id: "admin"}, becomeAnonymous: vi.fn(), refreshPrincipal: vi.fn()};
 vi.mock("./auth", () => ({useAuth: () => auth}));
 const api = vi.mocked(adminApi);
-const user = (overrides = {}) => ({user_id: "u1", login: "иван.иванов", display_name: "Иван Иванов", first_name: "Иван", last_name: "Иванов", is_active: true, roles: ["student"] as adminApi.Role[], student_id: null, created_at: "1", updated_at: "1", ...overrides});
+const user = (overrides = {}) => ({user_id: "u1", login: "иван.иванов", display_name: "Иван Иванов", first_name: "Иван", last_name: "Иванов", is_active: true, roles: ["student"] as adminApi.Role[], created_at: "1", updated_at: "1", ...overrides});
 
 describe("AdminUsersPage", () => {
   beforeEach(() => {

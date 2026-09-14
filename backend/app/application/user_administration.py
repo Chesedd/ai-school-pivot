@@ -8,7 +8,7 @@ from uuid import UUID
 
 from app.application.auth_errors import AccountAlreadyExistsError, InvalidAccountInputError
 from app.application.authentication import AuthenticationService, normalize_login
-from app.infrastructure.auth_repository import DuplicateNormalizedLogin, StudentLinkConflict
+from app.infrastructure.auth_repository import DuplicateNormalizedLogin
 from app.security.passwords import InvalidPassword, PasswordHasher, generate_password
 from app.application.user_identity import compose_display_name, normalize_person_name, InvalidPersonName
 from app.application.login_generation import (
@@ -35,7 +35,6 @@ class AdminUserView:
     last_name: str | None
     is_active: bool
     roles: tuple[str, ...]
-    student_id: UUID | None
     created_at: datetime
     updated_at: datetime
 
@@ -51,10 +50,6 @@ class AdministrationRepository(Protocol):
     async def list_users(self, *, offset: int, limit: int): ...
     async def roles_for_user(self, user_id: UUID): ...
     async def link_for_user(self, user_id: UUID): ...
-    async def link_for_student(self, student_id: UUID): ...
-    async def student_exists(self, student_id: UUID) -> bool: ...
-    async def create_student_link(self, user_id: UUID, student_id: UUID): ...
-    async def remove_student_link(self, user_id: UUID) -> bool: ...
     async def replace_roles(self, user_id: UUID, roles: frozenset[str]): ...
     async def update_user_identity(self, user_id: UUID, *, login: str, normalized_login: str, display_name: str, first_name: str | None, last_name: str | None): ...
     async def set_user_active(self, user_id: UUID, active: bool): ...
@@ -71,8 +66,7 @@ class UserAdministrationService:
 
     async def _view(self, row) -> AdminUserView:
         roles = await self.repository.roles_for_user(row.id)
-        link = await self.repository.link_for_user(row.id)
-        return AdminUserView(row.id, row.login, row.display_name, getattr(row, "first_name", None), getattr(row, "last_name", None), row.is_active, tuple(sorted(roles)), None if link is None else link.student_id, row.created_at, row.updated_at)
+        return AdminUserView(row.id, row.login, row.display_name, getattr(row, "first_name", None), getattr(row, "last_name", None), row.is_active, tuple(sorted(roles)), row.created_at, row.updated_at)
 
     async def get(self, user_id: UUID) -> AdminUserView:
         row = await self.repository.get_user(user_id)
@@ -90,17 +84,11 @@ class UserAdministrationService:
 
     async def create(
         self, *, login: str | None = None, display_name: str | None = None,
-        password: str | None = None, roles: set[str], student_id: UUID | None,
+        password: str | None = None, roles: set[str],
         first_name: str | None = None, last_name: str | None = None,
         password_mode: str = "provided",
     ) -> AdminUserCreationView:
         roles_value = self._roles(roles)
-        if student_id is not None and "student" not in roles_value:
-            raise AdministrationError("student_link_requires_student_role", 409)
-        if student_id is not None and not await self.repository.student_exists(student_id):
-            raise AdministrationError("student_not_found", 404)
-        if student_id is not None and await self.repository.link_for_student(student_id):
-            raise AdministrationError("student_link_conflict", 409)
         generated_password = generate_password() if password_mode == "generated" else None
         credential = generated_password if generated_password is not None else password
         if password_mode not in {"generated", "provided"} or credential is None:
@@ -129,9 +117,6 @@ class UserAdministrationService:
         except AccountAlreadyExistsError as exc: raise AdministrationError("account_already_exists", 409) from exc
         except InvalidAccountInputError as exc: raise AdministrationError("invalid_account_input", 422) from exc
         await self.repository.replace_roles(account.user_id, roles_value)
-        if student_id is not None:
-            try: await self.repository.create_student_link(account.user_id, student_id)
-            except StudentLinkConflict as exc: raise AdministrationError("student_link_conflict", 409) from exc
         view = await self.get(account.user_id)
         return AdminUserCreationView(**view.__dict__, generated_password=generated_password)
 
@@ -174,20 +159,6 @@ class UserAdministrationService:
         await self.repository.replace_roles(user_id, value)
         return await self.get(user_id)
 
-    async def link_student(self, user_id: UUID, student_id: UUID) -> AdminUserView:
-        if await self.repository.get_user(user_id) is None: raise AdministrationError("user_not_found", 404)
-        if not await self.repository.student_exists(student_id): raise AdministrationError("student_not_found", 404)
-        if "student" not in await self.repository.roles_for_user(user_id): raise AdministrationError("student_link_requires_student_role", 409)
-        if await self.repository.link_for_user(user_id) or await self.repository.link_for_student(student_id): raise AdministrationError("student_link_conflict", 409)
-        try: await self.repository.create_student_link(user_id, student_id)
-        except StudentLinkConflict as exc: raise AdministrationError("student_link_conflict", 409) from exc
-        return await self.get(user_id)
-
-    async def unlink_student(self, user_id: UUID) -> AdminUserView:
-        if await self.repository.get_user(user_id) is None: raise AdministrationError("user_not_found", 404)
-        await self.repository.remove_student_link(user_id)
-        return await self.get(user_id)
-
     async def reset_password(self, user_id: UUID, new_password: str) -> None:
         if await self.repository.get_user(user_id) is None: raise AdministrationError("user_not_found", 404)
         try: encoded = self.password_hasher.hash_password(new_password)
@@ -198,4 +169,4 @@ class UserAdministrationService:
     async def bootstrap(self, *, login: str, display_name: str, password: str) -> AdminUserView:
         await self.repository.lock_admin_invariant()
         if await self.repository.count_active_admins(): raise AdministrationError("bootstrap_not_required", 409)
-        return await self.create(login=login, display_name=display_name, password=password, roles={"admin"}, student_id=None)
+        return await self.create(login=login, display_name=display_name, password=password, roles={"admin"})

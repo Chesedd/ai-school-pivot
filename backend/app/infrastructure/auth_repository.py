@@ -20,10 +20,6 @@ class SessionTokenCollision(Exception):
     """A generated session digest collided with an existing digest."""
 
 
-class StudentLinkConflict(Exception):
-    """A one-to-one student link conflicted with an existing link."""
-
-
 def _constraint_name(exc: IntegrityError) -> str | None:
     """Read asyncpg's constraint metadata through SQLAlchemy's wrapper."""
     original = getattr(exc, "orig", None)
@@ -128,30 +124,6 @@ class SQLAlchemyAuthRepository:
     async def link_for_user(self, user_id: UUID) -> StudentUserLink | None:
         return await self.session.get(StudentUserLink, user_id)
 
-    async def link_for_student(self, student_id: UUID) -> StudentUserLink | None:
-        return await self.session.scalar(
-            select(StudentUserLink).where(StudentUserLink.student_id == student_id)
-        )
-
-    async def create_student_link(
-        self, user_id: UUID, student_id: UUID
-    ) -> StudentUserLink:
-        row = StudentUserLink(user_id=user_id, student_id=student_id)
-        try:
-            async with self.session.begin_nested():
-                self.session.add(row)
-                await self.session.flush()
-        except IntegrityError as exc:
-            raise StudentLinkConflict from exc
-        await self.session.refresh(row)
-        return row
-
-    async def remove_student_link(self, user_id: UUID) -> bool:
-        result = await self.session.execute(
-            delete(StudentUserLink).where(StudentUserLink.user_id == user_id)
-        )
-        return bool(result.rowcount)
-
     async def list_users(self, *, offset: int, limit: int) -> tuple[list[User], int]:
         total = await self.session.scalar(select(func.count()).select_from(User))
         rows = await self.session.scalars(
@@ -199,10 +171,6 @@ class SQLAlchemyAuthRepository:
         await self.session.execute(
             update(User).where(User.id == user_id).values(password_hash=password_hash, updated_at=func.clock_timestamp())
         )
-
-    async def student_exists(self, student_id: UUID) -> bool:
-        from app.infrastructure.assessment_models import Student
-        return await self.session.get(Student, student_id) is not None
 
     async def lock_admin_invariant(self) -> None:
         # A transaction-scoped PostgreSQL advisory lock serializes every operation

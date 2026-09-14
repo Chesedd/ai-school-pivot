@@ -16,8 +16,6 @@ export type AdminUser = {
   last_name: string | null;
   is_active: boolean;
   roles: Role[];
-  // Kept for response compatibility. Account administration must not depend on this link.
-  student_id: string | null;
   created_at: string;
   updated_at: string;
 };
