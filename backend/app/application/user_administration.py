@@ -1,7 +1,7 @@
 """Account administration orchestration, independent of HTTP."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 from datetime import datetime, timezone
 from typing import Protocol
 from uuid import UUID
@@ -9,8 +9,13 @@ from uuid import UUID
 from app.application.auth_errors import AccountAlreadyExistsError, InvalidAccountInputError
 from app.application.authentication import AuthenticationService, normalize_login
 from app.infrastructure.auth_repository import DuplicateNormalizedLogin, StudentLinkConflict
-from app.security.passwords import InvalidPassword, PasswordHasher
+from app.security.passwords import InvalidPassword, PasswordHasher, generate_password
 from app.application.user_identity import compose_display_name, normalize_person_name, InvalidPersonName
+from app.application.login_generation import (
+    MAX_GENERATED_LOGIN_ATTEMPTS,
+    generated_login_base,
+    generated_login_candidate,
+)
 
 VALID_ROLES = frozenset({"admin", "teacher", "student"})
 
@@ -33,6 +38,12 @@ class AdminUserView:
     student_id: UUID | None
     created_at: datetime
     updated_at: datetime
+
+
+@dataclass(frozen=True)
+class AdminUserCreationView(AdminUserView):
+    # repr=False reduces the chance of accidental plaintext disclosure.
+    generated_password: str | None = dataclass_field(default=None, repr=False)
 
 
 class AdministrationRepository(Protocol):
@@ -77,7 +88,12 @@ class UserAdministrationService:
         if not result <= VALID_ROLES: raise AdministrationError("invalid_role", 422)
         return result
 
-    async def create(self, *, login: str, display_name: str | None, password: str, roles: set[str], student_id: UUID | None, first_name: str | None = None, last_name: str | None = None) -> AdminUserView:
+    async def create(
+        self, *, login: str | None = None, display_name: str | None = None,
+        password: str | None = None, roles: set[str], student_id: UUID | None,
+        first_name: str | None = None, last_name: str | None = None,
+        password_mode: str = "provided",
+    ) -> AdminUserCreationView:
         roles_value = self._roles(roles)
         if student_id is not None and "student" not in roles_value:
             raise AdministrationError("student_link_requires_student_role", 409)
@@ -85,15 +101,39 @@ class UserAdministrationService:
             raise AdministrationError("student_not_found", 404)
         if student_id is not None and await self.repository.link_for_student(student_id):
             raise AdministrationError("student_link_conflict", 409)
+        generated_password = generate_password() if password_mode == "generated" else None
+        credential = generated_password if generated_password is not None else password
+        if password_mode not in {"generated", "provided"} or credential is None:
+            raise AdministrationError("invalid_account_input", 422)
         try:
-            account = await self.authentication.create_account(login=login, display_name=display_name, password=password, first_name=first_name, last_name=last_name)
+            if login is None:
+                if first_name is None or last_name is None:
+                    raise InvalidAccountInputError()
+                base = generated_login_base(first_name, last_name)
+                for attempt in range(1, MAX_GENERATED_LOGIN_ATTEMPTS + 1):
+                    try:
+                        account = await self.authentication.create_account(
+                            login=generated_login_candidate(base, attempt),
+                            display_name=display_name, password=credential,
+                            first_name=first_name, last_name=last_name,
+                        )
+                        break
+                    except AccountAlreadyExistsError:
+                        if attempt == MAX_GENERATED_LOGIN_ATTEMPTS:
+                            raise
+            else:
+                account = await self.authentication.create_account(
+                    login=login, display_name=display_name, password=credential,
+                    first_name=first_name, last_name=last_name,
+                )
         except AccountAlreadyExistsError as exc: raise AdministrationError("account_already_exists", 409) from exc
         except InvalidAccountInputError as exc: raise AdministrationError("invalid_account_input", 422) from exc
         await self.repository.replace_roles(account.user_id, roles_value)
         if student_id is not None:
             try: await self.repository.create_student_link(account.user_id, student_id)
             except StudentLinkConflict as exc: raise AdministrationError("student_link_conflict", 409) from exc
-        return await self.get(account.user_id)
+        view = await self.get(account.user_id)
+        return AdminUserCreationView(**view.__dict__, generated_password=generated_password)
 
     async def update(self, user_id: UUID, *, login: str | None = None, display_name: str | None = None, is_active: bool | None = None, first_name: str | None = None, last_name: str | None = None) -> AdminUserView:
         row = await self.repository.get_user(user_id)
