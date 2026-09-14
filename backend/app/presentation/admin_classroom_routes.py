@@ -38,6 +38,8 @@ async def unassign(class_group_id:UUID,teacher_user_id:UUID,p:Principal=Depends(
  await svc.unassign_teacher(class_group_id,teacher_user_id,p.user_id);await session.commit();return Response(status_code=204)
 @router.get('/{class_group_id}/students',response_model=list[StudentResponse])
 async def students(class_group_id:UUID,status:Literal['active','archived','all']='active',_=Depends(admin),svc=Depends(service)):return [sr(x) for x in await svc.list_students(class_group_id,status)]
+@router.get('/{class_group_id}/student-candidates',response_model=list[StudentCandidateResponse])
+async def student_candidates(class_group_id:UUID,query:Annotated[str|None,Field(max_length=200)]=None,limit:Annotated[int,Field(ge=1,le=100)]=25,_=Depends(admin),svc=Depends(service)):return await svc.list_student_candidates(class_group_id,query,limit)
 @router.post('/{class_group_id}/students',response_model=StudentResponse,status_code=201,dependencies=unsafe)
 async def create_student(class_group_id:UUID,body:CreateStudentRequest,p:Principal=Depends(admin),svc=Depends(service),session:AsyncSession=Depends(get_session)):
  x=await svc.create_student(class_group_id,**body.model_dump(),actor=p.user_id);await session.commit();return sr(x)

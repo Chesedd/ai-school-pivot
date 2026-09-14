@@ -158,16 +158,12 @@ async def test_full_classroom_product_vertical():
             await classroom.assign_teacher(group.id, ids["teacher_a"], ids["admin"])
             await classroom.assign_teacher(group.id, ids["teacher_b"], ids["admin"])
             student_a = await classroom.create_student(
-                group.id, "Student A", "vertical-a", ids["admin"]
+                group.id, ids["student_a_user"], "vertical-a", ids["admin"]
             )
             student_b = await classroom.create_student(
-                group.id, "Student B", "vertical-b", ids["admin"]
+                group.id, ids["student_b_user"], "vertical-b", ids["admin"]
             )
         ids.update(group=group.id, student_a=student_a.id, student_b=student_b.id)
-        await connection.execute(text("""
-          INSERT INTO student_user_links(user_id,student_id) VALUES
-            (:student_a_user,:student_a),(:student_b_user,:student_b)
-        """), ids)
 
         # Real notes service proves object ownership is narrower than class membership.
         async with factory() as session, session.begin():

@@ -14,7 +14,17 @@ class TeacherView:
     user_id: UUID; display_name: str; is_active: bool
 @dataclass(frozen=True)
 class StudentView:
-    id: UUID; display_name: str; external_ref: str | None; class_group_id: UUID; archived_at: datetime | None
+    id: UUID; display_name: str; external_ref: str | None; class_group_id: UUID; archived_at: datetime | None; user_id: UUID | None = None; login: str | None = None; first_name: str | None = None; last_name: str | None = None
+@dataclass(frozen=True)
+class StudentCandidate:
+    user_id: UUID; first_name: str | None; last_name: str | None; display_name: str; login: str; provisioning_state: Literal['available'] = 'available'
+@dataclass(frozen=True)
+class StudentAccount:
+    user_id: UUID; display_name: str; is_active: bool; has_student_role: bool; linked_student: StudentView | None
+
+class StudentProvisioningConflict(Exception):
+    """A constraint rejected provisioning; the nested transaction was rolled back."""
+    def __init__(self, kind: Literal['external_ref', 'link']): self.kind = kind
 
 class ClassroomError(Exception):
     def __init__(self, code: str, status: int = 409): self.code=code; self.status=status; super().__init__(code.replace('_',' '))
@@ -31,6 +41,9 @@ class ClassroomRepository(Protocol):
     async def assign_teacher(self, class_id: UUID, teacher_id: UUID, actor: UUID): ...
     async def unassign_teacher(self, class_id: UUID, teacher_id: UUID) -> bool: ...
     async def list_students(self, id: UUID, status: str) -> list[StudentView]: ...
+    async def list_student_candidates(self, query: str | None, limit: int) -> list[StudentCandidate]: ...
+    async def student_account(self, user_id: UUID, lock: bool=False) -> StudentAccount | None: ...
+    async def provision_student(self, *, user_id: UUID, class_group_id: UUID, display_name: str, external_ref: str | None) -> StudentView: ...
     async def get_student(self, id: UUID, lock: bool=False) -> StudentView | None: ...
     async def create_student(self, **values) -> StudentView: ...
     async def update_student(self, id: UUID, values: dict) -> StudentView: ...
@@ -82,14 +95,40 @@ class ClassroomAdministrationService:
         if not await self.repository.get_class(class_id,True): raise ClassroomError('class_not_found',404)
         if await self.repository.unassign_teacher(class_id,teacher_id): await self.repository.audit('teacher_membership',class_id,'teacher.unassigned',actor,{'teacher_user_id':str(teacher_id)})
     async def list_students(self,class_id,status='active'): await self.get_class(class_id); return await self.repository.list_students(class_id,status)
-    async def create_student(self,class_id,display_name,external_ref,actor):
+    async def list_student_candidates(self,class_id,query=None,limit=25):
+        group=await self.repository.get_class(class_id)
+        if not group: raise ClassroomError('class_not_found',404)
+        if group.archived_at: raise ClassroomError('class_archived')
+        if not group.grade_id: raise ClassroomError('class_grade_required')
+        return await self.repository.list_student_candidates(query,limit)
+    async def create_student(self,class_id,user_id,external_ref,actor):
         group=await self.repository.get_class(class_id,True)
         if not group: raise ClassroomError('class_not_found',404)
         if group.archived_at: raise ClassroomError('class_archived')
         if not group.grade_id: raise ClassroomError('class_grade_required')
-        try: value=await self.repository.create_student(class_group_id=class_id,display_name=display_name,external_ref=external_ref)
-        except ValueError: raise ClassroomError('external_ref_conflict')
-        await self.repository.audit('student',value.id,'student.created',actor,{'class_group_id':str(class_id),'display_name':display_name,'external_ref':external_ref}); return value
+        account=await self.repository.student_account(user_id,True)
+        if not account: raise ClassroomError('user_not_found',404)
+        if not account.is_active: raise ClassroomError('student_user_inactive')
+        if not account.has_student_role: raise ClassroomError('student_role_required')
+        if account.linked_student:
+            linked=account.linked_student
+            if linked.archived_at: code='student_profile_archived'
+            elif linked.class_group_id==class_id: code='student_already_in_class'
+            else: code='student_in_another_class'
+            raise ClassroomError(code)
+        try:
+            value=await self.repository.provision_student(user_id=user_id,class_group_id=class_id,display_name=account.display_name,external_ref=external_ref)
+        except StudentProvisioningConflict as exc:
+            if exc.kind=='external_ref': raise ClassroomError('external_ref_conflict') from exc
+            # A writer not using the user-row lock may have won. Read
+            # its durable result so the race has the same semantics as a retry.
+            account=await self.repository.student_account(user_id,True)
+            if account and account.linked_student:
+                linked=account.linked_student
+                code='student_profile_archived' if linked.archived_at else ('student_already_in_class' if linked.class_group_id==class_id else 'student_in_another_class')
+                raise ClassroomError(code) from exc
+            raise ClassroomError('student_in_another_class') from exc
+        await self.repository.audit('student',value.id,'student.created',actor,{'user_id':str(user_id),'student_id':str(value.id),'class_group_id':str(class_id),'external_ref':external_ref}); return value
     async def move_student(self,student_id,target,expected,actor):
         student=await self.repository.get_student(student_id,True)
         if not student: raise ClassroomError('student_not_found',404)

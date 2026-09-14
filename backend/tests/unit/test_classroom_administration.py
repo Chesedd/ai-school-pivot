@@ -2,11 +2,11 @@ from dataclasses import replace
 from datetime import datetime,timezone
 from uuid import uuid4
 import pytest
-from app.application.classroom_administration import ClassView,ClassroomAdministrationService,ClassroomError,StudentView
+from app.application.classroom_administration import ClassView,ClassroomAdministrationService,ClassroomError,StudentAccount,StudentView
 
 class Repo:
  def __init__(self):
-  self.grade=uuid4();self.actor=uuid4();self.audit_events=[];self.groups={};self.students={};self.members=set();self.eligibility='eligible'
+  self.grade=uuid4();self.actor=uuid4();self.audit_events=[];self.groups={};self.students={};self.members=set();self.eligibility='eligible';self.accounts={}
  async def grade_exists(self,id):return id==self.grade
  async def create_class(self,**v):
   x=ClassView(uuid4(),v['name'],v['grade_id'],9,'9',v['external_ref'],datetime.now(timezone.utc),None);self.groups[x.id]=x;return x
@@ -23,6 +23,9 @@ class Repo:
  async def update_student(self,id,values):self.students[id]=replace(self.students[id],**values);return self.students[id]
  async def create_student(self,**v):
   x=StudentView(uuid4(),v['display_name'],v['external_ref'],v['class_group_id'],None);self.students[x.id]=x;return x
+ async def student_account(self,id,lock=False):return self.accounts.get(id)
+ async def provision_student(self,**v):
+  x=await self.create_student(**{k:v[k] for k in ('class_group_id','display_name','external_ref')});self.accounts[v['user_id']]=replace(self.accounts[v['user_id']],linked_student=x);return x
 
 def configured(r):
  g=ClassView(uuid4(),'9A',r.grade,9,'9',None,datetime.now(timezone.utc),None);r.groups[g.id]=g;return g
@@ -53,7 +56,31 @@ async def test_legacy_group_can_be_mapped_but_not_receive_students_or_teachers()
  with pytest.raises(ClassroomError,match='class grade required'):await s.assign_teacher(g.id,uuid4(),r.actor)
  mapped=await s.update_class(g.id,{'grade_id':r.grade},r.actor);assert mapped.is_configuration_complete
 async def test_archive_student_checks_nested_class_id_and_is_idempotent():
- r=Repo();g=configured(r);s=ClassroomAdministrationService(r);x=await s.create_student(g.id,'S',None,r.actor);r.audit_events.clear()
+ r=Repo();g=configured(r);s=ClassroomAdministrationService(r);user=uuid4();r.accounts[user]=StudentAccount(user,'S',True,True,None);x=await s.create_student(g.id,user,None,r.actor);r.audit_events.clear()
  with pytest.raises(ClassroomError,match='student not found'):await s.archive_student(uuid4(),x.id,r.actor)
  await s.archive_student(g.id,x.id,r.actor);await s.archive_student(g.id,x.id,r.actor)
  assert [x[2] for x in r.audit_events]==['student.archived']
+
+async def test_provisioning_validates_account_and_existing_link_states():
+ r=Repo();group=configured(r);other=configured(r);s=ClassroomAdministrationService(r)
+ missing=uuid4()
+ with pytest.raises(ClassroomError) as error:await s.create_student(group.id,missing,None,r.actor)
+ assert error.value.code=='user_not_found'
+ for account,code in (
+  (StudentAccount(uuid4(),'Inactive',False,True,None),'student_user_inactive'),
+  (StudentAccount(uuid4(),'Teacher',True,False,None),'student_role_required'),
+  (StudentAccount(uuid4(),'Same',True,True,StudentView(uuid4(),'Same',None,group.id,None)),'student_already_in_class'),
+  (StudentAccount(uuid4(),'Other',True,True,StudentView(uuid4(),'Other',None,other.id,None)),'student_in_another_class'),
+  (StudentAccount(uuid4(),'Old',True,True,StudentView(uuid4(),'Old',None,group.id,datetime.now(timezone.utc))),'student_profile_archived'),
+ ):
+  r.accounts[account.user_id]=account
+  with pytest.raises(ClassroomError) as error:await s.create_student(group.id,account.user_id,None,r.actor)
+  assert error.value.code==code
+
+async def test_provisioning_uses_canonical_name_and_audits_both_ids():
+ r=Repo();group=configured(r);s=ClassroomAdministrationService(r);user=uuid4()
+ r.accounts[user]=StudentAccount(user,'Canonical Name',True,True,None)
+ student=await s.create_student(group.id,user,'school-42',r.actor)
+ assert student.display_name=='Canonical Name' and student.external_ref=='school-42'
+ details=r.audit_events[-1][4]
+ assert details['user_id']==str(user) and details['student_id']==str(student.id)
