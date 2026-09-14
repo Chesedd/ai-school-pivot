@@ -24,6 +24,8 @@ class UserResponse(BaseModel):
     user_id: UUID
     login: str
     display_name: str
+    first_name: str | None
+    last_name: str | None
     is_active: bool
     roles: list[str]
     student_id: UUID | None
@@ -42,15 +44,24 @@ class UserListResponse(BaseModel):
 class CreateUserRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     login: Annotated[str, Field(min_length=1, max_length=254)]
-    display_name: Annotated[str, Field(min_length=1, max_length=200)]
+    display_name: Annotated[str, Field(min_length=1, max_length=200)] | None = None
+    first_name: Annotated[str, Field(min_length=1, max_length=100)] | None = None
+    last_name: Annotated[str, Field(min_length=1, max_length=100)] | None = None
     password: Annotated[str, Field(min_length=1, max_length=1024)]
     roles: set[str] = Field(default_factory=set)
     student_id: UUID | None = None
+    @model_validator(mode="after")
+    def has_name(self):
+        if self.display_name is None and self.first_name is None and self.last_name is None:
+            raise ValueError("display_name or a structured name is required")
+        return self
 
 class UpdateUserRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     login: Annotated[str, Field(min_length=1, max_length=254)] | None = None
     display_name: Annotated[str, Field(min_length=1, max_length=200)] | None = None
+    first_name: Annotated[str, Field(min_length=1, max_length=100)] | None = None
+    last_name: Annotated[str, Field(min_length=1, max_length=100)] | None = None
     is_active: bool | None = None
     @model_validator(mode="after")
     def nonempty(self):

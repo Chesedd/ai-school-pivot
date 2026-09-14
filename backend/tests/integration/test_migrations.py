@@ -377,3 +377,41 @@ async def test_j1f_resolution_revision_constraints_and_foreign_keys():
         await assert_database_at_repository_head(engine)
     finally:
         await engine.dispose()
+
+
+async def test_user_structured_names_migration_preserves_legacy_rows():
+    engine = create_async_engine(URL)
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(sa.text("DROP SCHEMA public CASCADE"))
+            await connection.execute(sa.text("CREATE SCHEMA public"))
+        alembic("upgrade", "20260911_01")
+        async with engine.begin() as connection:
+            user_id = await connection.scalar(sa.text(
+                "INSERT INTO users(login,normalized_login,display_name,password_hash) "
+                "VALUES ('legacy','legacy','Legacy Unparsed Name','opaque') RETURNING id"
+            ))
+        alembic("upgrade", "20260914_01")
+        async with engine.connect() as connection:
+            row = (await connection.execute(sa.text(
+                "SELECT display_name,first_name,last_name FROM users WHERE id=:id"
+            ), {"id": user_id})).one()
+            assert tuple(row) == ("Legacy Unparsed Name", None, None)
+        for column, value in (("first_name", " padded "), ("last_name", "x" * 101)):
+            with pytest.raises(sa.exc.IntegrityError):
+                async with engine.begin() as connection:
+                    await connection.execute(
+                        sa.text(f"UPDATE users SET {column}=:value WHERE id=:id"),
+                        {"value": value, "id": user_id},
+                    )
+        alembic("downgrade", "20260911_01")
+        async with engine.connect() as connection:
+            assert await connection.scalar(sa.text(
+                "SELECT count(*) FROM information_schema.columns WHERE table_name='users' "
+                "AND column_name IN ('first_name','last_name')"
+            )) == 0
+            assert await connection.scalar(sa.text("SELECT display_name FROM users WHERE id=:id"), {"id": user_id}) == "Legacy Unparsed Name"
+        alembic("upgrade", "head")
+        await assert_database_at_repository_head(engine)
+    finally:
+        await engine.dispose()

@@ -45,12 +45,16 @@ class SQLAlchemyAuthRepository:
         normalized_login: str,
         display_name: str,
         password_hash: str,
+        first_name: str | None = None,
+        last_name: str | None = None,
     ) -> User:
         row = User(
             login=login,
             normalized_login=normalized_login,
             display_name=display_name,
             password_hash=password_hash,
+            first_name=first_name,
+            last_name=last_name,
         )
         try:
             async with self.session.begin_nested():
@@ -156,11 +160,13 @@ class SQLAlchemyAuthRepository:
         return list(rows), int(total or 0)
 
     async def update_user_identity(
-        self, user_id: UUID, *, login: str, normalized_login: str, display_name: str
+        self, user_id: UUID, *, login: str, normalized_login: str, display_name: str,
+        first_name: str | None, last_name: str | None,
     ) -> User:
         row = await self.get_user(user_id)
         assert row is not None
         row.login, row.normalized_login, row.display_name = login, normalized_login, display_name
+        row.first_name, row.last_name = first_name, last_name
         try:
             async with self.session.begin_nested():
                 await self.session.flush()
