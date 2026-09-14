@@ -12,7 +12,7 @@ from app.presentation.admin_user_routes import CreateUserRequest, PasswordResetR
 def repository(*, roles=frozenset(), active=True, linked=False, admins=1):
     user_id = uuid4()
     now = datetime.now(timezone.utc)
-    row = SimpleNamespace(id=user_id, login="user", display_name="User", is_active=active, created_at=now, updated_at=now)
+    row = SimpleNamespace(id=user_id, login="user", display_name="User", first_name=None, last_name=None, is_active=active, created_at=now, updated_at=now)
     repo = SimpleNamespace(
         get_user=AsyncMock(return_value=row), roles_for_user=AsyncMock(return_value=roles),
         link_for_user=AsyncMock(return_value=SimpleNamespace(student_id=uuid4()) if linked else None),
@@ -63,3 +63,13 @@ def test_admin_requests_forbid_secret_and_spoofing_fields():
         CreateUserRequest(login="x", display_name="X", password="p", roles=set(), password_hash="leak")
     with pytest.raises(ValueError):
         PasswordResetRequest(new_password="p", actor_id=str(uuid4()))
+
+
+@pytest.mark.asyncio
+async def test_name_edit_composes_display_name_without_changing_login():
+    service, repo, row = repository()
+    await service.update(row.id, first_name="  Grace ", last_name=" Hopper ")
+    repo.update_user_identity.assert_awaited_once_with(
+        row.id, login="user", normalized_login="user", display_name="Grace Hopper",
+        first_name="Grace", last_name="Hopper",
+    )

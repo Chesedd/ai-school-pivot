@@ -33,6 +33,7 @@ from app.security.session_tokens import (
     generate_session_secret,
     hash_session_secret,
 )
+from app.application.user_identity import compose_display_name, InvalidPersonName
 
 MAX_LOGIN_LENGTH = 254
 MAX_DISPLAY_NAME_LENGTH = 200
@@ -62,6 +63,8 @@ class AuthRepository(Protocol):
         normalized_login: str,
         display_name: str,
         password_hash: str,
+        first_name: str | None = None,
+        last_name: str | None = None,
     ) -> UserRecord: ...
     async def get_user(self, user_id: UUID) -> UserRecord | None: ...
     async def find_user_by_normalized_login(
@@ -136,22 +139,34 @@ class AuthenticationService:
         self.secret_generator = secret_generator
 
     async def create_account(
-        self, *, login: str, display_name: str, password: str
+        self, *, login: str, display_name: str | None, password: str,
+        first_name: str | None = None, last_name: str | None = None,
     ) -> AuthenticatedAccount:
         visible_login, normalized_login = normalize_login(login)
-        if not isinstance(display_name, str):
-            raise InvalidAccountInputError()
-        display_name = display_name.strip()
-        if not display_name or len(display_name) > MAX_DISPLAY_NAME_LENGTH:
-            raise InvalidAccountInputError()
+        try:
+            if first_name is not None or last_name is not None:
+                display_name = compose_display_name(first_name, last_name)
+            elif isinstance(display_name, str):
+                display_name = display_name.strip()
+            else:
+                raise InvalidPersonName
+            if not display_name or len(display_name) > MAX_DISPLAY_NAME_LENGTH:
+                raise InvalidPersonName
+        except InvalidPersonName as exc:
+            raise InvalidAccountInputError() from exc
         try:
             password_hash = self.password_hasher.hash_password(password)
-            user = await self.repository.create_user(
+            values = dict(
                 login=visible_login,
                 normalized_login=normalized_login,
                 display_name=display_name,
                 password_hash=password_hash,
             )
+            # Keep legacy repository adapters valid for the legacy creation path.
+            if first_name is not None or last_name is not None:
+                values.update(first_name=first_name.strip() if first_name is not None else None,
+                              last_name=last_name.strip() if last_name is not None else None)
+            user = await self.repository.create_user(**values)
         except InvalidPassword as exc:
             raise InvalidAccountInputError() from exc
         except DuplicateNormalizedLogin as exc:

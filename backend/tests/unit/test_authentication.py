@@ -27,6 +27,8 @@ class User:
     normalized_login: str
     display_name: str
     password_hash: str
+    first_name: str | None = None
+    last_name: str | None = None
     is_active: bool = True
 
 
@@ -187,3 +189,15 @@ async def test_token_collision_retry_is_strictly_bounded():
     with pytest.raises(SessionCreationError):
         await failed.login("teacher", "correct")
     assert len(failed_repository.created_hashes) == 3
+
+
+async def test_structured_names_are_trimmed_and_dual_written():
+    repository = FakeRepository()
+    service = AuthenticationService(repository)
+    account = await service.create_account(
+        login="person", display_name="ignored legacy value", password="correct",
+        first_name="  Ada ", last_name=" Lovelace  ",
+    )
+    row = repository.users["person"]
+    assert (row.first_name, row.last_name, row.display_name) == ("Ada", "Lovelace", "Ada Lovelace")
+    assert account.display_name == "Ada Lovelace"

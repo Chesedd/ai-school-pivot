@@ -10,6 +10,7 @@ from app.application.auth_errors import AccountAlreadyExistsError, InvalidAccoun
 from app.application.authentication import AuthenticationService, normalize_login
 from app.infrastructure.auth_repository import DuplicateNormalizedLogin, StudentLinkConflict
 from app.security.passwords import InvalidPassword, PasswordHasher
+from app.application.user_identity import compose_display_name, normalize_person_name, InvalidPersonName
 
 VALID_ROLES = frozenset({"admin", "teacher", "student"})
 
@@ -25,6 +26,8 @@ class AdminUserView:
     user_id: UUID
     login: str
     display_name: str
+    first_name: str | None
+    last_name: str | None
     is_active: bool
     roles: tuple[str, ...]
     student_id: UUID | None
@@ -42,7 +45,7 @@ class AdministrationRepository(Protocol):
     async def create_student_link(self, user_id: UUID, student_id: UUID): ...
     async def remove_student_link(self, user_id: UUID) -> bool: ...
     async def replace_roles(self, user_id: UUID, roles: frozenset[str]): ...
-    async def update_user_identity(self, user_id: UUID, *, login: str, normalized_login: str, display_name: str): ...
+    async def update_user_identity(self, user_id: UUID, *, login: str, normalized_login: str, display_name: str, first_name: str | None, last_name: str | None): ...
     async def set_user_active(self, user_id: UUID, active: bool): ...
     async def revoke_sessions_for_user(self, user_id: UUID, revoked_at: datetime): ...
     async def update_password_hash(self, user_id: UUID, password_hash: str): ...
@@ -58,7 +61,7 @@ class UserAdministrationService:
     async def _view(self, row) -> AdminUserView:
         roles = await self.repository.roles_for_user(row.id)
         link = await self.repository.link_for_user(row.id)
-        return AdminUserView(row.id, row.login, row.display_name, row.is_active, tuple(sorted(roles)), None if link is None else link.student_id, row.created_at, row.updated_at)
+        return AdminUserView(row.id, row.login, row.display_name, getattr(row, "first_name", None), getattr(row, "last_name", None), row.is_active, tuple(sorted(roles)), None if link is None else link.student_id, row.created_at, row.updated_at)
 
     async def get(self, user_id: UUID) -> AdminUserView:
         row = await self.repository.get_user(user_id)
@@ -74,7 +77,7 @@ class UserAdministrationService:
         if not result <= VALID_ROLES: raise AdministrationError("invalid_role", 422)
         return result
 
-    async def create(self, *, login: str, display_name: str, password: str, roles: set[str], student_id: UUID | None) -> AdminUserView:
+    async def create(self, *, login: str, display_name: str | None, password: str, roles: set[str], student_id: UUID | None, first_name: str | None = None, last_name: str | None = None) -> AdminUserView:
         roles_value = self._roles(roles)
         if student_id is not None and "student" not in roles_value:
             raise AdministrationError("student_link_requires_student_role", 409)
@@ -83,7 +86,7 @@ class UserAdministrationService:
         if student_id is not None and await self.repository.link_for_student(student_id):
             raise AdministrationError("student_link_conflict", 409)
         try:
-            account = await self.authentication.create_account(login=login, display_name=display_name, password=password)
+            account = await self.authentication.create_account(login=login, display_name=display_name, password=password, first_name=first_name, last_name=last_name)
         except AccountAlreadyExistsError as exc: raise AdministrationError("account_already_exists", 409) from exc
         except InvalidAccountInputError as exc: raise AdministrationError("invalid_account_input", 422) from exc
         await self.repository.replace_roles(account.user_id, roles_value)
@@ -92,14 +95,21 @@ class UserAdministrationService:
             except StudentLinkConflict as exc: raise AdministrationError("student_link_conflict", 409) from exc
         return await self.get(account.user_id)
 
-    async def update(self, user_id: UUID, *, login: str | None, display_name: str | None, is_active: bool | None) -> AdminUserView:
+    async def update(self, user_id: UUID, *, login: str | None = None, display_name: str | None = None, is_active: bool | None = None, first_name: str | None = None, last_name: str | None = None) -> AdminUserView:
         row = await self.repository.get_user(user_id)
         if row is None: raise AdministrationError("user_not_found", 404)
         try: visible, normalized = normalize_login(row.login if login is None else login)
         except InvalidAccountInputError as exc: raise AdministrationError("invalid_account_input", 422) from exc
-        name = row.display_name if display_name is None else display_name.strip()
-        if not name or len(name) > 200: raise AdministrationError("invalid_account_input", 422)
-        try: await self.repository.update_user_identity(user_id, login=visible, normalized_login=normalized, display_name=name)
+        try:
+            given = normalize_person_name(getattr(row, "first_name", None) if first_name is None else first_name)
+            family = normalize_person_name(getattr(row, "last_name", None) if last_name is None else last_name)
+            if first_name is not None or last_name is not None:
+                name = compose_display_name(given, family)
+            else:
+                name = row.display_name if display_name is None else display_name.strip()
+                if not name or len(name) > 200: raise InvalidPersonName
+        except InvalidPersonName as exc: raise AdministrationError("invalid_account_input", 422) from exc
+        try: await self.repository.update_user_identity(user_id, login=visible, normalized_login=normalized, display_name=name, first_name=given, last_name=family)
         except DuplicateNormalizedLogin as exc: raise AdministrationError("account_already_exists", 409) from exc
         if is_active is not None and is_active != row.is_active:
             if not is_active:

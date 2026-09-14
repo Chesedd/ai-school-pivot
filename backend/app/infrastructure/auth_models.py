@@ -45,6 +45,14 @@ class User(Base):
             name="ck_users_display_name_valid",
         ),
         CheckConstraint(
+            "first_name IS NULL OR (first_name = btrim(first_name) AND char_length(first_name) BETWEEN 1 AND 100)",
+            name="ck_users_first_name_valid",
+        ),
+        CheckConstraint(
+            "last_name IS NULL OR (last_name = btrim(last_name) AND char_length(last_name) BETWEEN 1 AND 100)",
+            name="ck_users_last_name_valid",
+        ),
+        CheckConstraint(
             "char_length(password_hash) BETWEEN 1 AND 1024",
             name="ck_users_password_hash_valid",
         ),
@@ -57,6 +65,8 @@ class User(Base):
     login: Mapped[str] = mapped_column(String(254))
     normalized_login: Mapped[str] = mapped_column(String(254))
     display_name: Mapped[str] = mapped_column(String(200))
+    first_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    last_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     password_hash: Mapped[str] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     created_at: Mapped[datetime] = mapped_column(
