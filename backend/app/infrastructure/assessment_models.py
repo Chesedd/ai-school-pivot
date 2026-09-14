@@ -33,9 +33,9 @@ class ClassGroup(IdMixin, Base):
 
 class Student(IdMixin, Base):
     __tablename__ = "students"
-    __table_args__ = (CheckConstraint("display_name = btrim(display_name) AND char_length(display_name) BETWEEN 1 AND 120", name="ck_students_display_name_valid"), Index("uq_students_group_external_ref", "class_group_id", "external_ref", unique=True, postgresql_where=text("external_ref IS NOT NULL")), Index("ix_students_group_active", "class_group_id", "archived_at", "id"))
+    __table_args__ = (CheckConstraint("display_name = btrim(display_name) AND char_length(display_name) BETWEEN 1 AND 200", name="ck_students_display_name_valid"), Index("uq_students_group_external_ref", "class_group_id", "external_ref", unique=True, postgresql_where=text("external_ref IS NOT NULL")), Index("ix_students_group_active", "class_group_id", "archived_at", "id"))
     class_group_id: Mapped[UUID] = mapped_column(ForeignKey("class_groups.id", ondelete="RESTRICT", onupdate="RESTRICT", name="fk_students_class_group_id_class_groups"))
-    display_name: Mapped[str] = mapped_column(String(120)); external_ref: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    display_name: Mapped[str] = mapped_column(String(200)); external_ref: Mapped[str | None] = mapped_column(String(120), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=clock); archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 

@@ -13,8 +13,10 @@ class UpdateClassRequest(BaseModel):
         if not self.model_fields_set:raise ValueError('at least one field is required')
         return self
 class TeacherResponse(BaseModel): user_id:UUID;display_name:str;is_active:bool
-class StudentResponse(BaseModel): id:UUID;display_name:str;external_ref:str|None;class_group_id:UUID;archived_at:datetime|None
+class StudentResponse(BaseModel): id:UUID;display_name:str;external_ref:str|None;class_group_id:UUID;archived_at:datetime|None;user_id:UUID|None=None;login:str|None=None;first_name:str|None=None;last_name:str|None=None
+class StudentCandidateResponse(BaseModel):
+    user_id:UUID;first_name:str|None;last_name:str|None;display_name:str;login:str;provisioning_state:Literal['available']
 class CreateStudentRequest(BaseModel):
-    model_config=ConfigDict(extra='forbid');display_name:Annotated[str,Field(min_length=1,max_length=120)];external_ref:Annotated[str,Field(max_length=120)]|None=None
+    model_config=ConfigDict(extra='forbid');user_id:UUID;external_ref:Annotated[str,Field(max_length=120)]|None=None
 class MoveStudentRequest(BaseModel):
     model_config=ConfigDict(extra='forbid');target_class_group_id:UUID;expected_current_class_group_id:UUID

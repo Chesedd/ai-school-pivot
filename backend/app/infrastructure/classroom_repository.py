@@ -1,13 +1,13 @@
 """SQLAlchemy adapter for the Classroom application port."""
 from uuid import UUID
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.application.classroom_administration import ClassView, StudentView, TeacherView
+from app.application.classroom_administration import ClassView, StudentAccount, StudentCandidate, StudentProvisioningConflict, StudentView, TeacherView
 from app.application.classroom_access import TeacherClassSummary, TeacherStudentSummary
 from app.application.classroom_notes import NoteRecord
 from app.infrastructure.assessment_models import ClassGroup, Student
-from app.infrastructure.auth_models import User, UserRole
+from app.infrastructure.auth_models import StudentUserLink, User, UserRole
 from app.infrastructure.classroom_models import ClassGroupTeacher, ClassroomAuditLog, ClassNote, StudentNote
 from app.infrastructure.models import Grade
 
@@ -59,12 +59,38 @@ class SQLAlchemyClassroomRepository:
     async def unassign_teacher(self,class_id,teacher_id):
         result=await self.session.execute(delete(ClassGroupTeacher).where(ClassGroupTeacher.class_group_id==class_id,ClassGroupTeacher.teacher_user_id==teacher_id)); return result.rowcount>0
     @staticmethod
-    def sv(x): return StudentView(x.id,x.display_name,x.external_ref,x.class_group_id,x.archived_at)
+    def sv(x, user=None): return StudentView(x.id,x.display_name,x.external_ref,x.class_group_id,x.archived_at,user.id if user else None,user.login if user else None,user.first_name if user else None,user.last_name if user else None)
     async def list_students(self,id,status):
-        q=select(Student).where(Student.class_group_id==id).order_by(Student.display_name,Student.id)
+        q=select(Student,User).outerjoin(StudentUserLink,StudentUserLink.student_id==Student.id).outerjoin(User,User.id==StudentUserLink.user_id).where(Student.class_group_id==id).order_by(Student.display_name,Student.id)
         if status=='active':q=q.where(Student.archived_at.is_(None))
         elif status=='archived':q=q.where(Student.archived_at.is_not(None))
-        return [self.sv(x) for x in (await self.session.scalars(q)).all()]
+        return [self.sv(student,user) for student,user in (await self.session.execute(q)).all()]
+    async def list_student_candidates(self,query,limit):
+        q=select(User).join(UserRole,UserRole.user_id==User.id).where(User.is_active.is_(True),UserRole.role=='student',~select(StudentUserLink.user_id).where(StudentUserLink.user_id==User.id).exists())
+        if query:
+            term=f"%{query.strip()}%"
+            q=q.where(or_(User.display_name.ilike(term),User.login.ilike(term),User.first_name.ilike(term),User.last_name.ilike(term)))
+        users=(await self.session.scalars(q.order_by(User.display_name,User.login,User.id).limit(limit))).all()
+        return [StudentCandidate(x.id,x.first_name,x.last_name,x.display_name,x.login) for x in users]
+    async def student_account(self,user_id,lock=False):
+        q=select(User).where(User.id==user_id)
+        if lock:q=q.with_for_update()
+        user=await self.session.scalar(q)
+        if not user:return None
+        has_role=bool(await self.session.scalar(select(UserRole.user_id).where(UserRole.user_id==user_id,UserRole.role=='student')))
+        student=(await self.session.execute(select(Student).join(StudentUserLink,StudentUserLink.student_id==Student.id).where(StudentUserLink.user_id==user_id))).scalar_one_or_none()
+        return StudentAccount(user.id,user.display_name,user.is_active,has_role,self.sv(student,user) if student else None)
+    async def provision_student(self,*,user_id,class_group_id,display_name,external_ref):
+        obj=Student(class_group_id=class_group_id,display_name=display_name,external_ref=external_ref)
+        try:
+            async with self.session.begin_nested():
+                self.session.add(obj);await self.session.flush()
+                self.session.add(StudentUserLink(user_id=user_id,student_id=obj.id));await self.session.flush()
+        except IntegrityError as exc:
+            constraint=getattr(getattr(exc.orig,'diag',None),'constraint_name','') or ''
+            kind='external_ref' if constraint=='uq_students_group_external_ref' else 'link'
+            raise StudentProvisioningConflict(kind) from exc
+        return self.sv(obj,await self.session.get(User,user_id))
     async def get_student(self,id,lock=False):
         q=select(Student).where(Student.id==id)
         if lock:q=q.with_for_update()
