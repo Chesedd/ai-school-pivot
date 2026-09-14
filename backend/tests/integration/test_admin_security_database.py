@@ -17,6 +17,7 @@ if not URL.rsplit("/", 1)[-1].split("?", 1)[0].endswith("_test"):
 from app.application.authentication import AuthenticationService
 from app.application.user_administration import AdministrationError, UserAdministrationService
 from app.infrastructure.auth_repository import SQLAlchemyAuthRepository
+from app.security.passwords import PasswordHasher
 
 pytestmark = pytest.mark.asyncio
 
@@ -115,3 +116,32 @@ async def test_bootstrap_real_database_boundaries(database):
     async with engine.connect() as connection:
         assert await connection.scalar(text("SELECT count(*) FROM users")) == 1
         assert await connection.scalar(text("SELECT count(*) FROM user_roles")) == 0
+
+
+async def test_generated_credentials_collide_with_inactive_normalized_login(database):
+    """The unique index arbitrates allocation and plaintext is returned only once."""
+    engine, factory = database
+    async with engine.begin() as connection:
+        await connection.execute(text(
+            "INSERT INTO users(login,normalized_login,display_name,password_hash,is_active) "
+            "VALUES ('ИВАН.ИВАНОВ','иван.иванов','Legacy','$argon2id$opaque',false)"
+        ))
+    async with factory() as session:
+        created = await service(session).create(
+            first_name="Иван", last_name="Иванов", password_mode="generated",
+            roles={"student"}, student_id=None,
+        )
+        plaintext = created.generated_password
+        await session.commit()
+        assert created.login == "иван.иванов-2"
+        stored_hash = await session.scalar(text(
+            "SELECT password_hash FROM users WHERE id=:user_id"
+        ), {"user_id": created.user_id})
+        assert plaintext and PasswordHasher().verify_password(
+            plaintext, stored_hash
+        )
+        assert (await service(session).get(created.user_id)).__dict__.get("generated_password") is None
+        assert all(
+            item.__dict__.get("generated_password") is None
+            for item in (await service(session).list(offset=0, limit=50))[0]
+        )

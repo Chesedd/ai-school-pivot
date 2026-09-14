@@ -1,9 +1,22 @@
 """Argon2id password hashing behind a deliberately narrow interface."""
 
+import secrets
+
 from argon2 import PasswordHasher as Argon2PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 
 MAX_PASSWORD_BYTES = 1024
+GENERATED_PASSWORD_LENGTH = 18
+# Excludes 0/O, 1/I/l and punctuation that is awkward to dictate.
+GENERATED_PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+
+
+def generate_password() -> str:
+    """Generate a transcription-friendly credential with system CSPRNG entropy."""
+    return "".join(
+        secrets.choice(GENERATED_PASSWORD_ALPHABET)
+        for _ in range(GENERATED_PASSWORD_LENGTH)
+    )
 
 
 class InvalidPassword(ValueError):

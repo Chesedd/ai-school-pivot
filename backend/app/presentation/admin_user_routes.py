@@ -1,8 +1,8 @@
 """Capability-protected global account administration API."""
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.application.authentication import AuthenticationService
@@ -41,20 +41,25 @@ class UserListResponse(BaseModel):
     offset: int
     limit: int
 
+class GeneratedPasswordRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["generated"]
+
+class ProvidedPasswordRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["provided"]
+    value: Annotated[str, Field(min_length=1, max_length=1024)]
+
+class CreateUserResponse(UserResponse):
+    generated_password: str | None = None
+
 class CreateUserRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    login: Annotated[str, Field(min_length=1, max_length=254)]
-    display_name: Annotated[str, Field(min_length=1, max_length=200)] | None = None
-    first_name: Annotated[str, Field(min_length=1, max_length=100)] | None = None
-    last_name: Annotated[str, Field(min_length=1, max_length=100)] | None = None
-    password: Annotated[str, Field(min_length=1, max_length=1024)]
+    first_name: Annotated[str, Field(min_length=1, max_length=100)]
+    last_name: Annotated[str, Field(min_length=1, max_length=100)]
+    password: GeneratedPasswordRequest | ProvidedPasswordRequest = Field(discriminator="mode")
     roles: set[str] = Field(default_factory=set)
     student_id: UUID | None = None
-    @model_validator(mode="after")
-    def has_name(self):
-        if self.display_name is None and self.first_name is None and self.last_name is None:
-            raise ValueError("display_name or a structured name is required")
-        return self
 
 class UpdateUserRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -85,9 +90,19 @@ async def list_users(offset: Annotated[int, Field(ge=0)] = 0, limit: Annotated[i
     values, total = await svc.list(offset=offset, limit=limit)
     return UserListResponse(items=[UserResponse.from_view(x) for x in values], total=total, offset=offset, limit=limit)
 
-@router.post("", response_model=UserResponse, status_code=201, dependencies=unsafe)
-async def create_user(body: CreateUserRequest, _: Principal = Depends(managed), svc: UserAdministrationService = Depends(service), session: AsyncSession = Depends(get_session)):
-    value = await svc.create(**body.model_dump()); await session.commit(); return UserResponse.from_view(value)
+@router.post("", response_model=CreateUserResponse, response_model_exclude_none=True, status_code=201, dependencies=unsafe)
+async def create_user(body: CreateUserRequest, response: Response, _: Principal = Depends(managed), svc: UserAdministrationService = Depends(service), session: AsyncSession = Depends(get_session)):
+    password_mode = body.password.mode
+    password = body.password.value if isinstance(body.password, ProvidedPasswordRequest) else None
+    value = await svc.create(
+        first_name=body.first_name, last_name=body.last_name, roles=body.roles,
+        student_id=body.student_id, password_mode=password_mode, password=password,
+    )
+    await session.commit()
+    payload = {**value.__dict__, "roles": list(value.roles)}
+    if value.generated_password is not None:
+        response.headers["Cache-Control"] = "no-store"
+    return CreateUserResponse(**payload)
 
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user(user_id: UUID, _: Principal = Depends(managed), svc: UserAdministrationService = Depends(service)):

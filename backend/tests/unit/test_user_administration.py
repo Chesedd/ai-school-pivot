@@ -60,9 +60,22 @@ async def test_password_reset_hashes_and_revokes_every_session():
 
 def test_admin_requests_forbid_secret_and_spoofing_fields():
     with pytest.raises(ValueError):
-        CreateUserRequest(login="x", display_name="X", password="p", roles=set(), password_hash="leak")
+        CreateUserRequest(first_name="X", last_name="Y", password={"mode": "generated"}, roles=set(), password_hash="leak")
     with pytest.raises(ValueError):
         PasswordResetRequest(new_password="p", actor_id=str(uuid4()))
+
+
+def test_admin_create_request_supports_generated_and_provided_passwords():
+    generated = CreateUserRequest(
+        first_name="Иван", last_name="Иванов", roles={"student"},
+        password={"mode": "generated"},
+    )
+    assert generated.password.mode == "generated"
+    provided = CreateUserRequest(
+        first_name="Иван", last_name="Иванов",
+        password={"mode": "provided", "value": "secret"},
+    )
+    assert provided.password.value == "secret"
 
 
 @pytest.mark.asyncio
