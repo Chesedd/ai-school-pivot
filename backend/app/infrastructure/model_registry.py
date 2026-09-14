@@ -14,3 +14,4 @@ def register_all_models() -> None:
     from app.infrastructure import classroom_models  # noqa: F401
     from app.infrastructure import image_solving_models  # noqa: F401
     from app.infrastructure import remediation_models  # noqa: F401
+    from app.infrastructure import scan_checking_models  # noqa: F401
