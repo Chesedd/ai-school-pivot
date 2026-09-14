@@ -1,4 +1,5 @@
 """SQLAlchemy adapter for the Classroom application port."""
+from typing import Literal
 from uuid import UUID
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
@@ -10,6 +11,41 @@ from app.infrastructure.assessment_models import ClassGroup, Student
 from app.infrastructure.auth_models import StudentUserLink, User, UserRole
 from app.infrastructure.classroom_models import ClassGroupTeacher, ClassroomAuditLog, ClassNote, StudentNote
 from app.infrastructure.models import Grade
+
+
+_STUDENT_EXTERNAL_REF_CONSTRAINT = "uq_students_group_external_ref"
+_STUDENT_LINK_CONSTRAINTS = frozenset({
+    "pk_student_user_links",
+    "uq_student_user_links_student_id",
+})
+
+
+def _constraint_name(exc: IntegrityError) -> str | None:
+    """Return constraint metadata from SQLAlchemy's supported PostgreSQL drivers.
+
+    SQLAlchemy's asyncpg adapter translates the driver exception and chains the
+    original asyncpg exception as ``orig.__cause__``.  Unlike psycopg, asyncpg
+    exposes ``constraint_name`` directly rather than through ``diag``.
+    """
+    original = getattr(exc, "orig", None)
+    driver_error = getattr(original, "__cause__", None)
+    return (
+        getattr(original, "constraint_name", None)
+        or getattr(driver_error, "constraint_name", None)
+        or getattr(getattr(original, "diag", None), "constraint_name", None)
+    )
+
+
+def _student_provisioning_conflict(
+    exc: IntegrityError,
+) -> Literal["external_ref", "link"] | None:
+    constraint = _constraint_name(exc)
+    if constraint == _STUDENT_EXTERNAL_REF_CONSTRAINT:
+        return "external_ref"
+    if constraint in _STUDENT_LINK_CONSTRAINTS:
+        return "link"
+    return None
+
 
 class SQLAlchemyClassroomRepository:
     def __init__(self,session:AsyncSession): self.session=session
@@ -87,8 +123,9 @@ class SQLAlchemyClassroomRepository:
                 self.session.add(obj);await self.session.flush()
                 self.session.add(StudentUserLink(user_id=user_id,student_id=obj.id));await self.session.flush()
         except IntegrityError as exc:
-            constraint=getattr(getattr(exc.orig,'diag',None),'constraint_name','') or ''
-            kind='external_ref' if constraint=='uq_students_group_external_ref' else 'link'
+            kind = _student_provisioning_conflict(exc)
+            if kind is None:
+                raise
             raise StudentProvisioningConflict(kind) from exc
         return self.sv(obj,await self.session.get(User,user_id))
     async def get_student(self,id,lock=False):
