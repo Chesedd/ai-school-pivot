@@ -59,3 +59,24 @@ retryable incomplete chunks resume the same revision, while succeeded evidence i
 never rewritten. Every successful run ends at `MATCHING_REVIEW_REQUIRED`, including
 perfect-confidence runs. It neither confirms grouping nor creates a
 `PaperSubmission`; teacher-owned revisions remain PR 5 work.
+
+## PR 5 — mandatory teacher page-grouping review
+
+AI page-match proposals and candidates are immutable evidence. Teacher changes are
+stored separately in a versioned grouping revision: its entries are identified by
+`AssignmentParticipant`, and its page membership and ordering form the human-owned
+draft. Ambiguous, unmatched, and invalid matched proposals are persisted explicitly
+as unresolved; confirmation requires every ready batch page exactly once and no
+unresolved page.
+
+Draft mutations assign, move, unassign, split/combine by participant, and reorder
+pages using revision plus row-version optimistic concurrency. A confirmed revision
+is immutable; future correction must supersede it with a new revision.
+
+Confirmation locks and revalidates the batch and draft in one database transaction,
+freezes canonical participant student and assigned-variant snapshots into one
+`PaperSubmission` per group, and copies only ScanPage identities/order into
+`PaperSubmissionPage`. It never creates or changes `StudentSubmission`, answers,
+digital attempts, or artifact storage. The batch records the `GROUPING_CONFIRMED`
+milestone and deterministically reaches `READY_FOR_CHECKING`. No AI/provider or
+academic checking call occurs during grouping or confirmation.

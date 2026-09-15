@@ -45,3 +45,23 @@ class PageResponse(BaseModel):
     failure_code: str | None
     content_fingerprint: str | None
     content_url: str | None
+
+
+class GroupingPageAssignment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    assignment_participant_id: UUID | None
+    expected_revision: int = Field(gt=0)
+    expected_row_version: int = Field(gt=0)
+
+
+class GroupingPageOrder(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    page_ids: list[UUID] = Field(min_length=1)
+    expected_revision: int = Field(gt=0)
+    expected_row_version: int = Field(gt=0)
+
+
+class GroupingConfirmation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(gt=0)
+    expected_row_version: int = Field(gt=0)
