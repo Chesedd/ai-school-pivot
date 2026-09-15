@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     anthropic_auth_token: SecretStr | None = None
     anthropic_base_url: str | None = None
     image_solving_anthropic_model: str = "claude-sonnet-4-6"
+    scan_matching_provider: str = "anthropic"
+    scan_matching_model: str = "claude-sonnet-4-6"
     authoring_routes: str = "openai:gpt-4.1-mini,anthropic:claude-sonnet-4-20250514"
 
     @field_validator("cors_origins")

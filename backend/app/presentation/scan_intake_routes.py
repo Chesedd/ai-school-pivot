@@ -21,6 +21,8 @@ from app.infrastructure.scan_checking_models import (
 )
 from app.infrastructure.scan_intake_repository import SqlAlchemyScanIntakeRepository
 from app.infrastructure.scan_page_pipeline import ScanPagePipeline
+from app.application.scan_matching_service import ScanMatchingError, ScanMatchingService
+from app.infrastructure.scan_matching_providers import AnthropicScanPageMatchingProvider
 from app.presentation.auth_dependencies import (
     require_capability,
     require_trusted_origin,
@@ -328,3 +330,68 @@ def _error(exc):
         else 422
     )
     return HTTPException(status, code)
+
+
+def _matching_provider(request: Request, settings: Settings):
+    injected = getattr(request.app.state, "scan_matching_provider", None)
+    if injected is not None:
+        return injected
+    if (
+        settings.scan_matching_provider != "anthropic"
+        or not settings.anthropic_credential
+    ):
+        raise HTTPException(503, "scan_matching_provider_not_configured")
+    from anthropic import AsyncAnthropic
+
+    client = AsyncAnthropic(
+        api_key=settings.anthropic_credential, base_url=settings.anthropic_base_url
+    )
+    return AnthropicScanPageMatchingProvider(client, settings.scan_matching_model)
+
+
+@router.post("/scan-batches/{batch_id}/match")
+async def match_pages(
+    batch_id: UUID,
+    request: Request,
+    db=Depends(get_session),
+    settings: Settings = Depends(get_settings),
+    principal: Principal = PrincipalDep,
+):
+    await _authorized_batch(db, batch_id, principal)
+    try:
+        return await ScanMatchingService(
+            db,
+            FilesystemArtifactStorage(settings.artifact_storage_path),
+            _matching_provider(request, settings),
+        ).run(batch_id, principal.user_id)
+    except ScanMatchingError as exc:
+        raise HTTPException(
+            409
+            if exc.code.startswith("matching_") or exc.code.startswith("scan_")
+            else 422,
+            exc.code,
+        ) from None
+
+
+@router.get("/scan-batches/{batch_id}/matching")
+async def matching_results(
+    batch_id: UUID,
+    request: Request,
+    db=Depends(get_session),
+    settings: Settings = Depends(get_settings),
+    principal: Principal = PrincipalDep,
+):
+    await _authorized_batch(db, batch_id, principal)
+    try:
+        # Reading never invokes this provider; a placeholder avoids requiring credentials.
+        provider = (
+            getattr(request.app.state, "scan_matching_provider", None)
+            or type(
+                "ReadOnlyProvider", (), {"provider_id": "none", "model_id": "none"}
+            )()
+        )
+        return await ScanMatchingService(
+            db, FilesystemArtifactStorage(settings.artifact_storage_path), provider
+        ).read(batch_id)
+    except ScanMatchingError as exc:
+        raise HTTPException(404, exc.code) from None

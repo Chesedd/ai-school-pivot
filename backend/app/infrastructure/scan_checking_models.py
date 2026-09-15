@@ -6,11 +6,13 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     SmallInteger,
     String,
     Text,
@@ -260,3 +262,185 @@ class ScanCheckingEvent(IdMixin, Base):
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=clock
     )
+
+
+class ScanMatchingRun(IdMixin, Base):
+    __tablename__ = "scan_matching_runs"
+    __table_args__ = (
+        UniqueConstraint("batch_id", "revision", name="uq_scan_matching_runs_revision"),
+        CheckConstraint("revision > 0", name="ck_scan_matching_runs_revision"),
+        CheckConstraint(
+            "status IN ('running','succeeded','failed_retryable','failed_terminal')",
+            name="ck_scan_matching_runs_status",
+        ),
+        CheckConstraint(
+            "request_context_fingerprint ~ '^[0-9a-f]{64}$' AND prompt_template_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_scan_matching_runs_hashes",
+        ),
+        CheckConstraint(
+            "(status='running' AND completed_at IS NULL AND failure_code IS NULL) OR (status='succeeded' AND completed_at IS NOT NULL AND failure_code IS NULL) OR (status IN ('failed_retryable','failed_terminal') AND completed_at IS NOT NULL AND failure_code IS NOT NULL)",
+            name="ck_scan_matching_runs_lifecycle",
+        ),
+    )
+    batch_id: Mapped[UUID] = mapped_column(
+        ForeignKey("assessment_scan_batches.id", ondelete="RESTRICT")
+    )
+    revision: Mapped[int] = mapped_column(Integer)
+    requested_by_user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT")
+    )
+    status: Mapped[str] = mapped_column(String(32), server_default="running")
+    prompt_name: Mapped[str] = mapped_column(String(128))
+    prompt_version: Mapped[str] = mapped_column(String(32))
+    prompt_template_hash: Mapped[str] = mapped_column(String(64))
+    output_schema_version: Mapped[str] = mapped_column(String(64))
+    provider_route: Mapped[str] = mapped_column(String(256))
+    request_context_fingerprint: Mapped[str] = mapped_column(String(64))
+    assessment_title_snapshot: Mapped[str] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=clock
+    )
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=clock
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    failure_code: Mapped[str | None] = mapped_column(String(64))
+
+
+class ScanMatchingRosterEntry(Base):
+    __tablename__ = "scan_matching_roster_entries"
+    __table_args__ = (
+        UniqueConstraint(
+            "matching_run_id",
+            "assignment_participant_id",
+            name="uq_scan_matching_roster_participant",
+        ),
+        UniqueConstraint(
+            "matching_run_id", "position", name="uq_scan_matching_roster_position"
+        ),
+    )
+    matching_run_id: Mapped[UUID] = mapped_column(
+        ForeignKey("scan_matching_runs.id", ondelete="RESTRICT"), primary_key=True
+    )
+    roster_token: Mapped[str] = mapped_column(String(128), primary_key=True)
+    assignment_participant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("assignment_participants.id", ondelete="RESTRICT")
+    )
+    display_name_snapshot: Mapped[str] = mapped_column(String(300))
+    position: Mapped[int] = mapped_column(Integer)
+
+
+class ScanMatchingPageEntry(Base):
+    __tablename__ = "scan_matching_page_entries"
+    __table_args__ = (
+        UniqueConstraint(
+            "matching_run_id", "scan_page_id", name="uq_scan_matching_page"
+        ),
+        UniqueConstraint(
+            "matching_run_id", "source_order", name="uq_scan_matching_source_order"
+        ),
+    )
+    matching_run_id: Mapped[UUID] = mapped_column(
+        ForeignKey("scan_matching_runs.id", ondelete="RESTRICT"), primary_key=True
+    )
+    page_token: Mapped[str] = mapped_column(String(128), primary_key=True)
+    scan_page_id: Mapped[UUID] = mapped_column(
+        ForeignKey("scan_pages.id", ondelete="RESTRICT")
+    )
+    source_order: Mapped[int] = mapped_column(Integer)
+
+
+class ScanMatchingChunk(IdMixin, Base):
+    __tablename__ = "scan_matching_chunks"
+    __table_args__ = (
+        UniqueConstraint(
+            "matching_run_id", "chunk_index", name="uq_scan_matching_chunks_index"
+        ),
+        CheckConstraint(
+            "status IN ('pending','running','succeeded','failed_retryable','failed_terminal')",
+            name="ck_scan_matching_chunks_status",
+        ),
+    )
+    matching_run_id: Mapped[UUID] = mapped_column(
+        ForeignKey("scan_matching_runs.id", ondelete="RESTRICT")
+    )
+    chunk_index: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(32), server_default="pending")
+    primary_page_tokens: Mapped[object] = mapped_column(JSONB)
+    context_page_tokens: Mapped[object] = mapped_column(JSONB)
+    provider_id: Mapped[str] = mapped_column(String(128))
+    model_id: Mapped[str] = mapped_column(String(128))
+    request_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    provider_request_id: Mapped[str | None] = mapped_column(String(256))
+    input_tokens: Mapped[int | None] = mapped_column(Integer)
+    output_tokens: Mapped[int | None] = mapped_column(Integer)
+    cached_tokens: Mapped[int | None] = mapped_column(Integer)
+    cache_write_tokens: Mapped[int | None] = mapped_column(Integer)
+    latency_ms: Mapped[int | None] = mapped_column(Integer)
+    validated_output: Mapped[object | None] = mapped_column(JSONB)
+    failure_code: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=clock
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ScanPageMatchProposal(IdMixin, Base):
+    __tablename__ = "scan_page_match_proposals"
+    __table_args__ = (
+        UniqueConstraint(
+            "matching_run_id", "scan_page_id", name="uq_scan_page_match_proposal"
+        ),
+        CheckConstraint(
+            "confidence >= 0 AND confidence <= 1", name="ck_scan_page_match_confidence"
+        ),
+        CheckConstraint(
+            "(disposition='matched' AND proposed_assignment_participant_id IS NOT NULL) OR (disposition IN ('ambiguous','unmatched') AND proposed_assignment_participant_id IS NULL)",
+            name="ck_scan_page_match_disposition",
+        ),
+    )
+    matching_run_id: Mapped[UUID] = mapped_column(
+        ForeignKey("scan_matching_runs.id", ondelete="RESTRICT")
+    )
+    scan_page_id: Mapped[UUID] = mapped_column(
+        ForeignKey("scan_pages.id", ondelete="RESTRICT")
+    )
+    disposition: Mapped[str] = mapped_column(String(16))
+    proposed_assignment_participant_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("assignment_participants.id", ondelete="RESTRICT")
+    )
+    confidence: Mapped[object] = mapped_column(Numeric(8, 7))
+    evidence_code: Mapped[str] = mapped_column(String(128))
+    evidence_summary: Mapped[str] = mapped_column(String(4000))
+    proposed_group_token: Mapped[str | None] = mapped_column(String(128))
+    proposed_page_order: Mapped[int | None] = mapped_column(Integer)
+    provider_requires_human_review: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=clock
+    )
+
+
+class ScanPageMatchCandidate(Base):
+    __tablename__ = "scan_page_match_candidates"
+    __table_args__ = (
+        UniqueConstraint(
+            "matching_run_id",
+            "scan_page_id",
+            "rank",
+            name="uq_scan_page_match_candidate_rank",
+        ),
+        CheckConstraint(
+            "rank BETWEEN 1 AND 8", name="ck_scan_page_match_candidate_rank"
+        ),
+    )
+    matching_run_id: Mapped[UUID] = mapped_column(
+        ForeignKey("scan_matching_runs.id", ondelete="RESTRICT"), primary_key=True
+    )
+    scan_page_id: Mapped[UUID] = mapped_column(
+        ForeignKey("scan_pages.id", ondelete="RESTRICT"), primary_key=True
+    )
+    assignment_participant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("assignment_participants.id", ondelete="RESTRICT"), primary_key=True
+    )
+    rank: Mapped[int] = mapped_column(Integer)
