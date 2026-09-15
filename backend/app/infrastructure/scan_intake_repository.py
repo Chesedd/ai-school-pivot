@@ -19,9 +19,17 @@ from app.application.scan_intake import (
     ScanPageRecord,
     ScanPageStatus,
 )
-from app.infrastructure.assessment_models import Assignment
-from app.infrastructure.authoring_models import InputArtifact
-from app.infrastructure.scan_checking_models import (
+from app.infrastructure.model_registry import register_all_models
+
+# Scan intake rows reference tables owned by auth, assessment, classroom, and
+# authoring.  Register the complete shared metadata graph when this persistence
+# adapter is loaded instead of depending on an unrelated application import
+# order to make those foreign-key targets resolvable during flush.
+register_all_models()
+
+from app.infrastructure.assessment_models import Assignment  # noqa: E402
+from app.infrastructure.authoring_models import InputArtifact  # noqa: E402
+from app.infrastructure.scan_checking_models import (  # noqa: E402
     AssessmentScanBatch,
     ScanBatchArtifact,
     ScanCheckingEvent,

@@ -82,3 +82,44 @@ assert CheckingRepository is not None
     )
 
     assert result.returncode == 0, result.stderr
+
+
+def test_scan_intake_repository_registers_complete_fk_graph_in_fresh_interpreter():
+    """Loading scan persistence alone must register every FK target table."""
+    backend_root = Path(__file__).parents[2]
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+from app.infrastructure.scan_intake_repository import SqlAlchemyScanIntakeRepository
+from app.infrastructure.models import Base
+from sqlalchemy.orm import configure_mappers
+
+configure_mappers()
+required = {
+    "users",
+    "assignments",
+    "class_groups",
+    "input_artifacts",
+    "assessment_scan_batches",
+    "scan_batch_artifacts",
+    "scan_pages",
+    "scan_checking_events",
+}
+missing = required - set(Base.metadata.tables)
+assert not missing, missing
+assert SqlAlchemyScanIntakeRepository is not None
+""",
+        ],
+        cwd=backend_root,
+        env={
+            **os.environ,
+            "DATABASE_URL": "postgresql+asyncpg://registry:registry@localhost/registry",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
