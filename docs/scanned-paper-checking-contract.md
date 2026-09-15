@@ -42,3 +42,20 @@ publication remains current until superseded. V1 publication is in-platform only
 (no email, Telegram, push, or external messaging). Students see only the current
 active publication; superseded history remains teacher/audit-visible. The
 original multi-student PDF is never student-visible.
+
+## PR 4: AI page-to-student matching
+
+Matching consumes only integrity-verified, normalized `READY` PNG page renders. Its
+roster authority is the assignment's immutable set of `AssignmentParticipant`
+rows. A run snapshots these as deterministic `roster-0001` tokens and pages as
+`page-0001` tokens; the provider receives only a display name and opaque token,
+never UUIDs, accounts, storage references, grades, variants, or notes.
+
+Calls are deterministic contiguous chunks of eight primary pages with one adjacent
+context page (sequential concurrency of one), using an in-memory 1800-pixel PNG
+preview. Provider calls occur outside database transactions. Validated structured
+matched, ambiguous, and unmatched results are immutable proposals and telemetry;
+retryable incomplete chunks resume the same revision, while succeeded evidence is
+never rewritten. Every successful run ends at `MATCHING_REVIEW_REQUIRED`, including
+perfect-confidence runs. It neither confirms grouping nor creates a
+`PaperSubmission`; teacher-owned revisions remain PR 5 work.
