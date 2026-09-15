@@ -12,3 +12,5 @@ openai==1.99.9
 anthropic==0.64.0
 argon2-cffi==25.1.0
 python-multipart==0.0.20
+Pillow==11.3.0
+pypdfium2==4.30.0
