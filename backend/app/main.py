@@ -34,6 +34,7 @@ from app.application.catalog_proposals import CatalogProposalError
 from app.application.catalog_resolution import CatalogResolutionError
 from app.presentation.catalog_proposal_routes import router as catalog_proposal_router
 from app.presentation.remediation_routes import router as remediation_router
+from app.presentation.scan_intake_routes import router as scan_intake_router
 
 
 app = FastAPI()
@@ -53,6 +54,7 @@ app.include_router(image_solving_router)
 app.include_router(image_artifact_router)
 app.include_router(catalog_proposal_router)
 app.include_router(remediation_router)
+app.include_router(scan_intake_router)
 
 @app.exception_handler(RemediationError)
 async def remediation_error(_: Request, exc: RemediationError) -> JSONResponse:

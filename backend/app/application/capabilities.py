@@ -18,6 +18,7 @@ IMAGE_SOLVING_USE = "image_solving.use"
 ASSESSMENT_CREATE = "assessment.create"
 ASSESSMENT_MANAGE = "assessment.manage"
 ASSESSMENT_RESULTS_READ = "assessment.results.read"
+ASSESSMENT_SCAN_CHECK_MANAGE = "assessment.scan_check.manage"
 STUDENT_ASSIGNMENTS_READ = "student.assignments.read"
 STUDENT_ATTEMPTS_SUBMIT = "student.attempts.submit"
 STUDENT_RESULTS_READ = "student.results.read"
@@ -45,6 +46,7 @@ ALL_CAPABILITIES = frozenset(
         ASSESSMENT_CREATE,
         ASSESSMENT_MANAGE,
         ASSESSMENT_RESULTS_READ,
+        ASSESSMENT_SCAN_CHECK_MANAGE,
         STUDENT_ASSIGNMENTS_READ,
         STUDENT_ATTEMPTS_SUBMIT,
         STUDENT_RESULTS_READ,
@@ -67,6 +69,7 @@ ROLE_CAPABILITIES: dict[str, frozenset[str]] = {
             ASSESSMENT_CREATE,
             ASSESSMENT_MANAGE,
             ASSESSMENT_RESULTS_READ,
+            ASSESSMENT_SCAN_CHECK_MANAGE,
             CLASSROOM_USE,
             CLASSROOM_NOTES_MANAGE,
             REMEDIATION_MANAGE,
@@ -86,4 +89,6 @@ ROLE_CAPABILITIES: dict[str, frozenset[str]] = {
 
 def capabilities_for_roles(roles: frozenset[str]) -> frozenset[str]:
     """Union known role grants; an unknown/no-role account receives no grants."""
-    return frozenset().union(*(ROLE_CAPABILITIES.get(role, frozenset()) for role in roles))
+    return frozenset().union(
+        *(ROLE_CAPABILITIES.get(role, frozenset()) for role in roles)
+    )

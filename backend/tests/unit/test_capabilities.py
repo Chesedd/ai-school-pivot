@@ -9,6 +9,7 @@ def test_teacher_has_exact_b1_grants():
     assert ROLE_CAPABILITIES["teacher"] == {
         "content.read", "content.create", "content.edit", "content.review.submit",
         "image_solving.use", "assessment.create", "assessment.manage", "assessment.results.read",
+        "assessment.scan_check.manage",
         "catalog.propose",
         "classroom.use", "classroom.notes.manage",
         "remediation.manage",
