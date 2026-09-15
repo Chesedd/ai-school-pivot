@@ -27,7 +27,15 @@ from app.presentation.auth_dependencies import (
     require_capability,
     require_trusted_origin,
 )
-from app.presentation.scan_intake_schemas import ScanBatchCreate, CancelScanBatch
+from app.presentation.scan_intake_schemas import (
+    ScanBatchCreate,
+    CancelScanBatch,
+    GroupingPageAssignment,
+    GroupingPageOrder,
+    GroupingConfirmation,
+)
+from app.application.scan_grouping import ScanGroupingError, ScanGroupingService
+from app.infrastructure.scan_grouping_repository import SqlAlchemyScanGroupingRepository
 
 router = APIRouter(
     prefix="/api/assessment-core",
@@ -395,3 +403,106 @@ async def matching_results(
         ).read(batch_id)
     except ScanMatchingError as exc:
         raise HTTPException(404, exc.code) from None
+
+
+def _grouping_service(db):
+    return ScanGroupingService(SqlAlchemyScanGroupingRepository(db))
+
+
+def _grouping_error(exc):
+    if exc.code.endswith("not_found"):
+        return HTTPException(404, exc.code)
+    if exc.code in {
+        "grouping_revision_conflict",
+        "grouping_based_on_stale_matching",
+        "grouping_immutable",
+        "grouping_initialization_not_allowed",
+        "grouping_confirmation_not_allowed",
+    }:
+        return HTTPException(409, exc.code)
+    return HTTPException(422, exc.code)
+
+
+@router.post("/scan-batches/{batch_id}/grouping", status_code=201)
+async def initialize_grouping(
+    batch_id: UUID, db=Depends(get_session), principal: Principal = PrincipalDep
+):
+    await _authorized_batch(db, batch_id, principal)
+    try:
+        return await _grouping_service(db).initialize(batch_id, principal.user_id)
+    except ScanGroupingError as exc:
+        raise _grouping_error(exc) from None
+
+
+@router.get("/scan-batches/{batch_id}/grouping")
+async def get_grouping(
+    batch_id: UUID, db=Depends(get_session), principal: Principal = PrincipalDep
+):
+    await _authorized_batch(db, batch_id, principal)
+    try:
+        return await _grouping_service(db).read(batch_id)
+    except ScanGroupingError as exc:
+        raise _grouping_error(exc) from None
+
+
+@router.patch("/scan-batches/{batch_id}/grouping/pages/{page_id}")
+async def assign_grouping_page(
+    batch_id: UUID,
+    page_id: UUID,
+    payload: GroupingPageAssignment,
+    db=Depends(get_session),
+    principal: Principal = PrincipalDep,
+):
+    await _authorized_batch(db, batch_id, principal)
+    try:
+        return await _grouping_service(db).assign(
+            batch_id,
+            page_id,
+            payload.assignment_participant_id,
+            payload.expected_revision,
+            payload.expected_row_version,
+            principal.user_id,
+        )
+    except ScanGroupingError as exc:
+        raise _grouping_error(exc) from None
+
+
+@router.put("/scan-batches/{batch_id}/grouping/groups/{participant_id}/page-order")
+async def reorder_grouping_pages(
+    batch_id: UUID,
+    participant_id: UUID,
+    payload: GroupingPageOrder,
+    db=Depends(get_session),
+    principal: Principal = PrincipalDep,
+):
+    await _authorized_batch(db, batch_id, principal)
+    try:
+        return await _grouping_service(db).reorder(
+            batch_id,
+            participant_id,
+            payload.page_ids,
+            payload.expected_revision,
+            payload.expected_row_version,
+            principal.user_id,
+        )
+    except ScanGroupingError as exc:
+        raise _grouping_error(exc) from None
+
+
+@router.post("/scan-batches/{batch_id}/grouping/confirm")
+async def confirm_grouping(
+    batch_id: UUID,
+    payload: GroupingConfirmation,
+    db=Depends(get_session),
+    principal: Principal = PrincipalDep,
+):
+    await _authorized_batch(db, batch_id, principal)
+    try:
+        return await _grouping_service(db).confirm(
+            batch_id,
+            payload.expected_revision,
+            payload.expected_row_version,
+            principal.user_id,
+        )
+    except ScanGroupingError as exc:
+        raise _grouping_error(exc) from None

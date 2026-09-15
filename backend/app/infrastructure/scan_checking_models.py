@@ -10,6 +10,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     Numeric,
@@ -233,11 +234,11 @@ class ScanCheckingEvent(IdMixin, Base):
     __tablename__ = "scan_checking_events"
     __table_args__ = (
         CheckConstraint(
-            "aggregate_type IN ('batch','artifact','page')",
+            "aggregate_type IN ('batch','artifact','page','grouping','paper_submission')",
             name="ck_scan_checking_events_aggregate",
         ),
         CheckConstraint(
-            "event_type IN ('batch.created','batch.cancelled','artifact.attached','artifact.extraction_status_changed','page.created','page.status_changed')",
+            "event_type IN ('batch.created','batch.cancelled','artifact.attached','artifact.extraction_status_changed','page.created','page.status_changed','grouping.draft_created','grouping.updated','grouping.confirmed','paper_submission.created')",
             name="ck_scan_checking_events_type",
         ),
         Index(
@@ -444,3 +445,184 @@ class ScanPageMatchCandidate(Base):
         ForeignKey("assignment_participants.id", ondelete="RESTRICT"), primary_key=True
     )
     rank: Mapped[int] = mapped_column(Integer)
+
+
+class ScanGroupingRevision(IdMixin, Base):
+    __tablename__ = "scan_grouping_revisions"
+    __table_args__ = (
+        UniqueConstraint(
+            "batch_id", "revision", name="uq_scan_grouping_revisions_revision"
+        ),
+        CheckConstraint(
+            "revision > 0 AND based_on_matching_revision > 0 AND row_version > 0",
+            name="ck_scan_grouping_revisions_versions",
+        ),
+        CheckConstraint(
+            "status IN ('draft','confirmed','superseded')",
+            name="ck_scan_grouping_revisions_status",
+        ),
+        CheckConstraint(
+            "(status='confirmed' AND confirmed_at IS NOT NULL AND confirmed_by_user_id IS NOT NULL) OR (status<>'confirmed' AND confirmed_at IS NULL AND confirmed_by_user_id IS NULL)",
+            name="ck_scan_grouping_revisions_confirmation",
+        ),
+        Index(
+            "uq_scan_grouping_revisions_one_draft",
+            "batch_id",
+            unique=True,
+            postgresql_where=text("status='draft'"),
+        ),
+    )
+    batch_id: Mapped[UUID] = mapped_column(
+        ForeignKey("assessment_scan_batches.id", ondelete="RESTRICT")
+    )
+    revision: Mapped[int] = mapped_column(Integer)
+    based_on_matching_revision: Mapped[int] = mapped_column(Integer)
+    created_by_user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT")
+    )
+    status: Mapped[str] = mapped_column(String(16), server_default="draft")
+    row_version: Mapped[int] = mapped_column(Integer, server_default="1")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=clock
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=clock
+    )
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    confirmed_by_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT")
+    )
+
+
+class ScanGroupingEntry(IdMixin, Base):
+    __tablename__ = "scan_grouping_entries"
+    __table_args__ = (
+        UniqueConstraint(
+            "id", "grouping_revision_id", name="uq_scan_grouping_entries_id_revision"
+        ),
+        UniqueConstraint(
+            "grouping_revision_id",
+            "assignment_participant_id",
+            name="uq_scan_grouping_entries_participant",
+        ),
+        UniqueConstraint(
+            "grouping_revision_id", "position", name="uq_scan_grouping_entries_position"
+        ),
+        CheckConstraint("position >= 0", name="ck_scan_grouping_entries_position"),
+    )
+    grouping_revision_id: Mapped[UUID] = mapped_column(
+        ForeignKey("scan_grouping_revisions.id", ondelete="RESTRICT")
+    )
+    assignment_participant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("assignment_participants.id", ondelete="RESTRICT")
+    )
+    position: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=clock
+    )
+
+
+class ScanGroupingPage(Base):
+    __tablename__ = "scan_grouping_pages"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["grouping_entry_id", "grouping_revision_id"],
+            ["scan_grouping_entries.id", "scan_grouping_entries.grouping_revision_id"],
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "grouping_revision_id",
+            "scan_page_id",
+            name="uq_scan_grouping_pages_revision_page",
+        ),
+        UniqueConstraint(
+            "grouping_entry_id", "page_order", name="uq_scan_grouping_pages_order"
+        ),
+        CheckConstraint("page_order >= 0", name="ck_scan_grouping_pages_order"),
+    )
+    grouping_entry_id: Mapped[UUID] = mapped_column(uuid_type, primary_key=True)
+    grouping_revision_id: Mapped[UUID] = mapped_column(uuid_type, primary_key=True)
+    scan_page_id: Mapped[UUID] = mapped_column(
+        ForeignKey("scan_pages.id", ondelete="RESTRICT"), primary_key=True
+    )
+    page_order: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=clock
+    )
+
+
+class ScanGroupingUnmatchedPage(Base):
+    __tablename__ = "scan_grouping_unmatched_pages"
+    grouping_revision_id: Mapped[UUID] = mapped_column(
+        ForeignKey("scan_grouping_revisions.id", ondelete="RESTRICT"), primary_key=True
+    )
+    scan_page_id: Mapped[UUID] = mapped_column(
+        ForeignKey("scan_pages.id", ondelete="RESTRICT"), primary_key=True
+    )
+    reason_code: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=clock
+    )
+
+
+class PaperSubmission(IdMixin, Base):
+    __tablename__ = "paper_submissions"
+    __table_args__ = (
+        UniqueConstraint(
+            "batch_id",
+            "assignment_participant_id",
+            name="uq_paper_submissions_batch_participant",
+        ),
+        UniqueConstraint(
+            "grouping_revision_id",
+            "assignment_participant_id",
+            name="uq_paper_submissions_revision_participant",
+        ),
+        CheckConstraint(
+            "status='ready_for_checking'", name="ck_paper_submissions_status"
+        ),
+    )
+    batch_id: Mapped[UUID] = mapped_column(
+        ForeignKey("assessment_scan_batches.id", ondelete="RESTRICT")
+    )
+    grouping_revision_id: Mapped[UUID] = mapped_column(
+        ForeignKey("scan_grouping_revisions.id", ondelete="RESTRICT")
+    )
+    assignment_id: Mapped[UUID] = mapped_column(
+        ForeignKey("assignments.id", ondelete="RESTRICT")
+    )
+    assignment_participant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("assignment_participants.id", ondelete="RESTRICT")
+    )
+    student_id: Mapped[UUID] = mapped_column(
+        ForeignKey("students.id", ondelete="RESTRICT")
+    )
+    assigned_variant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("assessment_variants.id", ondelete="RESTRICT")
+    )
+    status: Mapped[str] = mapped_column(String(32), server_default="ready_for_checking")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=clock
+    )
+    created_by_user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT")
+    )
+
+
+class PaperSubmissionPage(Base):
+    __tablename__ = "paper_submission_pages"
+    __table_args__ = (
+        UniqueConstraint(
+            "paper_submission_id", "page_order", name="uq_paper_submission_pages_order"
+        ),
+    )
+    paper_submission_id: Mapped[UUID] = mapped_column(
+        ForeignKey("paper_submissions.id", ondelete="RESTRICT"), primary_key=True
+    )
+    scan_page_id: Mapped[UUID] = mapped_column(
+        ForeignKey("scan_pages.id", ondelete="RESTRICT"), primary_key=True, unique=True
+    )
+    page_order: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=clock
+    )
