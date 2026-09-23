@@ -79,6 +79,8 @@ async def paper_database():
         "batch_artifact",
         "render_a",
         "render_b",
+        "render_bad_mime",
+        "render_bad_hash",
         "page_a",
         "page_b",
         "revision",
@@ -93,6 +95,7 @@ async def paper_database():
     ids.update(
         hash_a="a" * 64,
         hash_b="b" * 64,
+        hash_bad="d" * 64,
         source_hash="c" * 64,
         suffix=suffix,
         subject_code=suffix,
@@ -121,7 +124,7 @@ async def paper_database():
         "INSERT INTO assignments(id,assessment_id,class_group_id,start_at,due_at,max_attempts,created_by) VALUES (:assignment,:assessment,:group,clock_timestamp(),clock_timestamp()+interval '1 day',3,:teacher)",
         "INSERT INTO assignment_participants(id,assignment_id,student_id,assigned_variant_id,variant_assigned_at) VALUES (:participant_a,:assignment,:student_a,:variant_a,clock_timestamp()),(:participant_b,:assignment,:student_b,:variant_b,clock_timestamp())",
         "INSERT INTO student_submissions(id,assignment_participant_id,attempt_no,status,submitted_at) VALUES (:digital_submission,:participant_a,1,'submitted',clock_timestamp())",
-        "INSERT INTO input_artifacts(id,owner_id,mime_type,content_hash_sha256,size_bytes,storage_reference) VALUES (:source,:teacher,'application/pdf',:source_hash,100,:suffix||'/original.pdf'),(:render_a,:teacher,'image/png',:hash_a,100,:suffix||'/a.png'),(:render_b,:teacher,'image/png',:hash_b,100,:suffix||'/b.png')",
+        "INSERT INTO input_artifacts(id,owner_id,mime_type,content_hash_sha256,size_bytes,storage_reference) VALUES (:source,:teacher,'application/pdf',:source_hash,100,:suffix||'/original.pdf'),(:render_a,:teacher,'image/png',:hash_a,100,:suffix||'/a.png'),(:render_b,:teacher,'image/png',:hash_b,100,:suffix||'/b.png'),(:render_bad_mime,:teacher,'image/jpeg',:hash_a,100,:suffix||'/bad-mime.jpg'),(:render_bad_hash,:teacher,'image/png',:hash_bad,100,:suffix||'/bad-hash.png')",
         "INSERT INTO assessment_scan_batches(id,assignment_id,class_group_id,created_by_user_id,status,instruction_text,matching_revision,row_version,request_key,request_hash) VALUES (:batch,:assignment,:group,:teacher,'ready_for_checking','Mark exactly',1,1,:suffix,:source_hash)",
         "INSERT INTO scan_batch_artifacts(id,batch_id,input_artifact_id,upload_position,original_filename,extraction_status,page_count) VALUES (:batch_artifact,:batch,:source,0,'private-original.pdf','completed',2)",
         "INSERT INTO scan_pages(id,batch_artifact_id,source_page_index,derived_render_artifact_id,width_px,height_px,rotation_degrees,coordinate_space_version,content_fingerprint,status) VALUES (:page_a,:batch_artifact,0,:render_a,1200,1600,0,'normalized_upright_v1',:hash_a,'ready'),(:page_b,:batch_artifact,1,:render_b,1200,1600,0,'normalized_upright_v1',:hash_b,'ready')",
@@ -468,11 +471,11 @@ async def test_invalid_page_state_rolls_back_run_event_and_batch(
             "invalid",
         ),
         "mime": (
-            "UPDATE input_artifacts SET mime_type='image/jpeg' WHERE id=:render_a",
+            "UPDATE scan_pages SET derived_render_artifact_id=:render_bad_mime WHERE id=:page_a",
             "invalid derived",
         ),
         "hash": (
-            "UPDATE input_artifacts SET content_hash_sha256=:hash_b WHERE id=:render_a",
+            "UPDATE scan_pages SET derived_render_artifact_id=:render_bad_hash WHERE id=:page_a",
             "invalid derived",
         ),
         "page_order": (
