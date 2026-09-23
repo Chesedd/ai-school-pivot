@@ -90,16 +90,29 @@ async def paper_database():
     )
     ids = {name: uuid4() for name in names}
     suffix = uuid4().hex
-    ids.update(hash_a="a" * 64, hash_b="b" * 64, source_hash="c" * 64, suffix=suffix)
+    ids.update(
+        hash_a="a" * 64,
+        hash_b="b" * 64,
+        source_hash="c" * 64,
+        suffix=suffix,
+        subject_code=suffix,
+        subject_name=suffix,
+        subject_normalized_name=suffix,
+        grade_name=suffix,
+        grade_normalized_name=suffix,
+        topic_code=suffix,
+        topic_name=suffix,
+        topic_normalized_name=suffix,
+    )
     statements = (
         "INSERT INTO users(id,login,normalized_login,display_name,password_hash) VALUES (:teacher,:suffix,:suffix,'Paper teacher','hash')",
         "INSERT INTO user_roles(user_id,role) VALUES (:teacher,'teacher')",
         "INSERT INTO class_groups(id,name,created_by) VALUES (:group,:suffix,:teacher)",
         "INSERT INTO class_group_teachers(class_group_id,teacher_user_id,assigned_by) VALUES (:group,:teacher,:teacher)",
         "INSERT INTO students(id,class_group_id,display_name) VALUES (:student_a,:group,'Private A'),(:student_b,:group,'Private B')",
-        "INSERT INTO subjects(id,code,name,normalized_name) VALUES (:subject,:suffix,:suffix,:suffix)",
-        "INSERT INTO grades(id,number,name,normalized_name) VALUES (:grade,7,:suffix,:suffix)",
-        "INSERT INTO topics(id,subject_id,grade_id,code,name,normalized_name) VALUES (:topic,:subject,:grade,:suffix,:suffix,:suffix)",
+        "INSERT INTO subjects(id,code,name,normalized_name) VALUES (:subject,:subject_code,:subject_name,:subject_normalized_name)",
+        "INSERT INTO grades(id,number,name,normalized_name) VALUES (:grade,7,:grade_name,:grade_normalized_name)",
+        "INSERT INTO topics(id,subject_id,grade_id,code,name,normalized_name) VALUES (:topic,:subject,:grade,:topic_code,:topic_name,:topic_normalized_name)",
         "INSERT INTO tasks(id,subject_id,grade_id,topic_id,created_by) VALUES (:task_a,:subject,:grade,:topic,:teacher),(:task_b,:subject,:grade,:topic,:teacher)",
         "INSERT INTO task_versions(id,task_id,version_no,statement,task_type,answer_format,difficulty,status,created_by) VALUES (:version_a,:task_a,1,'Paper A','problem','short_text',50,'approved',:teacher),(:version_b,:task_b,1,'Paper B','problem','short_text',50,'approved',:teacher)",
         "INSERT INTO assessments(id,title,status,created_by) VALUES (:assessment,:suffix,'published',:teacher)",
