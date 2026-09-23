@@ -330,12 +330,10 @@ class SqlAlchemyScanGroupingRepository:
             raise GroupingRepositoryError("grouping_duplicate_page")
         if set(page_ids) != {p.scan_page_id for p in current}:
             raise GroupingRepositoryError("grouping_page_order_mismatch")
-        for n, p in enumerate(current):
-            p.page_order = -(n + 1)
-        await self.s.flush()
         by_id = {p.scan_page_id: p for p in current}
-        for n, page_id in enumerate(page_ids):
-            by_id[page_id].page_order = n
+        await self._reindex_ordinals(
+            [by_id[page_id] for page_id in page_ids], "page_order"
+        )
         self._event(
             batch_id,
             "grouping",
@@ -726,11 +724,7 @@ class SqlAlchemyScanGroupingRepository:
             )
             await self._compact_positions(revision_id)
             return
-        for n, p in enumerate(rows):
-            p.page_order = -(n + 1)
-        await self.s.flush()
-        for n, p in enumerate(rows):
-            p.page_order = n
+        await self._reindex_ordinals(rows, "page_order")
 
     async def _compact_positions(self, revision_id):
         rows = (
@@ -740,11 +734,19 @@ class SqlAlchemyScanGroupingRepository:
                 .order_by(ScanGroupingEntry.position)
             )
         ).all()
-        for n, e in enumerate(rows):
-            e.position = -(n + 1)
+        await self._reindex_ordinals(rows, "position")
+
+    async def _reindex_ordinals(self, rows, attribute):
+        """Safely compact a non-negative, unique ordinal in the given row order."""
+        if not rows:
+            return
+        temporary_base = max(getattr(row, attribute) for row in rows) + len(rows) + 1
+        for offset, row in enumerate(rows):
+            setattr(row, attribute, temporary_base + offset)
         await self.s.flush()
-        for n, e in enumerate(rows):
-            e.position = n
+        for ordinal, row in enumerate(rows):
+            setattr(row, attribute, ordinal)
+        await self.s.flush()
 
     async def _lock_batch(self, batch_id):
         return await self.s.scalar(
