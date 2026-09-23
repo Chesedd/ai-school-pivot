@@ -382,6 +382,9 @@ async def test_scan_grouping_assign_move_unassign_boundaries_and_concurrency(
 ):
     connection, session, service, ids = grouping_database
     view = await initialize(service, ids)
+    revision_id = await scalar(
+        connection, "SELECT id FROM scan_grouping_revisions WHERE batch_id=:batch", ids
+    )
     old_version = view["row_version"]
     view = await service.assign(
         ids["batch"],
@@ -420,10 +423,23 @@ async def test_scan_grouping_assign_move_unassign_boundaries_and_concurrency(
         view["row_version"],
         ids["teacher"],
     )
-    assert [
-        (group["assignment_participant_id"], group["position"])
-        for group in view["groups"]
-    ] == [(ids["participant_a"], 0)]
+    assert [group["assignment_participant_id"] for group in view["groups"]] == [
+        ids["participant_a"]
+    ]
+    assert [page["page_id"] for page in view["groups"][0]["pages"]] == [
+        ids["pages"][1],
+        ids["pages"][0],
+        ids["pages"][3],
+        ids["pages"][2],
+    ]
+    assert await rows(
+        connection,
+        "SELECT assignment_participant_id, position "
+        "FROM scan_grouping_entries "
+        "WHERE grouping_revision_id=:revision ORDER BY position",
+        ids,
+        revision=revision_id,
+    ) == [(ids["participant_a"], 0)]
     with pytest.raises(ScanGroupingError, match="grouping_revision_conflict"):
         await service.assign(
             ids["batch"],
