@@ -115,7 +115,7 @@ async def paper_database():
         "INSERT INTO topics(id,subject_id,grade_id,code,name,normalized_name) VALUES (:topic,:subject,:grade,:topic_code,:topic_name,:topic_normalized_name)",
         "INSERT INTO tasks(id,subject_id,grade_id,topic_id,created_by) VALUES (:task_a,:subject,:grade,:topic,:teacher),(:task_b,:subject,:grade,:topic,:teacher)",
         "INSERT INTO task_versions(id,task_id,version_no,statement,task_type,answer_format,difficulty,status,created_by) VALUES (:version_a,:task_a,1,'Paper A','problem','short_text',50,'approved',:teacher),(:version_b,:task_b,1,'Paper B','problem','short_text',50,'approved',:teacher)",
-        "INSERT INTO assessments(id,title,status,created_by) VALUES (:assessment,:suffix,'published',:teacher)",
+        "INSERT INTO assessments(id,title,status,created_by,published_at,published_by) VALUES (:assessment,:suffix,'published',:teacher,clock_timestamp(),:teacher)",
         "INSERT INTO assessment_variants(id,assessment_id,name,position) VALUES (:variant_a,:assessment,'A',1),(:variant_b,:assessment,'B',2)",
         "INSERT INTO assessment_items(id,variant_id,task_version_id,position,points) VALUES (:item_a,:variant_a,:version_a,1,10.00),(:item_b,:variant_b,:version_b,1,20.00)",
         "INSERT INTO assignments(id,assessment_id,class_group_id,start_at,due_at,max_attempts,created_by) VALUES (:assignment,:assessment,:group,clock_timestamp(),clock_timestamp()+interval '1 day',3,:teacher)",
