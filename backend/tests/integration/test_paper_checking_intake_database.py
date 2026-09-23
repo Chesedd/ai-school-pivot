@@ -17,7 +17,9 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+from tests.integration.c10a_postgres import rolled_back_connection
 
 from app.application.checking import ActiveRunConflict, IdempotencyConflict
 from app.application.checking_intake import InvalidCheckingInput
@@ -52,8 +54,6 @@ pytestmark = [
 
 @pytest_asyncio.fixture
 async def paper_database():
-    engine = create_async_engine(URL)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
     names = (
         "teacher",
         "group",
@@ -134,16 +134,15 @@ async def paper_database():
         "INSERT INTO paper_submissions(id,batch_id,grouping_revision_id,assignment_id,assignment_participant_id,student_id,assigned_variant_id,status,created_by_user_id) VALUES (:paper_a,:batch,:revision,:assignment,:participant_a,:student_a,:variant_a,'ready_for_checking',:teacher),(:paper_b,:batch,:revision,:assignment,:participant_b,:student_b,:variant_b,'ready_for_checking',:teacher)",
         "INSERT INTO paper_submission_pages(paper_submission_id,scan_page_id,page_order) VALUES (:paper_a,:page_a,0),(:paper_b,:page_b,0)",
     )
-    async with engine.begin() as connection:
-        await connection.execute(
-            text(
-                "TRUNCATE cost_events,model_runs,checker_events,check_findings,check_results,prompt_versions,check_runs,scan_grading_policy_revisions,paper_submission_pages,paper_submissions,scan_grouping_pages,scan_grouping_entries,scan_grouping_revisions,scan_pages,scan_batch_artifacts,assessment_scan_batches,input_artifacts,student_answers,student_submissions,assignment_participants,assignments,assessment_items,assessment_variants,assessments,class_group_teachers,students,class_groups,task_versions,tasks,topics,grades,subjects,user_roles,users CASCADE"
-            )
+    async with rolled_back_connection() as connection:
+        factory = async_sessionmaker(
+            bind=connection,
+            expire_on_commit=False,
+            join_transaction_mode="create_savepoint",
         )
         for statement in statements:
             await connection.execute(text(statement), ids)
-    yield engine, factory, ids
-    await engine.dispose()
+        yield connection, factory, ids
 
 
 def policy(ids, variant="a", *, rule="Use exact evidence."):
@@ -219,23 +218,22 @@ def constraint(exc):
 async def test_policy_freeze_replay_revision_validation_and_immutability(
     paper_database,
 ):
-    engine, factory, ids = paper_database
+    connection, factory, ids = paper_database
     first = await freeze(factory, ids)
     replay = await freeze(factory, ids)
     assert replay == first and first[1] == 1 and first[2] == policy(ids).fingerprint
     second = await freeze(factory, ids, rule="Changed legitimate rule.")
     assert second[1] == 2 and second[0] != first[0]
-    async with engine.connect() as connection:
-        rows = (
-            await connection.execute(
-                text(
-                    "SELECT id,revision,supersedes_policy_id,compiler_version,prompt_policy_version,policy_json FROM scan_grading_policy_revisions ORDER BY revision"
-                )
+    rows = (
+        await connection.execute(
+            text(
+                "SELECT id,revision,supersedes_policy_id,compiler_version,prompt_policy_version,policy_json FROM scan_grading_policy_revisions ORDER BY revision"
             )
-        ).all()
-        assert len(rows) == 2 and rows[1].supersedes_policy_id == rows[0].id
-        assert rows[0].compiler_version == PAPER_POLICY_COMPILER_VERSION
-        assert rows[0].prompt_policy_version == PAPER_PROMPT_POLICY_VERSION
+        )
+    ).all()
+    assert len(rows) == 2 and rows[1].supersedes_policy_id == rows[0].id
+    assert rows[0].compiler_version == PAPER_POLICY_COMPILER_VERSION
+    assert rows[0].prompt_policy_version == PAPER_PROMPT_POLICY_VERSION
     async with factory() as session:
         for sql in (
             "UPDATE scan_grading_policy_revisions SET revision=9 WHERE id=:id",
@@ -245,19 +243,18 @@ async def test_policy_freeze_replay_revision_validation_and_immutability(
                 async with session.begin_nested():
                     await session.execute(text(sql), {"id": first[0]})
             await session.rollback()
-    async with engine.connect() as connection:
-        assert (
-            await connection.scalar(
-                text("SELECT count(*) FROM scan_grading_policy_revisions")
-            )
-            == 2
+    assert (
+        await connection.scalar(
+            text("SELECT count(*) FROM scan_grading_policy_revisions")
         )
+        == 2
+    )
 
 
 async def test_policy_coverage_variant_and_version_authority_fail_closed(
     paper_database,
 ):
-    engine, factory, ids = paper_database
+    connection, factory, ids = paper_database
     bad = policy(ids).model_copy(update={"compiler_version": "caller-owned"})
     async with factory() as session:
         with pytest.raises(InvalidCheckingInput, match="version_mismatch"):
@@ -281,55 +278,52 @@ async def test_policy_coverage_variant_and_version_authority_fail_closed(
                 ids["batch"], ids["variant_a"], missing, ids["teacher"]
             )
         await session.rollback()
-    async with engine.connect() as connection:
-        assert (
-            await connection.scalar(
-                text("SELECT count(*) FROM scan_grading_policy_revisions")
-            )
-            == 0
+    assert (
+        await connection.scalar(
+            text("SELECT count(*) FROM scan_grading_policy_revisions")
         )
+        == 0
+    )
 
 
 async def test_multivariant_completeness_snapshot_privacy_and_atomic_transition(
     paper_database,
 ):
-    engine, factory, ids = paper_database
+    connection, factory, ids = paper_database
     await freeze(factory, ids, "a")
     with pytest.raises(
         PaperGradingPolicyIncomplete, match="paper_grading_policy_incomplete"
     ):
         await intake(factory).create(request(ids))
-    async with engine.connect() as connection:
-        assert (
-            await connection.scalar(
-                text("SELECT status FROM assessment_scan_batches WHERE id=:id"),
-                {"id": ids["batch"]},
-            )
-            == "ready_for_checking"
-        )
-        assert await connection.scalar(text("SELECT count(*) FROM check_runs")) == 0
-        assert await connection.scalar(text("SELECT count(*) FROM checker_events")) == 0
-    policy_id, revision, fingerprint, policy_json = await freeze(factory, ids, "b")
-    run = await intake(factory).create(request(ids))
-    async with engine.connect() as connection:
-        row = (
-            await connection.execute(
-                text(
-                    "SELECT submission_id,paper_submission_id,input_snapshot,input_fingerprint FROM check_runs WHERE id=:id"
-                ),
-                {"id": run.id},
-            )
-        ).one()
-        status = await connection.scalar(
+    assert (
+        await connection.scalar(
             text("SELECT status FROM assessment_scan_batches WHERE id=:id"),
             {"id": ids["batch"]},
         )
-        events = await connection.scalar(
+        == "ready_for_checking"
+    )
+    assert await connection.scalar(text("SELECT count(*) FROM check_runs")) == 0
+    assert await connection.scalar(text("SELECT count(*) FROM checker_events")) == 0
+    policy_id, revision, fingerprint, policy_json = await freeze(factory, ids, "b")
+    run = await intake(factory).create(request(ids))
+    row = (
+        await connection.execute(
             text(
-                "SELECT count(*) FROM checker_events WHERE check_run_id=:id AND event_type='run_created'"
+                "SELECT submission_id,paper_submission_id,input_snapshot,input_fingerprint FROM check_runs WHERE id=:id"
             ),
             {"id": run.id},
         )
+    ).one()
+    status = await connection.scalar(
+        text("SELECT status FROM assessment_scan_batches WHERE id=:id"),
+        {"id": ids["batch"]},
+    )
+    events = await connection.scalar(
+        text(
+            "SELECT count(*) FROM checker_events WHERE check_run_id=:id AND event_type='run_created'"
+        ),
+        {"id": run.id},
+    )
     snapshot = row.input_snapshot
     assert row.submission_id is None and row.paper_submission_id == ids["paper_a"]
     assert status == "checking" and events == 1
@@ -380,7 +374,7 @@ async def test_multivariant_completeness_snapshot_privacy_and_atomic_transition(
 async def test_paper_idempotency_active_conflict_attempts_and_policy_lock(
     paper_database,
 ):
-    engine, factory, ids = paper_database
+    connection, factory, ids = paper_database
     await freeze(factory, ids, "a")
     await freeze(factory, ids, "b")
     service = intake(factory)
@@ -405,22 +399,21 @@ async def test_paper_idempotency_active_conflict_attempts_and_policy_lock(
                 ids["teacher"],
             )
         await session.rollback()
-    async with engine.connect() as connection:
-        assert (
-            await connection.scalar(
-                text("SELECT count(*) FROM check_runs WHERE paper_submission_id=:p"),
-                {"p": ids["paper_a"]},
-            )
-            == 3
+    assert (
+        await connection.scalar(
+            text("SELECT count(*) FROM check_runs WHERE paper_submission_id=:p"),
+            {"p": ids["paper_a"]},
         )
-        assert (
-            await connection.scalar(
-                text(
-                    "SELECT count(*) FROM checker_events WHERE event_type='run_created'"
-                )
+        == 3
+    )
+    assert (
+        await connection.scalar(
+            text(
+                "SELECT count(*) FROM checker_events WHERE event_type='run_created'"
             )
-            == 3
         )
+        == 3
+    )
 
 
 async def test_xor_request_attempt_and_active_constraints_are_postgresql_enforced(
@@ -462,7 +455,7 @@ async def test_xor_request_attempt_and_active_constraints_are_postgresql_enforce
 async def test_invalid_page_state_rolls_back_run_event_and_batch(
     paper_database, corruption
 ):
-    engine, factory, ids = paper_database
+    connection, factory, ids = paper_database
     await freeze(factory, ids, "a")
     await freeze(factory, ids, "b")
     updates = {
@@ -483,44 +476,40 @@ async def test_invalid_page_state_rolls_back_run_event_and_batch(
             "contiguous",
         ),
     }
-    async with engine.begin() as connection:
-        await connection.execute(text(updates[corruption][0]), ids)
+    await connection.execute(text(updates[corruption][0]), ids)
     with pytest.raises(InvalidCheckingInput, match=updates[corruption][1]):
         await intake(factory).create(request(ids))
-    async with engine.connect() as connection:
-        assert await connection.scalar(text("SELECT count(*) FROM check_runs")) == 0
-        assert await connection.scalar(text("SELECT count(*) FROM checker_events")) == 0
-        assert (
-            await connection.scalar(
-                text("SELECT status FROM assessment_scan_batches WHERE id=:batch"), ids
-            )
-            == "ready_for_checking"
+    assert await connection.scalar(text("SELECT count(*) FROM check_runs")) == 0
+    assert await connection.scalar(text("SELECT count(*) FROM checker_events")) == 0
+    assert (
+        await connection.scalar(
+            text("SELECT status FROM assessment_scan_batches WHERE id=:batch"), ids
         )
+        == "ready_for_checking"
+    )
 
 
 async def test_paper_runs_do_not_create_or_increment_digital_attempts(paper_database):
-    engine, factory, ids = paper_database
+    connection, factory, ids = paper_database
     await freeze(factory, ids, "a")
     await freeze(factory, ids, "b")
-    async with engine.connect() as connection:
-        before = (
-            await connection.execute(
-                text(
-                    "SELECT (SELECT count(*) FROM student_submissions),(SELECT count(*) FROM student_answers),(SELECT max_attempts FROM assignments WHERE id=:assignment)"
-                ),
-                ids,
-            )
-        ).one()
+    before = (
+        await connection.execute(
+            text(
+                "SELECT (SELECT count(*) FROM student_submissions),(SELECT count(*) FROM student_answers),(SELECT max_attempts FROM assignments WHERE id=:assignment)"
+            ),
+            ids,
+        )
+    ).one()
     await intake(factory).create(request(ids))
-    async with engine.connect() as connection:
-        after = (
-            await connection.execute(
-                text(
-                    "SELECT (SELECT count(*) FROM student_submissions),(SELECT count(*) FROM student_answers),(SELECT max_attempts FROM assignments WHERE id=:assignment)"
-                ),
-                ids,
-            )
-        ).one()
+    after = (
+        await connection.execute(
+            text(
+                "SELECT (SELECT count(*) FROM student_submissions),(SELECT count(*) FROM student_answers),(SELECT max_attempts FROM assignments WHERE id=:assignment)"
+            ),
+            ids,
+        )
+    ).one()
     assert before == after == (1, 0, 3)
 
 
@@ -556,7 +545,7 @@ async def test_check_run_identity_is_immutable_but_cas_lifecycle_still_works(
 
 
 async def test_second_paper_in_checking_batch_is_allowed(paper_database):
-    engine, factory, ids = paper_database
+    connection, factory, ids = paper_database
     await freeze(factory, ids, "a")
     await freeze(factory, ids, "b")
     first = await intake(factory).create(request(ids, "a", "first"))
@@ -565,10 +554,9 @@ async def test_second_paper_in_checking_batch_is_allowed(paper_database):
         first.paper_submission_id == ids["paper_a"]
         and second.paper_submission_id == ids["paper_b"]
     )
-    async with engine.connect() as connection:
-        assert (
-            await connection.scalar(
-                text("SELECT status FROM assessment_scan_batches WHERE id=:batch"), ids
-            )
-            == "checking"
+    assert (
+        await connection.scalar(
+            text("SELECT status FROM assessment_scan_batches WHERE id=:batch"), ids
         )
+        == "checking"
+    )
