@@ -1,4 +1,5 @@
 """PostgreSQL adapters for paper policy freezing and checking intake."""
+# ruff: noqa: E701, E702
 from uuid import UUID
 
 from sqlalchemy import select
@@ -9,6 +10,10 @@ from app.application.paper_checking_intake import (FrozenPaperPolicy, PaperCheck
     PAPER_POLICY_COMPILER_VERSION, PAPER_PROMPT_POLICY_VERSION)
 from app.application.checking_intake import InvalidCheckingInput
 from app.application.scan_grading_policy import ScanGradingPolicy
+from app.application.scan_checking_contracts import (
+    AssessmentScanBatchState,
+    validate_batch_transition,
+)
 from app.infrastructure.assessment_models import AssessmentItem, AssessmentVariant, Assignment
 from app.infrastructure.authoring_models import InputArtifact
 from app.infrastructure.checking_models import CheckRun
@@ -66,7 +71,13 @@ class SQLAlchemyPaperCheckingIntakeUnitOfWork(SQLAlchemyCheckingIntakeUnitOfWork
 
     async def mark_checking_started(self,batch_id):
         batch=await self.session.get(AssessmentScanBatch,batch_id)
-        if batch.status=="ready_for_checking": batch.status="checking"; batch.row_version+=1
+        if batch.status==AssessmentScanBatchState.READY_FOR_CHECKING:
+            validate_batch_transition(
+                AssessmentScanBatchState(batch.status),
+                AssessmentScanBatchState.CHECKING,
+            )
+            batch.status=AssessmentScanBatchState.CHECKING
+            batch.row_version+=1
 
 class SQLAlchemyPaperCheckingIntakeUnitOfWorkFactory:
     def __init__(self,factory): self.factory=factory
