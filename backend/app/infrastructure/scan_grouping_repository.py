@@ -524,8 +524,13 @@ class SqlAlchemyScanGroupingRepository:
         entries = (
             await self.s.execute(
                 select(ScanGroupingEntry, AssignmentParticipant, Student)
-                .join(AssignmentParticipant)
-                .join(Student)
+                .select_from(ScanGroupingEntry)
+                .join(
+                    AssignmentParticipant,
+                    AssignmentParticipant.id
+                    == ScanGroupingEntry.assignment_participant_id,
+                )
+                .join(Student, Student.id == AssignmentParticipant.student_id)
                 .where(ScanGroupingEntry.grouping_revision_id == rev.id)
                 .order_by(ScanGroupingEntry.position)
             )
