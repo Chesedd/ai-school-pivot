@@ -60,7 +60,6 @@ async def paper_database():
         "student_a",
         "student_b",
         "subject",
-        "grade",
         "topic",
         "task_a",
         "task_b",
@@ -114,7 +113,6 @@ async def paper_database():
         "INSERT INTO class_group_teachers(class_group_id,teacher_user_id,assigned_by) VALUES (:group,:teacher,:teacher)",
         "INSERT INTO students(id,class_group_id,display_name) VALUES (:student_a,:group,'Private A'),(:student_b,:group,'Private B')",
         "INSERT INTO subjects(id,code,name,normalized_name) VALUES (:subject,:subject_code,:subject_name,:subject_normalized_name)",
-        "INSERT INTO grades(id,number,name,normalized_name) VALUES (:grade,7,:grade_name,:grade_normalized_name)",
         "INSERT INTO topics(id,subject_id,grade_id,code,name,normalized_name) VALUES (:topic,:subject,:grade,:topic_code,:topic_name,:topic_normalized_name)",
         "INSERT INTO tasks(id,subject_id,grade_id,topic_id,created_by) VALUES (:task_a,:subject,:grade,:topic,:teacher),(:task_b,:subject,:grade,:topic,:teacher)",
         "INSERT INTO task_versions(id,task_id,version_no,statement,task_type,answer_format,difficulty,status,created_by) VALUES (:version_a,:task_a,1,'Paper A','problem','short_text',50,'approved',:teacher),(:version_b,:task_b,1,'Paper B','problem','short_text',50,'approved',:teacher)",
@@ -135,6 +133,22 @@ async def paper_database():
         "INSERT INTO paper_submission_pages(paper_submission_id,scan_page_id,page_order) VALUES (:paper_a,:page_a,0),(:paper_b,:page_b,0)",
     )
     async with rolled_back_connection() as connection:
+        grade_id = await connection.scalar(
+            text(
+                "SELECT id FROM grades "
+                "WHERE number=7 AND status IN ('active','provisional') LIMIT 1"
+            )
+        )
+        if grade_id is None:
+            grade_id = uuid4()
+            await connection.execute(
+                text(
+                    "INSERT INTO grades(id,number,name,normalized_name) "
+                    "VALUES (:grade,7,:grade_name,:grade_normalized_name)"
+                ),
+                {**ids, "grade": grade_id},
+            )
+        ids["grade"] = grade_id
         factory = async_sessionmaker(
             bind=connection,
             expire_on_commit=False,
