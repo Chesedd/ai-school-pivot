@@ -160,7 +160,7 @@ async def grouping_database():
                  (id,batch_id,revision,requested_by_user_id,status,prompt_name,prompt_version,
                   prompt_template_hash,output_schema_version,provider_route,
                   request_context_fingerprint,assessment_title_snapshot,completed_at)
-                 VALUES (:id,:batch,1,:teacher,'succeeded','scan-match','1','a'||repeat('a',63),
+                 VALUES (:matching_run,:batch,1,:teacher,'succeeded','scan-match','1','a'||repeat('a',63),
                          'v1','test/no-network','b'||repeat('b',63),'Grouping assessment',clock_timestamp())"""),
             ids,
         )
