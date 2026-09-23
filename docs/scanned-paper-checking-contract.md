@@ -80,3 +80,28 @@ freezes canonical participant student and assigned-variant snapshots into one
 digital attempts, or artifact storage. The batch records the `GROUPING_CONFIRMED`
 milestone and deterministically reaches `READY_FOR_CHECKING`. No AI/provider or
 academic checking call occurs during grouping or confirmation.
+
+## PR 6: frozen policy and paper-checking intake
+
+A `CheckRun` now has exactly one execution source: a digital/remediation
+`StudentSubmission` **or** a `PaperSubmission`, enforced by a database XOR.
+Paper intake never creates a digital submission or answer and therefore does not
+consume or alter digital assignment attempts. Existing student-facing digital
+projections remain scoped through `submission_id`.
+
+Paper grading policies are immutable, variant-scoped revisions. Every variant
+represented by a confirmed batch must have a current frozen policy before the
+first run is accepted. The first successfully-created paper run atomically moves
+the batch from `ready_for_checking` to `checking`; revisions are then locked for
+the whole batch.
+
+The `checking_input_paper_v1` snapshot contains only immutable page-render,
+assessment-item methodology, and frozen-policy provenance. It excludes student
+identity, storage references, source PDFs, and original filenames. Policy and
+complete input snapshots use canonical JSON SHA-256 fingerprints. Paper checking
+remains anonymous at the provider boundary.
+
+PR 6 ends with a pending run. It performs no provider call and creates no check
+result, approval, publication, or student result. Authoritative totals and grade
+labels remain deterministic application work through `calculate_total()` and
+`calculate_grade()`.

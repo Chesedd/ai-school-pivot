@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
-from app.application.checking import (ActiveRunConflict, ConcurrentConflict, CreateRunCommand,
+from app.application.checking import (ActiveRunConflict, ConcurrentConflict, CreateRunCommand, CreatePaperRunCommand,
     IdempotencyConflict, InvalidPersistenceCommand, SourceSubmissionNotFound, safe_event_details,
     validate_finding, validate_result, validate_transition)
 from app.infrastructure.model_registry import register_all_models
@@ -18,6 +18,7 @@ from app.infrastructure.model_registry import register_all_models
 register_all_models()
 
 from app.infrastructure.assessment_models import StudentSubmission
+from app.infrastructure.scan_checking_models import PaperSubmission
 from app.infrastructure.checking_models import CostEvent, CheckFinding, CheckResult, CheckRun, CheckerEvent, ModelRun, PromptVersion
 from app.application.checking_provider import (MAX_ATTEMPTS, AttemptDisposition, AttemptState,
     Pricing, PromptSpec, ProviderExecutionKey, ProviderRequest, ProviderResponse, canonical_json,
@@ -53,6 +54,46 @@ class CheckingRepository:
         except IntegrityError as exc: raise ConcurrentConflict("run creation race") from exc
         self.session.add(CheckerEvent(check_run_id=row.id, event_type="run_created", details={"attempt_no": attempt}))
         await self.session.flush(); return row
+
+    async def create_paper_run(self, command: CreatePaperRunCommand) -> CheckRun:
+        command.validate()
+        source = await self.session.scalar(select(PaperSubmission).where(
+            PaperSubmission.id == command.paper_submission_id).with_for_update())
+        if source is None:
+            from app.application.checking import SourcePaperSubmissionNotFound
+            raise SourcePaperSubmissionNotFound(str(command.paper_submission_id))
+        prior = await self.session.scalar(select(CheckRun).where(
+            CheckRun.paper_submission_id == source.id, CheckRun.request_key == command.request_key))
+        if prior is not None:
+            if prior.request_hash != command.request_hash:
+                raise IdempotencyConflict(command.request_key)
+            return prior
+        if command.supersedes_run_id:
+            old = await self.session.get(CheckRun, command.supersedes_run_id)
+            if old is None or old.paper_submission_id != source.id:
+                raise InvalidPersistenceCommand("superseded run target mismatch")
+            if old.status in {"pending", "running"}:
+                raise InvalidPersistenceCommand("superseded run is active")
+        active = await self.session.scalar(select(CheckRun.id).where(
+            CheckRun.paper_submission_id == source.id,
+            CheckRun.status.in_(("pending", "running"))))
+        if active is not None:
+            raise ActiveRunConflict(str(active))
+        attempt = (await self.session.scalar(select(func.coalesce(func.max(CheckRun.attempt_no), 0))
+            .where(CheckRun.paper_submission_id == source.id))) + 1
+        values = dict(command.__dict__)
+        values["submission_id"] = None
+        row = CheckRun(**values, attempt_no=attempt)
+        try:
+            async with self.session.begin_nested():
+                self.session.add(row)
+                await self.session.flush()
+        except IntegrityError as exc:
+            raise ConcurrentConflict("paper run creation race") from exc
+        self.session.add(CheckerEvent(check_run_id=row.id, event_type="run_created",
+                                      details={"attempt_no": attempt}))
+        await self.session.flush()
+        return row
 
     async def transition_run(self, run_id: UUID, expected_version: int, target: str, *, failure_code: str | None = None, failure_detail: str | None = None, details=None) -> CheckRun:
         row = await self.session.get(CheckRun, run_id)

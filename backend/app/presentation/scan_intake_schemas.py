@@ -65,3 +65,13 @@ class GroupingConfirmation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     expected_revision: int = Field(gt=0)
     expected_row_version: int = Field(gt=0)
+
+
+class PaperCheckRunCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_key: str = Field(min_length=1, max_length=128)
+    routing_version: str = Field(min_length=1, max_length=64)
+    checker_set_version: str = Field(min_length=1, max_length=64)
+    threshold_policy_version: str = Field(min_length=1, max_length=64)
+    prompt_model_policy_version: str = Field(min_length=1, max_length=64)
+    supersedes_run_id: UUID | None = None

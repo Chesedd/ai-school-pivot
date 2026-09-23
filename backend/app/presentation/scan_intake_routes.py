@@ -33,9 +33,15 @@ from app.presentation.scan_intake_schemas import (
     GroupingPageAssignment,
     GroupingPageOrder,
     GroupingConfirmation,
+    PaperCheckRunCreate,
 )
 from app.application.scan_grouping import ScanGroupingError, ScanGroupingService
 from app.infrastructure.scan_grouping_repository import SqlAlchemyScanGroupingRepository
+from app.application.scan_grading_policy import ScanGradingPolicy
+from app.application.paper_checking_intake import (PaperCheckingIntakeRequest,
+    PaperCheckingIntakeService, PaperCheckingIntakeError)
+from app.application.checking_intake import InvalidCheckingInput
+from app.infrastructure.paper_checking_repository import PaperGradingPolicyRepository
 
 router = APIRouter(
     prefix="/api/assessment-core",
@@ -506,3 +512,56 @@ async def confirm_grouping(
         )
     except ScanGroupingError as exc:
         raise _grouping_error(exc) from None
+
+
+def _policy_response(row):
+    return {"id":row.id,"assessment_variant_id":row.assessment_variant_id,
+        "revision":row.revision,"schema_version":row.policy_schema_version,
+        "compiler_version":row.compiler_version,"prompt_policy_version":row.prompt_policy_version,
+        "fingerprint":row.policy_fingerprint,"policy":row.policy_json,"created_at":row.created_at}
+
+
+@router.post("/scan-batches/{batch_id}/grading-policies/{variant_id}")
+async def freeze_grading_policy(batch_id:UUID,variant_id:UUID,payload:ScanGradingPolicy,
+    db=Depends(get_session),principal:Principal=PrincipalDep):
+    await _authorized_batch(db,batch_id,principal)
+    try:
+        row=await PaperGradingPolicyRepository(db).freeze(batch_id,variant_id,payload,principal.user_id)
+        await db.commit(); return _policy_response(row)
+    except (InvalidCheckingInput, PaperCheckingIntakeError) as exc:
+        await db.rollback(); raise HTTPException(409,str(exc)) from None
+
+
+@router.get("/scan-batches/{batch_id}/grading-policies")
+async def list_grading_policies(batch_id:UUID,db=Depends(get_session),principal:Principal=PrincipalDep):
+    await _authorized_batch(db,batch_id,principal)
+    return {"items":[_policy_response(x) for x in await PaperGradingPolicyRepository(db).list(batch_id)]}
+
+
+@router.post("/paper-submissions/{paper_submission_id}/check-runs",status_code=201)
+async def create_paper_check_run(paper_submission_id:UUID,payload:PaperCheckRunCreate,
+    db=Depends(get_session),principal:Principal=PrincipalDep):
+    from app.infrastructure.scan_checking_models import PaperSubmission
+    paper=await db.get(PaperSubmission,paper_submission_id)
+    if paper is None: raise HTTPException(404,"paper_submission_not_found")
+    await _authorized_batch(db,paper.batch_id,principal)
+    try:
+        # Adapt the request-scoped session without opening a second transaction.
+        from app.infrastructure.paper_checking_repository import SQLAlchemyPaperCheckingIntakeUnitOfWork
+        class RequestUow(SQLAlchemyPaperCheckingIntakeUnitOfWork):
+            def __init__(self): self.session=db
+            async def __aenter__(self): return self
+            async def __aexit__(self,exc_type,exc,tb):
+                if exc_type: await db.rollback()
+            async def commit(self): await db.commit()
+        class Factory:
+            def __call__(self): return RequestUow()
+        run=await PaperCheckingIntakeService(Factory()).create(PaperCheckingIntakeRequest(
+            paper_submission_id,payload.request_key,payload.routing_version,payload.checker_set_version,
+            payload.threshold_policy_version,payload.prompt_model_policy_version,payload.supersedes_run_id))
+        return {"check_run_id":run.id,"paper_submission_id":run.paper_submission_id,"status":run.status,
+            "attempt_no":run.attempt_no,"snapshot_schema_version":run.snapshot_schema_version,
+            "input_fingerprint":run.input_fingerprint,"requested_at":run.requested_at}
+    except Exception as exc:
+        if isinstance(exc,HTTPException): raise
+        raise HTTPException(409,str(exc)) from None
