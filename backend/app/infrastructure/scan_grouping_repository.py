@@ -174,6 +174,28 @@ class SqlAlchemyScanGroupingRepository:
         expected_row_version,
         actor_id,
     ):
+        try:
+            return await self._assign(
+                batch_id,
+                page_id,
+                participant_id,
+                expected_revision,
+                expected_row_version,
+                actor_id,
+            )
+        except Exception:
+            await self.s.rollback()
+            raise
+
+    async def _assign(
+        self,
+        batch_id,
+        page_id,
+        participant_id,
+        expected_revision,
+        expected_row_version,
+        actor_id,
+    ):
         batch, rev = await self._editable(
             batch_id, expected_revision, expected_row_version
         )
@@ -258,6 +280,28 @@ class SqlAlchemyScanGroupingRepository:
         return await self.read(batch_id)
 
     async def reorder(
+        self,
+        batch_id,
+        participant_id,
+        page_ids,
+        expected_revision,
+        expected_row_version,
+        actor_id,
+    ):
+        try:
+            return await self._reorder(
+                batch_id,
+                participant_id,
+                page_ids,
+                expected_revision,
+                expected_row_version,
+                actor_id,
+            )
+        except Exception:
+            await self.s.rollback()
+            raise
+
+    async def _reorder(
         self,
         batch_id,
         participant_id,
