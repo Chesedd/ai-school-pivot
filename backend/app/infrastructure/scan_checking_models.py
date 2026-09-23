@@ -626,3 +626,26 @@ class PaperSubmissionPage(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=clock
     )
+
+
+class ScanGradingPolicyRevision(IdMixin, Base):
+    __tablename__ = "scan_grading_policy_revisions"
+    __table_args__ = (
+        UniqueConstraint("batch_id", "assessment_variant_id", "revision", name="uq_scan_grading_policy_revision"),
+        CheckConstraint("revision > 0", name="ck_scan_grading_policy_revision_positive"),
+        CheckConstraint("policy_fingerprint ~ '^[0-9a-f]{64}$'", name="ck_scan_grading_policy_fingerprint"),
+        CheckConstraint("supersedes_policy_id IS NULL OR supersedes_policy_id <> id", name="ck_scan_grading_policy_not_self"),
+        CheckConstraint("char_length(btrim(policy_schema_version)) BETWEEN 1 AND 64 AND char_length(btrim(compiler_version)) BETWEEN 1 AND 64 AND char_length(btrim(prompt_policy_version)) BETWEEN 1 AND 64", name="ck_scan_grading_policy_versions"),
+        Index("ix_scan_grading_policy_current", "batch_id", "assessment_variant_id", text("revision DESC")),
+    )
+    batch_id: Mapped[UUID] = mapped_column(ForeignKey("assessment_scan_batches.id", ondelete="RESTRICT"))
+    assessment_variant_id: Mapped[UUID] = mapped_column(ForeignKey("assessment_variants.id", ondelete="RESTRICT"))
+    revision: Mapped[int] = mapped_column(Integer)
+    policy_schema_version: Mapped[str] = mapped_column(String(64))
+    compiler_version: Mapped[str] = mapped_column(String(64))
+    prompt_policy_version: Mapped[str] = mapped_column(String(64))
+    policy_json: Mapped[object] = mapped_column(JSONB)
+    policy_fingerprint: Mapped[str] = mapped_column(String(64))
+    created_by_user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    supersedes_policy_id: Mapped[UUID | None] = mapped_column(ForeignKey("scan_grading_policy_revisions.id", ondelete="RESTRICT"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=clock)

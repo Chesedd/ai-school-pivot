@@ -16,6 +16,7 @@ class InvalidPersistenceCommand(CheckingPersistenceError): pass
 class IdempotencyConflict(CheckingPersistenceError): pass
 class ActiveRunConflict(CheckingPersistenceError): pass
 class SourceSubmissionNotFound(CheckingPersistenceError): pass
+class SourcePaperSubmissionNotFound(CheckingPersistenceError): pass
 class ConcurrentConflict(CheckingPersistenceError): pass
 
 
@@ -40,6 +41,27 @@ class CreateRunCommand:
         snapshot_submission = self.input_snapshot.get("submission_id")
         if snapshot_submission is not None and snapshot_submission != str(self.submission_id):
             raise InvalidPersistenceCommand("snapshot submission mismatch")
+
+
+@dataclass(frozen=True)
+class CreatePaperRunCommand:
+    paper_submission_id: UUID; request_key: str; request_hash: str; handoff_version: int
+    input_snapshot: dict[str, Any]; input_fingerprint: str
+    snapshot_schema_version: str; routing_version: str; checker_set_version: str
+    threshold_policy_version: str; prompt_model_policy_version: str
+    supersedes_run_id: UUID | None = None
+
+    def validate(self) -> None:
+        # Keep validation identical to digital intake, except for the source key.
+        CreateRunCommand(self.paper_submission_id, self.request_key, self.request_hash,
+            self.handoff_version, self.input_snapshot, self.input_fingerprint,
+            self.snapshot_schema_version, self.routing_version, self.checker_set_version,
+            self.threshold_policy_version, self.prompt_model_policy_version,
+            self.supersedes_run_id).validate()
+        if self.input_snapshot.get("paper_submission_id") != str(self.paper_submission_id):
+            raise InvalidPersistenceCommand("snapshot paper submission mismatch")
+        if "submission_id" in self.input_snapshot:
+            raise InvalidPersistenceCommand("paper snapshot contains digital source")
 
 
 ALLOWED_TRANSITIONS = {"pending": {"running", "failed_terminal"}, "running": {"completed", "completed_with_review_required", "failed_retryable", "failed_terminal"}, "failed_retryable": {"pending"}}
