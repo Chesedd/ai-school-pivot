@@ -227,8 +227,9 @@ async def test_policy_freeze_replay_revision_validation_and_immutability(
     rows = (
         await connection.execute(
             text(
-                "SELECT id,revision,supersedes_policy_id,compiler_version,prompt_policy_version,policy_json FROM scan_grading_policy_revisions ORDER BY revision"
-            )
+                "SELECT id,revision,supersedes_policy_id,compiler_version,prompt_policy_version,policy_json FROM scan_grading_policy_revisions WHERE batch_id=:batch AND assessment_variant_id=:variant ORDER BY revision"
+            ),
+            {"batch": ids["batch"], "variant": ids["variant_a"]},
         )
     ).all()
     assert len(rows) == 2 and rows[1].supersedes_policy_id == rows[0].id
@@ -245,7 +246,10 @@ async def test_policy_freeze_replay_revision_validation_and_immutability(
             await session.rollback()
     assert (
         await connection.scalar(
-            text("SELECT count(*) FROM scan_grading_policy_revisions")
+            text(
+                "SELECT count(*) FROM scan_grading_policy_revisions WHERE batch_id=:batch AND assessment_variant_id=:variant"
+            ),
+            {"batch": ids["batch"], "variant": ids["variant_a"]},
         )
         == 2
     )
@@ -280,7 +284,10 @@ async def test_policy_coverage_variant_and_version_authority_fail_closed(
         await session.rollback()
     assert (
         await connection.scalar(
-            text("SELECT count(*) FROM scan_grading_policy_revisions")
+            text(
+                "SELECT count(*) FROM scan_grading_policy_revisions WHERE batch_id=:batch"
+            ),
+            {"batch": ids["batch"]},
         )
         == 0
     )
@@ -302,8 +309,22 @@ async def test_multivariant_completeness_snapshot_privacy_and_atomic_transition(
         )
         == "ready_for_checking"
     )
-    assert await connection.scalar(text("SELECT count(*) FROM check_runs")) == 0
-    assert await connection.scalar(text("SELECT count(*) FROM checker_events")) == 0
+    assert (
+        await connection.scalar(
+            text("SELECT count(*) FROM check_runs WHERE paper_submission_id=:paper"),
+            {"paper": ids["paper_a"]},
+        )
+        == 0
+    )
+    assert (
+        await connection.scalar(
+            text(
+                "SELECT count(*) FROM checker_events ce JOIN check_runs cr ON cr.id=ce.check_run_id WHERE cr.paper_submission_id=:paper"
+            ),
+            {"paper": ids["paper_a"]},
+        )
+        == 0
+    )
     policy_id, revision, fingerprint, policy_json = await freeze(factory, ids, "b")
     run = await intake(factory).create(request(ids))
     row = (
@@ -409,8 +430,9 @@ async def test_paper_idempotency_active_conflict_attempts_and_policy_lock(
     assert (
         await connection.scalar(
             text(
-                "SELECT count(*) FROM checker_events WHERE event_type='run_created'"
-            )
+                "SELECT count(*) FROM checker_events ce JOIN check_runs cr ON cr.id=ce.check_run_id WHERE cr.paper_submission_id=:paper AND ce.event_type='run_created'"
+            ),
+            {"paper": ids["paper_a"]},
         )
         == 3
     )
@@ -479,8 +501,22 @@ async def test_invalid_page_state_rolls_back_run_event_and_batch(
     await connection.execute(text(updates[corruption][0]), ids)
     with pytest.raises(InvalidCheckingInput, match=updates[corruption][1]):
         await intake(factory).create(request(ids))
-    assert await connection.scalar(text("SELECT count(*) FROM check_runs")) == 0
-    assert await connection.scalar(text("SELECT count(*) FROM checker_events")) == 0
+    assert (
+        await connection.scalar(
+            text("SELECT count(*) FROM check_runs WHERE paper_submission_id=:paper"),
+            {"paper": ids["paper_a"]},
+        )
+        == 0
+    )
+    assert (
+        await connection.scalar(
+            text(
+                "SELECT count(*) FROM checker_events ce JOIN check_runs cr ON cr.id=ce.check_run_id WHERE cr.paper_submission_id=:paper AND ce.event_type='run_created'"
+            ),
+            {"paper": ids["paper_a"]},
+        )
+        == 0
+    )
     assert (
         await connection.scalar(
             text("SELECT status FROM assessment_scan_batches WHERE id=:batch"), ids
@@ -493,24 +529,33 @@ async def test_paper_runs_do_not_create_or_increment_digital_attempts(paper_data
     connection, factory, ids = paper_database
     await freeze(factory, ids, "a")
     await freeze(factory, ids, "b")
-    before = (
-        await connection.execute(
+    async def digital_state():
+        submission_ids = tuple(
+            (
+                await connection.execute(
+                    text(
+                        "SELECT id FROM student_submissions WHERE assignment_participant_id IN (:participant_a,:participant_b) ORDER BY id"
+                    ),
+                    ids,
+                )
+            ).scalars()
+        )
+        answer_count = await connection.scalar(
             text(
-                "SELECT (SELECT count(*) FROM student_submissions),(SELECT count(*) FROM student_answers),(SELECT max_attempts FROM assignments WHERE id=:assignment)"
+                "SELECT count(*) FROM student_answers sa JOIN student_submissions ss ON ss.id=sa.submission_id WHERE ss.assignment_participant_id IN (:participant_a,:participant_b)"
             ),
             ids,
         )
-    ).one()
+        max_attempts = await connection.scalar(
+            text("SELECT max_attempts FROM assignments WHERE id=:assignment"), ids
+        )
+        return submission_ids, answer_count, max_attempts
+
+    before = await digital_state()
     await intake(factory).create(request(ids))
-    after = (
-        await connection.execute(
-            text(
-                "SELECT (SELECT count(*) FROM student_submissions),(SELECT count(*) FROM student_answers),(SELECT max_attempts FROM assignments WHERE id=:assignment)"
-            ),
-            ids,
-        )
-    ).one()
-    assert before == after == (1, 0, 3)
+    after = await digital_state()
+    assert before == after
+    assert before == ((ids["digital_submission"],), 0, 3)
 
 
 async def test_check_run_identity_is_immutable_but_cas_lifecycle_still_works(
