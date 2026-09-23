@@ -331,6 +331,12 @@ async def test_scan_grouping_postgresql_structural_constraints(grouping_database
         ids,
         revision=revision_id,
     )
+    second_entry_id = await scalar(
+        connection,
+        "SELECT id FROM scan_grouping_entries WHERE grouping_revision_id=:revision AND assignment_participant_id=:participant_b",
+        ids,
+        revision=revision_id,
+    )
     checks = (
         (
             "uq_scan_grouping_revisions_revision",
@@ -350,7 +356,11 @@ async def test_scan_grouping_postgresql_structural_constraints(grouping_database
         (
             "uq_scan_grouping_pages_revision_page",
             "INSERT INTO scan_grouping_pages(grouping_entry_id,grouping_revision_id,scan_page_id,page_order) VALUES (:entry,:revision,:page,9)",
-            {"entry": entry_id, "revision": revision_id, "page": ids["pages"][0]},
+            {
+                "entry": second_entry_id,
+                "revision": revision_id,
+                "page": ids["pages"][0],
+            },
         ),
         (
             "uq_scan_grouping_pages_order",
@@ -400,6 +410,20 @@ async def test_scan_grouping_assign_move_unassign_boundaries_and_concurrency(
         )
         == 1
     )
+    # Moving participant B's only page removes that entry and compacts the
+    # surviving entry positions without violating their non-negative check.
+    view = await service.assign(
+        ids["batch"],
+        ids["pages"][2],
+        ids["participant_a"],
+        1,
+        view["row_version"],
+        ids["teacher"],
+    )
+    assert [
+        (group["assignment_participant_id"], group["position"])
+        for group in view["groups"]
+    ] == [(ids["participant_a"], 0)]
     with pytest.raises(ScanGroupingError, match="grouping_revision_conflict"):
         await service.assign(
             ids["batch"],
