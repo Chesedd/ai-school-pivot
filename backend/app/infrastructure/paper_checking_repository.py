@@ -1,32 +1,50 @@
 """PostgreSQL adapters for paper policy freezing and checking intake."""
-# ruff: noqa: E701, E702
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.paper_checking_intake import (FrozenPaperPolicy, PaperCheckingHandoff,
-    PaperCheckingItem, PaperCheckingPage, PaperGradingPolicyIncomplete,
-    PAPER_POLICY_COMPILER_VERSION, PAPER_PROMPT_POLICY_VERSION)
 from app.application.checking_intake import InvalidCheckingInput
-from app.application.scan_grading_policy import ScanGradingPolicy
+from app.application.paper_checking_intake import (
+    PAPER_POLICY_COMPILER_VERSION,
+    PAPER_PROMPT_POLICY_VERSION,
+    FrozenPaperPolicy,
+    PaperCheckingHandoff,
+    PaperCheckingItem,
+    PaperCheckingPage,
+    PaperGradingPolicyIncomplete,
+)
 from app.application.scan_checking_contracts import (
     AssessmentScanBatchState,
     validate_batch_transition,
 )
-from app.infrastructure.assessment_models import AssessmentItem, AssessmentVariant, Assignment
+from app.application.scan_grading_policy import ScanGradingPolicy
+from app.infrastructure.assessment_models import (
+    AssessmentItem,
+    AssessmentVariant,
+    Assignment,
+)
 from app.infrastructure.authoring_models import InputArtifact
+from app.infrastructure.checking_intake_repository import (
+    SQLAlchemyCheckingIntakeUnitOfWork,
+)
 from app.infrastructure.checking_models import CheckRun
 from app.infrastructure.checking_repository import CheckingRepository
-from app.infrastructure.checking_intake_repository import SQLAlchemyCheckingIntakeUnitOfWork
-from app.infrastructure.scan_checking_models import (AssessmentScanBatch, PaperSubmission,
-    PaperSubmissionPage, ScanPage, ScanGradingPolicyRevision)
+from app.infrastructure.scan_checking_models import (
+    AssessmentScanBatch,
+    PaperSubmission,
+    PaperSubmissionPage,
+    ScanGradingPolicyRevision,
+    ScanPage,
+)
+
 
 class SQLAlchemyPaperCheckingIntakeUnitOfWork(SQLAlchemyCheckingIntakeUnitOfWork):
     async def load_locked_handoff(self, paper_submission_id: UUID) -> PaperCheckingHandoff:
         paper=await self.session.scalar(select(PaperSubmission).where(
             PaperSubmission.id==paper_submission_id).with_for_update())
-        if paper is None: raise InvalidCheckingInput("paper_submission_not_found")
+        if paper is None:
+            raise InvalidCheckingInput("paper_submission_not_found")
         batch=await self.session.scalar(select(AssessmentScanBatch).where(
             AssessmentScanBatch.id==paper.batch_id).with_for_update())
         if batch.status not in {"ready_for_checking","checking"}:
@@ -38,8 +56,10 @@ class SQLAlchemyPaperCheckingIntakeUnitOfWork(SQLAlchemyCheckingIntakeUnitOfWork
             ScanGradingPolicyRevision.assessment_variant_id,
             ScanGradingPolicyRevision.revision.desc()))).all()
         current={}
-        for p in policies: current.setdefault(p.assessment_variant_id,p)
-        if set(current) != represented: raise PaperGradingPolicyIncomplete("paper_grading_policy_incomplete")
+        for p in policies:
+            current.setdefault(p.assessment_variant_id,p)
+        if set(current) != represented:
+            raise PaperGradingPolicyIncomplete("paper_grading_policy_incomplete")
         policy=current[paper.assigned_variant_id]
         rows=(await self.session.execute(select(PaperSubmissionPage,ScanPage,InputArtifact)
             .join(ScanPage,ScanPage.id==PaperSubmissionPage.scan_page_id)
@@ -88,20 +108,24 @@ class PaperGradingPolicyRepository:
     async def freeze(self,batch_id:UUID,variant_id:UUID,supplied:ScanGradingPolicy,actor_id:UUID):
         batch=await self.session.scalar(select(AssessmentScanBatch).where(
             AssessmentScanBatch.id==batch_id).with_for_update())
-        if batch is None: raise InvalidCheckingInput("scan_batch_not_found")
-        if batch.status!="ready_for_checking": raise InvalidCheckingInput("paper_grading_policy_locked")
+        if batch is None:
+            raise InvalidCheckingInput("scan_batch_not_found")
+        if batch.status!="ready_for_checking":
+            raise InvalidCheckingInput("paper_grading_policy_locked")
         assignment=await self.session.get(Assignment,batch.assignment_id)
         variant=await self.session.get(AssessmentVariant,variant_id)
         if variant is None or variant.assessment_id!=assignment.assessment_id:
             raise InvalidCheckingInput("foreign_assessment_variant")
         represented=await self.session.scalar(select(PaperSubmission.id).where(
             PaperSubmission.batch_id==batch_id,PaperSubmission.assigned_variant_id==variant_id).limit(1))
-        if represented is None: raise InvalidCheckingInput("variant_not_represented")
+        if represented is None:
+            raise InvalidCheckingInput("variant_not_represented")
         canonical=(await self.session.scalars(select(AssessmentItem).where(
             AssessmentItem.variant_id==variant_id))).all()
         maxima={x.id:x.points for x in canonical}
         proposed={x.assessment_item_id:x.max_score for x in supplied.assessment_items}
-        if proposed!=maxima: raise InvalidCheckingInput("paper_grading_policy_item_coverage")
+        if proposed!=maxima:
+            raise InvalidCheckingInput("paper_grading_policy_item_coverage")
         if supplied.original_teacher_instruction != batch.instruction_text:
             raise InvalidCheckingInput("paper_grading_policy_instruction_mismatch")
         if (supplied.compiler_version != PAPER_POLICY_COMPILER_VERSION or
@@ -114,7 +138,8 @@ class PaperGradingPolicyRepository:
             ScanGradingPolicyRevision.batch_id==batch_id,
             ScanGradingPolicyRevision.assessment_variant_id==variant_id).order_by(
             ScanGradingPolicyRevision.revision.desc()).limit(1))
-        if latest and latest.policy_fingerprint==final.fingerprint: return latest
+        if latest and latest.policy_fingerprint==final.fingerprint:
+            return latest
         if await self.session.scalar(select(CheckRun.id).join(PaperSubmission,
             PaperSubmission.id==CheckRun.paper_submission_id).where(PaperSubmission.batch_id==batch_id).limit(1)):
             raise InvalidCheckingInput("paper_grading_policy_locked")
@@ -123,7 +148,9 @@ class PaperGradingPolicyRepository:
             compiler_version=final.compiler_version,prompt_policy_version=final.prompt_policy_version,
             policy_json=final.model_dump(mode="json"),policy_fingerprint=final.fingerprint,
             created_by_user_id=actor_id,supersedes_policy_id=latest.id if latest else None)
-        self.session.add(row); await self.session.flush(); return row
+        self.session.add(row)
+        await self.session.flush()
+        return row
     async def list(self,batch_id):
         return (await self.session.scalars(select(ScanGradingPolicyRevision).where(
             ScanGradingPolicyRevision.batch_id==batch_id).order_by(
