@@ -19,8 +19,6 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from tests.integration.c10a_postgres import rolled_back_connection
-
 from app.application.checking import ActiveRunConflict, IdempotencyConflict
 from app.application.checking_intake import InvalidCheckingInput
 from app.application.paper_checking_intake import (
@@ -42,6 +40,7 @@ from app.infrastructure.paper_checking_repository import (
     PaperGradingPolicyRepository,
     SQLAlchemyPaperCheckingIntakeUnitOfWorkFactory,
 )
+from tests.integration.c10a_postgres import rolled_back_connection
 
 URL = os.environ.get("TEST_DATABASE_URL", "")
 if URL and not URL.rsplit("/", 1)[-1].split("?", 1)[0].endswith("_test"):
@@ -161,7 +160,7 @@ async def paper_database():
 
 def policy(ids, variant="a", *, rule="Use exact evidence."):
     item_id = ids[f"item_{variant}"]
-    maximum = Decimal("10") if variant == "a" else Decimal("20")
+    maximum = Decimal(10) if variant == "a" else Decimal(20)
     return ScanGradingPolicy(
         original_teacher_instruction="Mark exactly",
         assessment_items=(
@@ -178,7 +177,7 @@ def policy(ids, variant="a", *, rule="Use exact evidence."):
         general_rules=(rule,),
         grade_scale=GradeScale(
             basis="points",
-            thresholds=(GradeThreshold(minimum=Decimal("0"), grade_label="graded"),),
+            thresholds=(GradeThreshold(minimum=Decimal(0), grade_label="graded"),),
         ),
         compiler_version=PAPER_POLICY_COMPILER_VERSION,
         prompt_policy_version=PAPER_PROMPT_POLICY_VERSION,
@@ -289,7 +288,7 @@ async def test_policy_coverage_variant_and_version_authority_fail_closed(
             )
         await session.rollback()
         missing = policy(ids).model_copy(
-            update={"assessment_items": (), "total_max_score": Decimal("10")}
+            update={"assessment_items": (), "total_max_score": Decimal(10)}
         )
         with pytest.raises(InvalidCheckingInput, match="item_coverage"):
             await PaperGradingPolicyRepository(session).freeze(
@@ -339,7 +338,7 @@ async def test_multivariant_completeness_snapshot_privacy_and_atomic_transition(
         )
         == 0
     )
-    policy_id, revision, fingerprint, policy_json = await freeze(factory, ids, "b")
+    await freeze(factory, ids, "b")
     run = await intake(factory).create(request(ids))
     row = (
         await connection.execute(
