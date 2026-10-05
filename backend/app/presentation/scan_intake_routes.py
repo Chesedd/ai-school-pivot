@@ -1,4 +1,5 @@
 """Dedicated, teacher-only scanned-paper intake HTTP boundary."""
+# ruff: noqa: E501, E701, E702
 
 from uuid import UUID
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
@@ -42,6 +43,9 @@ from app.application.paper_checking_intake import (PaperCheckingIntakeRequest,
     PaperCheckingIntakeService, PaperCheckingIntakeError)
 from app.application.checking_intake import InvalidCheckingInput
 from app.infrastructure.paper_checking_repository import PaperGradingPolicyRepository
+from app.application.paper_checking_execution import PaperCheckingExecutionError, PaperCheckingExecutionService
+from app.infrastructure.paper_checking_execution_repository import SQLAlchemyPaperCheckingExecutionRepository
+from app.infrastructure.paper_checking_providers import AnthropicPaperCheckingProvider
 
 router = APIRouter(
     prefix="/api/assessment-core",
@@ -565,3 +569,41 @@ async def create_paper_check_run(paper_submission_id:UUID,payload:PaperCheckRunC
     except Exception as exc:
         if isinstance(exc,HTTPException): raise
         raise HTTPException(409,str(exc)) from None
+
+
+def _paper_provider(request:Request,settings:Settings):
+    injected=getattr(request.app.state,"paper_checking_provider",None)
+    if injected is not None: return injected
+    if settings.paper_checking_provider!="anthropic" or not settings.anthropic_credential:
+        raise HTTPException(503,"paper_checking_provider_not_configured")
+    from anthropic import AsyncAnthropic
+    return AnthropicPaperCheckingProvider(AsyncAnthropic(api_key=settings.anthropic_credential,
+        base_url=settings.anthropic_base_url),settings.paper_checking_model)
+
+
+@router.post("/paper-submissions/{paper_submission_id}/check-runs/{check_run_id}/execute")
+async def execute_paper_check(paper_submission_id:UUID,check_run_id:UUID,request:Request,
+    db=Depends(get_session),settings:Settings=Depends(get_settings),principal:Principal=PrincipalDep):
+    from app.db.session import async_session_factory
+    from app.infrastructure.scan_checking_models import PaperSubmission
+    paper=await db.get(PaperSubmission,paper_submission_id)
+    if paper is None: raise HTTPException(404,"paper_submission_not_found")
+    await _authorized_batch(db,paper.batch_id,principal)
+    try:
+        return await PaperCheckingExecutionService(SQLAlchemyPaperCheckingExecutionRepository(async_session_factory),
+            FilesystemArtifactStorage(settings.artifact_storage_path),_paper_provider(request,settings)).execute(paper_submission_id,check_run_id)
+    except PaperCheckingExecutionError as exc:
+        raise HTTPException(409 if "conflict" in exc.code or "progress" in exc.code else 422,exc.code) from None
+
+
+@router.get("/paper-submissions/{paper_submission_id}/check-runs/{check_run_id}/ai-result")
+async def get_paper_ai_result(paper_submission_id:UUID,check_run_id:UUID,db=Depends(get_session),principal:Principal=PrincipalDep):
+    from app.db.session import async_session_factory
+    from app.infrastructure.checking_models import CheckRun
+    from app.infrastructure.scan_checking_models import PaperSubmission
+    paper=await db.get(PaperSubmission,paper_submission_id); run=await db.get(CheckRun,check_run_id)
+    if paper is None or run is None or run.paper_submission_id!=paper.id: raise HTTPException(404,"paper_check_run_not_found")
+    await _authorized_batch(db,paper.batch_id,principal)
+    result=await SQLAlchemyPaperCheckingExecutionRepository(async_session_factory).read(check_run_id)
+    if result["ai_revision_id"] is None: raise HTTPException(404,"paper_ai_result_not_found")
+    return result

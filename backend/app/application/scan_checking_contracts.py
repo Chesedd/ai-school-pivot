@@ -413,6 +413,15 @@ class PaperItemResult(_Contract):
             and self.rubric_score is not None
         ):
             raise ValueError("indeterminate_status_forbids_score")
+        if self.status == PaperItemStatus.CORRECT and self.rubric_score != self.rubric_max_score:
+            raise ValueError("correct_requires_max_score")
+        if self.status == PaperItemStatus.INCORRECT and self.rubric_score != 0:
+            raise ValueError("incorrect_requires_zero_score")
+        if self.status == PaperItemStatus.PARTIALLY_CORRECT and not (
+            self.rubric_score is not None
+            and 0 < self.rubric_score < self.rubric_max_score
+        ):
+            raise ValueError("partially_correct_requires_partial_score")
         return self
 
 
@@ -438,8 +447,13 @@ def validate_checking_response(
     if returned != set(expected):
         raise ValueError("item_coverage_mismatch")
     pages = {page.page_token for page in request.pages}
+    finding_tokens: set[str] = set()
     for item in response.items:
         if item.rubric_max_score != expected[item.item_token]:
             raise ValueError("rubric_max_score_mismatch")
         if any(finding.page_token not in pages for finding in item.findings):
             raise ValueError("unknown_page_token")
+        for finding in item.findings:
+            if finding.finding_token in finding_tokens:
+                raise ValueError("duplicate_finding_token")
+            finding_tokens.add(finding.finding_token)
