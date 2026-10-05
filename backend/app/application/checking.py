@@ -2,6 +2,7 @@
 
 This module intentionally performs no intake, routing, checking, or provider calls.
 """
+# ruff: noqa: E501, E701, E702
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
@@ -107,7 +108,7 @@ def validate_result(snapshot: dict[str, Any], key: CheckingItemKey | UUID, task_
     if frozen != max_score: raise InvalidPersistenceCommand("max score mismatch")
     valid = ((status == "correct" and score == max_score) or (status == "incorrect" and score == 0)
              or (status == "partially_correct" and score is not None and 0 < score < max_score)
-             or (status in {"unclear", "insufficient_rubric", "manual_required"} and score is None))
+             or (status in {"unclear", "insufficient_rubric", "manual_required", "not_attempted", "unreadable", "insufficient_evidence"} and score is None))
     if not valid: raise InvalidPersistenceCommand("score/status mismatch")
 
 
