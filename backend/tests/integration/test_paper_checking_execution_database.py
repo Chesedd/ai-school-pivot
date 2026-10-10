@@ -341,10 +341,11 @@ async def durable_ids(connection, run_id):
         "SELECT id FROM model_runs WHERE check_run_id=:run AND status='succeeded'",
         "SELECT c.id FROM cost_events c JOIN model_runs m ON m.id=c.model_run_id WHERE m.check_run_id=:run",
     )
-    return tuple(
-        frozenset((await connection.execute(text(sql), {"run": run_id})).scalars())
-        for sql in queries
-    )
+    result = []
+    for sql in queries:
+        rows = await connection.execute(text(sql), {"run": run_id})
+        result.append(frozenset(rows.scalars()))
+    return tuple(result)
 
 
 async def clone(connection, table, row_id, **changes):
