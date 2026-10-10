@@ -178,9 +178,8 @@ async def test_edit_approve_correct_and_reapprove_preserves_exact_history(
         == "completed_with_review_required"
     )
     assert not await connection.scalar(
-        text(
-            "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name LIKE 'paper%public%')"
-        )
+        text("SELECT EXISTS (SELECT 1 FROM paper_result_publications WHERE paper_submission_id=:id)"),
+        {"id": ids["paper_a"]},
     )
 
 
@@ -463,10 +462,12 @@ async def test_database_rejects_foreign_pointer_and_unapproved_pointer(
 
 
 async def test_migrated_review_schema_and_unique_workspace(execution_database):
+    from tests.integration.test_migrations import repository_head
+
     connection = execution_database[0]
     assert (
         await connection.scalar(text("SELECT version_num FROM alembic_version"))
-        == "20261010_01"
+        == repository_head()
     )
     run = await completed(execution_database)
     review = await call(execution_database, run, "start")

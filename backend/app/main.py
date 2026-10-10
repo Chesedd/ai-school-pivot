@@ -1,41 +1,51 @@
-from uuid import uuid4
 import logging
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.application.folders import FolderDomainError
-from app.application.content_bank import ApplicationError, ConflictError, GoneError, IssuesError, NotFoundError
-from app.application.managed_tags import TagError
 from app.application.assessments import AssessmentError
-from app.config import get_settings
-from app.presentation.routes import router
-from app.presentation.assessment_routes import router as assessment_router
-from app.presentation.student_assessment_routes import router as student_assessment_router
-from app.presentation.attachment_routes import router as attachment_router
-from app.presentation.authoring_routes import router as authoring_router
 from app.application.authoring_api import AuthoringApiError
-from app.application.image_solving_api import ImageSolvingApiError
-from app.application.classroom_administration import ClassroomError
-from app.application.classroom_access import ClassroomAccessError
-from app.application.classroom_notes import ClassroomNotesError
-from app.application.classroom_results import ClassroomResultsError
-from app.application.remediation import RemediationError
-from app.presentation.image_solving_routes import router as image_solving_router
-from app.presentation.image_artifact_routes import router as image_artifact_router
-from app.presentation.auth_routes import router as auth_router
-from app.presentation.admin_user_routes import router as admin_user_router
-from app.presentation.admin_classroom_routes import router as admin_classroom_router
-from app.presentation.classroom_routes import router as classroom_router
-from app.application.user_administration import AdministrationError
 from app.application.catalog_proposals import CatalogProposalError
 from app.application.catalog_resolution import CatalogResolutionError
+from app.application.classroom_access import ClassroomAccessError
+from app.application.classroom_administration import ClassroomError
+from app.application.classroom_notes import ClassroomNotesError
+from app.application.classroom_results import ClassroomResultsError
+from app.application.content_bank import (
+    ApplicationError,
+    ConflictError,
+    GoneError,
+    IssuesError,
+    NotFoundError,
+)
+from app.application.folders import FolderDomainError
+from app.application.image_solving_api import ImageSolvingApiError
+from app.application.managed_tags import TagError
+from app.application.remediation import RemediationError
+from app.application.user_administration import AdministrationError
+from app.config import get_settings
+from app.presentation.admin_classroom_routes import router as admin_classroom_router
+from app.presentation.admin_user_routes import router as admin_user_router
+from app.presentation.assessment_routes import router as assessment_router
+from app.presentation.attachment_routes import router as attachment_router
+from app.presentation.auth_routes import router as auth_router
+from app.presentation.authoring_routes import router as authoring_router
 from app.presentation.catalog_proposal_routes import router as catalog_proposal_router
+from app.presentation.classroom_routes import router as classroom_router
+from app.presentation.image_artifact_routes import router as image_artifact_router
+from app.presentation.image_solving_routes import router as image_solving_router
+from app.presentation.paper_result_publication_routes import (
+    router as paper_publication_router,
+)
 from app.presentation.remediation_routes import router as remediation_router
+from app.presentation.routes import router
 from app.presentation.scan_intake_routes import router as scan_intake_router
-
+from app.presentation.student_assessment_routes import (
+    router as student_assessment_router,
+)
 
 app = FastAPI()
 logger = logging.getLogger(__name__)
@@ -55,6 +65,7 @@ app.include_router(image_artifact_router)
 app.include_router(catalog_proposal_router)
 app.include_router(remediation_router)
 app.include_router(scan_intake_router)
+app.include_router(paper_publication_router)
 
 @app.exception_handler(RemediationError)
 async def remediation_error(_: Request, exc: RemediationError) -> JSONResponse:

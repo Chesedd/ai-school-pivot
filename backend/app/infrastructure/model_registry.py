@@ -15,6 +15,7 @@ def register_all_models() -> None:
         classroom_models,  # noqa: F401
         image_solving_models,  # noqa: F401
         paper_checking_review_models,  # noqa: F401
+        paper_result_publication_models,  # noqa: F401
         remediation_models,  # noqa: F401
         scan_checking_models,  # noqa: F401
     )
