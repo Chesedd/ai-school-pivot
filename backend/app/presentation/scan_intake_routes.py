@@ -1,51 +1,70 @@
 """Dedicated, teacher-only scanned-paper intake HTTP boundary."""
-# ruff: noqa: E501, E701, E702
+# FastAPI dependency declarations intentionally use call expressions in defaults.
+# ruff: noqa: B008
 
 from uuid import UUID
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
-from starlette.datastructures import UploadFile
+from pydantic import ValidationError
 from sqlalchemy import select
+from starlette.datastructures import UploadFile
 
 from app.application.capabilities import ASSESSMENT_SCAN_CHECK_MANAGE
-from app.application.input_artifacts import ArtifactError, MAX_ARTIFACT_SIZE_BYTES
+from app.application.checking_intake import InvalidCheckingInput
+from app.application.input_artifacts import MAX_ARTIFACT_SIZE_BYTES, ArtifactError
+from app.application.paper_checking_execution import (
+    PaperCheckingExecutionError,
+    PaperCheckingExecutionService,
+)
+from app.application.paper_checking_intake import (
+    PaperCheckingIntakeError,
+    PaperCheckingIntakeRequest,
+    PaperCheckingIntakeService,
+)
+from app.application.paper_checking_review import (
+    PaperReviewApproval,
+    PaperReviewEdit,
+    PaperReviewError,
+)
 from app.application.principal import Principal
+from app.application.scan_grading_policy import ScanGradingPolicy
+from app.application.scan_grouping import ScanGroupingError, ScanGroupingService
 from app.application.scan_intake import ScanIntakeError, ScanIntakeService
+from app.application.scan_matching_service import ScanMatchingError, ScanMatchingService
 from app.config import Settings, get_settings
 from app.db.session import get_session
 from app.infrastructure.artifact_storage import FilesystemArtifactStorage
 from app.infrastructure.authoring_models import InputArtifact
 from app.infrastructure.classroom_repository import SQLAlchemyClassroomAccessRepository
+from app.infrastructure.paper_checking_execution_repository import (
+    SQLAlchemyPaperCheckingExecutionRepository,
+)
+from app.infrastructure.paper_checking_providers import AnthropicPaperCheckingProvider
+from app.infrastructure.paper_checking_repository import PaperGradingPolicyRepository
+from app.infrastructure.paper_checking_review_repository import (
+    PaperCheckingReviewRepository,
+)
 from app.infrastructure.scan_checking_models import (
     AssessmentScanBatch,
     ScanBatchArtifact,
     ScanPage,
 )
+from app.infrastructure.scan_grouping_repository import SqlAlchemyScanGroupingRepository
 from app.infrastructure.scan_intake_repository import SqlAlchemyScanIntakeRepository
-from app.infrastructure.scan_page_pipeline import ScanPagePipeline
-from app.application.scan_matching_service import ScanMatchingError, ScanMatchingService
 from app.infrastructure.scan_matching_providers import AnthropicScanPageMatchingProvider
+from app.infrastructure.scan_page_pipeline import ScanPagePipeline
 from app.presentation.auth_dependencies import (
     require_capability,
     require_trusted_origin,
 )
 from app.presentation.scan_intake_schemas import (
-    ScanBatchCreate,
     CancelScanBatch,
+    GroupingConfirmation,
     GroupingPageAssignment,
     GroupingPageOrder,
-    GroupingConfirmation,
     PaperCheckRunCreate,
+    ScanBatchCreate,
 )
-from app.application.scan_grouping import ScanGroupingError, ScanGroupingService
-from app.infrastructure.scan_grouping_repository import SqlAlchemyScanGroupingRepository
-from app.application.scan_grading_policy import ScanGradingPolicy
-from app.application.paper_checking_intake import (PaperCheckingIntakeRequest,
-    PaperCheckingIntakeService, PaperCheckingIntakeError)
-from app.application.checking_intake import InvalidCheckingInput
-from app.infrastructure.paper_checking_repository import PaperGradingPolicyRepository
-from app.application.paper_checking_execution import PaperCheckingExecutionError, PaperCheckingExecutionService
-from app.infrastructure.paper_checking_execution_repository import SQLAlchemyPaperCheckingExecutionRepository
-from app.infrastructure.paper_checking_providers import AnthropicPaperCheckingProvider
 
 router = APIRouter(
     prefix="/api/assessment-core",
@@ -551,7 +570,9 @@ async def create_paper_check_run(paper_submission_id:UUID,payload:PaperCheckRunC
     await _authorized_batch(db,paper.batch_id,principal)
     try:
         # Adapt the request-scoped session without opening a second transaction.
-        from app.infrastructure.paper_checking_repository import SQLAlchemyPaperCheckingIntakeUnitOfWork
+        from app.infrastructure.paper_checking_repository import (
+            SQLAlchemyPaperCheckingIntakeUnitOfWork,
+        )
         class RequestUow(SQLAlchemyPaperCheckingIntakeUnitOfWork):
             def __init__(self): self.session=db
             async def __aenter__(self): return self
@@ -607,3 +628,67 @@ async def get_paper_ai_result(paper_submission_id:UUID,check_run_id:UUID,db=Depe
     result=await SQLAlchemyPaperCheckingExecutionRepository(async_session_factory).read(check_run_id)
     if result["ai_revision_id"] is None: raise HTTPException(404,"paper_ai_result_not_found")
     return result
+
+
+async def _review_action(db, principal, paper_id, run_id, action, payload=None):
+    from app.infrastructure.scan_checking_models import PaperSubmission
+    paper = await db.get(PaperSubmission, paper_id)
+    if paper is None:
+        raise HTTPException(404, "paper_submission_not_found")
+    await _authorized_batch(db, paper.batch_id, principal)
+    repository = PaperCheckingReviewRepository(db)
+    try:
+        if action == "start":
+            result = await repository.start(paper_id, run_id, principal.user_id)
+        elif action == "edit":
+            result = await repository.edit(paper_id, run_id, principal.user_id, payload.draft, payload.expected_version)
+        elif action == "approve":
+            result = await repository.approve(paper_id, run_id, principal.user_id, payload)
+        elif action == "history":
+            return await repository.history(paper_id, run_id)
+        else:
+            return await repository.get(paper_id, run_id)
+        await db.commit()
+        return result
+    except PaperReviewError as exc:
+        await db.rollback()
+        raise HTTPException(exc.status, exc.code) from None
+
+
+@router.post("/paper-submissions/{paper_submission_id}/check-runs/{check_run_id}/review")
+async def start_paper_review(paper_submission_id: UUID, check_run_id: UUID,
+    db=Depends(get_session), principal: Principal=PrincipalDep):
+    return await _review_action(db, principal, paper_submission_id, check_run_id, "start")
+
+
+@router.get("/paper-submissions/{paper_submission_id}/check-runs/{check_run_id}/review")
+async def get_paper_review(paper_submission_id: UUID, check_run_id: UUID,
+    db=Depends(get_session), principal: Principal=PrincipalDep):
+    return await _review_action(db, principal, paper_submission_id, check_run_id, "get")
+
+
+async def _paper_review_edit_body(request: Request):
+    # Strict domain UUID/Decimal contracts must be validated in JSON mode at HTTP.
+    try:
+        return PaperReviewEdit.model_validate_json(await request.body())
+    except ValidationError:
+        raise HTTPException(422, "paper_review_invalid_edit") from None
+
+
+@router.put("/paper-submissions/{paper_submission_id}/check-runs/{check_run_id}/review")
+async def edit_paper_review(paper_submission_id: UUID, check_run_id: UUID,
+    payload: PaperReviewEdit=Depends(_paper_review_edit_body),
+    db=Depends(get_session), principal: Principal=PrincipalDep):
+    return await _review_action(db, principal, paper_submission_id, check_run_id, "edit", payload)
+
+
+@router.get("/paper-submissions/{paper_submission_id}/check-runs/{check_run_id}/review/history")
+async def paper_review_history(paper_submission_id: UUID, check_run_id: UUID,
+    db=Depends(get_session), principal: Principal=PrincipalDep):
+    return await _review_action(db, principal, paper_submission_id, check_run_id, "history")
+
+
+@router.post("/paper-submissions/{paper_submission_id}/check-runs/{check_run_id}/review/approve")
+async def approve_paper_review(paper_submission_id: UUID, check_run_id: UUID, payload: PaperReviewApproval,
+    db=Depends(get_session), principal: Principal=PrincipalDep):
+    return await _review_action(db, principal, paper_submission_id, check_run_id, "approve", payload)

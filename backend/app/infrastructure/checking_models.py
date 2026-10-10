@@ -1,12 +1,24 @@
 """PostgreSQL mappings owned by the Checking bounded context."""
-# ruff: noqa: E501, E702
 from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, SmallInteger, String, Text, UniqueConstraint, text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    SmallInteger,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import ENUM, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -69,7 +81,7 @@ class ModelRun(IdMixin, Base):
 
 
 class PaperAIRevision(IdMixin, Base):
-    __tablename__="paper_ai_revisions"; __table_args__=(UniqueConstraint("check_run_id",name="uq_paper_ai_revisions_run"),UniqueConstraint("model_run_id",name="uq_paper_ai_revisions_model"),)
+    __tablename__="paper_ai_revisions"; __table_args__=(UniqueConstraint("check_run_id",name="uq_paper_ai_revisions_run"),UniqueConstraint("model_run_id",name="uq_paper_ai_revisions_model"),UniqueConstraint("id","paper_submission_id","check_run_id",name="uq_paper_ai_revisions_provenance"),)
     check_run_id: Mapped[UUID]=mapped_column(ForeignKey("check_runs.id",ondelete="RESTRICT")); paper_submission_id: Mapped[UUID]=mapped_column(ForeignKey("paper_submissions.id",ondelete="RESTRICT")); model_run_id: Mapped[UUID]=mapped_column(ForeignKey("model_runs.id",ondelete="RESTRICT")); response_schema_version: Mapped[str]=mapped_column(String(64)); prompt_version: Mapped[str]=mapped_column(String(64)); prompt_fingerprint: Mapped[str]=mapped_column(String(64)); grading_policy_revision: Mapped[int]=mapped_column(Integer); grading_policy_fingerprint: Mapped[str]=mapped_column(String(64)); validated_response: Mapped[object]=mapped_column(JSONB); summary_draft: Mapped[str]=mapped_column(String(4000)); overall_confidence: Mapped[Decimal]=mapped_column(Numeric(5,4)); requires_human_review: Mapped[bool]=mapped_column(Boolean); created_at: Mapped[datetime]=mapped_column(DateTime(timezone=True),server_default=clock)
 
 

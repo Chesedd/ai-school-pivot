@@ -7,8 +7,9 @@ only application code totals accepted scores and selects a grade label.
 from __future__ import annotations
 
 import hashlib
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal, localcontext
 from enum import StrEnum
+from itertools import pairwise
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -30,7 +31,7 @@ MAX_RULES = 64
 MAX_ITEMS = 256
 MAX_GRADE_LABEL = 64
 
-Score = Annotated[Decimal, Field(strict=True, ge=Decimal("0"))]
+Score = Annotated[Decimal, Field(strict=True, ge=Decimal(0))]
 
 
 class _FrozenContract(BaseModel):
@@ -123,11 +124,11 @@ class GradeScale(_FrozenContract):
     thresholds: tuple[GradeThreshold, ...] = Field(min_length=1, max_length=64)
 
     @model_validator(mode="after")
-    def valid_thresholds(self) -> "GradeScale":
+    def valid_thresholds(self) -> GradeScale:
         minima = [entry.minimum for entry in self.thresholds]
-        if any(left <= right for left, right in zip(minima, minima[1:])):
+        if any(left <= right for left, right in pairwise(minima)):
             raise ValueError("thresholds_must_be_strictly_descending")
-        if minima[-1] != Decimal("0"):
+        if minima[-1] != Decimal(0):
             raise ValueError("thresholds_must_cover_zero")
         labels = [entry.grade_label for entry in self.thresholds]
         if len(set(labels)) != len(labels):
@@ -187,11 +188,11 @@ class ScanGradingPolicy(_FrozenContract):
         return tuple(sorted(value, key=lambda item: str(item.assessment_item_id)))
 
     @model_validator(mode="after")
-    def totals_are_consistent(self) -> "ScanGradingPolicy":
+    def totals_are_consistent(self) -> ScanGradingPolicy:
         if not self.total_max_score.is_finite() or self.total_max_score <= 0:
             raise ValueError("total_max_score_must_be_positive")
         if (
-            sum((item.max_score for item in self.assessment_items), Decimal("0"))
+            sum((item.max_score for item in self.assessment_items), Decimal(0))
             != self.total_max_score
         ):
             raise ValueError("item_maxima_must_equal_total")
@@ -247,7 +248,7 @@ def calculate_total(
         raise ValueError("item_score_coverage_mismatch")
     if any(entry.score > maxima[entry.assessment_item_id] for entry in scores):
         raise ValueError("item_score_out_of_range")
-    return sum((entry.score for entry in scores), Decimal("0"))
+    return sum((entry.score for entry in scores), Decimal(0))
 
 
 def calculate_grade(policy: ScanGradingPolicy, total_score: Decimal) -> str:
@@ -262,10 +263,35 @@ def calculate_grade(policy: ScanGradingPolicy, total_score: Decimal) -> str:
     basis_value = (
         total_score
         if policy.grade_scale.basis == GradeBasis.POINTS
-        else total_score * Decimal("100") / policy.total_max_score
+        else total_score * Decimal(100) / policy.total_max_score
     )
     return next(
         entry.grade_label
         for entry in policy.grade_scale.thresholds
         if basis_value >= entry.minimum
     )
+
+
+def calculate_percentage(policy: ScanGradingPolicy, total_score: Decimal) -> Decimal:
+    """Display metadata, rounded to four places; never used to select a grade.
+
+    Grade selection retains calculate_grade's frozen exact-ratio semantics.
+    """
+    if (
+        type(total_score) is not Decimal
+        or not total_score.is_finite()
+        or not 0 <= total_score <= policy.total_max_score
+    ):
+        raise ValueError("total_score_out_of_range")
+    # Isolate display rounding from a caller's ambient Decimal context. Preserve
+    # enough significant digits to distinguish a ratio just below a half step.
+    with localcontext() as context:
+        context.prec = max(
+            28,
+            len(total_score.as_tuple().digits)
+            + len(policy.total_max_score.as_tuple().digits)
+            + 8,
+        )
+        return (total_score * Decimal(100) / policy.total_max_score).quantize(
+            Decimal("0.0001"), rounding=ROUND_HALF_UP
+        )

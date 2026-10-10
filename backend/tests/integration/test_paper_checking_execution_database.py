@@ -296,10 +296,11 @@ async def test_both_papers_complete_without_batch_publication(execution_database
 
 
 async def test_migrated_postgres_schema_contract(execution_database):
+    from tests.integration.test_migrations import repository_head
     connection, _, _, _ = execution_database
     assert (
         await connection.scalar(text("SELECT version_num FROM alembic_version"))
-        == "20261005_01"
+        == repository_head()
     )
     labels = await rows(
         connection,
