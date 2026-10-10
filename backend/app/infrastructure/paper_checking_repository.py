@@ -1,35 +1,53 @@
 """PostgreSQL adapters for paper policy freezing and checking intake."""
-# ruff: noqa: E701, E702
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.application.paper_checking_intake import (FrozenPaperPolicy, PaperCheckingHandoff,
-    PaperCheckingItem, PaperCheckingPage, PaperGradingPolicyIncomplete,
-    PAPER_POLICY_COMPILER_VERSION, PAPER_PROMPT_POLICY_VERSION)
 from app.application.checking_intake import InvalidCheckingInput
-from app.application.scan_grading_policy import ScanGradingPolicy
-from app.application.scan_checking_contracts import (
-    AssessmentScanBatchState,
-    validate_batch_transition,
+from app.application.paper_checking_intake import (
+    PAPER_POLICY_COMPILER_VERSION,
+    PAPER_PROMPT_POLICY_VERSION,
+    FrozenPaperPolicy,
+    PaperCheckingHandoff,
+    PaperCheckingItem,
+    PaperCheckingPage,
+    PaperGradingPolicyIncomplete,
 )
-from app.infrastructure.assessment_models import AssessmentItem, AssessmentVariant, Assignment
+from app.application.scan_grading_policy import ScanGradingPolicy
+from app.infrastructure.assessment_models import (
+    AssessmentItem,
+    AssessmentVariant,
+    Assignment,
+)
 from app.infrastructure.authoring_models import InputArtifact
+from app.infrastructure.checking_intake_repository import (
+    SQLAlchemyCheckingIntakeUnitOfWork,
+)
 from app.infrastructure.checking_models import CheckRun
 from app.infrastructure.checking_repository import CheckingRepository
-from app.infrastructure.checking_intake_repository import SQLAlchemyCheckingIntakeUnitOfWork
-from app.infrastructure.scan_checking_models import (AssessmentScanBatch, PaperSubmission,
-    PaperSubmissionPage, ScanPage, ScanGradingPolicyRevision)
+from app.infrastructure.scan_checking_models import (
+    AssessmentScanBatch,
+    PaperSubmission,
+    PaperSubmissionPage,
+    ScanGradingPolicyRevision,
+    ScanPage,
+)
+
 
 class SQLAlchemyPaperCheckingIntakeUnitOfWork(SQLAlchemyCheckingIntakeUnitOfWork):
     async def load_locked_handoff(self, paper_submission_id: UUID) -> PaperCheckingHandoff:
+        batch_id=await self.session.scalar(select(PaperSubmission.batch_id).where(
+            PaperSubmission.id==paper_submission_id))
+        if batch_id is None: raise InvalidCheckingInput("paper_submission_not_found")
+        from app.infrastructure.paper_batch_orchestration_repository import (
+            PaperBatchOrchestrationRepository,
+        )
+        batch=await PaperBatchOrchestrationRepository(self.session).load(batch_id,lock=True)
         paper=await self.session.scalar(select(PaperSubmission).where(
             PaperSubmission.id==paper_submission_id).with_for_update())
         if paper is None: raise InvalidCheckingInput("paper_submission_not_found")
-        batch=await self.session.scalar(select(AssessmentScanBatch).where(
-            AssessmentScanBatch.id==paper.batch_id).with_for_update())
-        if batch.status not in {"ready_for_checking","checking"}:
+        if batch.status not in {"ready_for_checking","checking","checking_completed","completed"}:
             raise InvalidCheckingInput("paper_batch_not_checkable")
         represented=set((await self.session.scalars(select(PaperSubmission.assigned_variant_id)
             .where(PaperSubmission.batch_id==batch.id))).all())
@@ -67,17 +85,11 @@ class SQLAlchemyPaperCheckingIntakeUnitOfWork(SQLAlchemyCheckingIntakeUnitOfWork
                 policy.policy_fingerprint,dict(policy.policy_json)))
 
     async def create_paper_run(self,command):
-        return await CheckingRepository(self.session).create_paper_run(command)
+        return await CheckingRepository(self.session, actor_id=getattr(self,"actor_id",None)).create_paper_run(command)
 
     async def mark_checking_started(self,batch_id):
-        batch=await self.session.get(AssessmentScanBatch,batch_id)
-        if batch.status==AssessmentScanBatchState.READY_FOR_CHECKING:
-            validate_batch_transition(
-                AssessmentScanBatchState(batch.status),
-                AssessmentScanBatchState.CHECKING,
-            )
-            batch.status=AssessmentScanBatchState.CHECKING
-            batch.row_version+=1
+        # Creation now transitions atomically; run replay must not reopen a batch.
+        pass
 
 class SQLAlchemyPaperCheckingIntakeUnitOfWorkFactory:
     def __init__(self,factory): self.factory=factory

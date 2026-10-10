@@ -3,13 +3,14 @@
 The frozen handoff is the only source used to construct provider context.  Binary
 content is carried beside the request and is deliberately absent from its hash.
 """
-# ruff: noqa: E501, E701, E702
 from __future__ import annotations
 
 import hashlib
+import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Mapping, Protocol
+from typing import Any, Protocol
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -17,9 +18,16 @@ from pydantic import ValidationError
 from app.application.checking_provider import canonical_json
 from app.application.paper_checking_intake import PAPER_SNAPSHOT_SCHEMA_VERSION
 from app.application.scan_checking_contracts import (
-    NORMALIZED_UPRIGHT_V1, PAPER_CHECK_OUTPUT_VERSION, PaperCheckAssessmentItem,
-    PaperCheckGradingContext, PaperCheckPage, PaperCheckRequest, PaperCheckResponse,
-    PromptContractMetadata, ProviderContentDescriptor, validate_checking_response,
+    NORMALIZED_UPRIGHT_V1,
+    PAPER_CHECK_OUTPUT_VERSION,
+    PaperCheckAssessmentItem,
+    PaperCheckGradingContext,
+    PaperCheckPage,
+    PaperCheckRequest,
+    PaperCheckResponse,
+    PromptContractMetadata,
+    ProviderContentDescriptor,
+    validate_checking_response,
 )
 
 PAPER_CHECK_PROMPT_NAME = "paper-vision-checking"
@@ -131,10 +139,21 @@ class PaperCheckingExecutionService:
     def __init__(self, repository, storage, provider: PaperCheckingProvider):
         self.repository,self.storage,self.provider=repository,storage,provider
 
+    async def _reconcile(self, paper_id):
+        hook = getattr(self.repository, "reconcile_batch", None)
+        if hook is not None:
+            try:
+                await hook(paper_id)
+            except Exception:
+                # Paper writes committed; explicit reconciliation can repair progress.
+                logging.getLogger(__name__).exception("paper batch reconciliation failed")
+
     async def execute(self, paper_submission_id: UUID, check_run_id: UUID):
         while True:
             prepared=await self.repository.prepare(paper_submission_id,check_run_id,self.provider.provider_id,self.provider.model_id)
-            if prepared.replay is not None: return prepared.replay
+            if prepared.replay is not None:
+                await self._reconcile(paper_submission_id)
+                return prepared.replay
             try:
                 content={}
                 for page in prepared.compiled.request.pages:
@@ -148,12 +167,17 @@ class PaperCheckingExecutionService:
                 semantic=exc.code in {"paper_response_invalid","paper_render_missing","paper_render_not_png","paper_render_hash_mismatch"}
                 retry=await self.repository.fail(prepared,"semantic_invalid" if semantic else "transport",None)
                 if retry: continue
+                await self._reconcile(paper_submission_id)
                 raise
             except (ValidationError,ValueError,TypeError):
                 await self.repository.fail(prepared,"semantic_invalid",None)
+                await self._reconcile(paper_submission_id)
                 raise PaperCheckingExecutionError("paper_response_invalid") from None
-            except Exception:
+            except Exception:  # noqa: BLE001 - provider SDKs use diverse transport exceptions.
                 retry=await self.repository.fail(prepared,"transport",None)
                 if retry: continue
+                await self._reconcile(paper_submission_id)
                 raise PaperCheckingExecutionError("paper_provider_failed") from None
-            return await self.repository.succeed(prepared,response,telemetry)
+            result = await self.repository.succeed(prepared,response,telemetry)
+            await self._reconcile(paper_submission_id)
+            return result

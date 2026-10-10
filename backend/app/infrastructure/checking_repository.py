@@ -6,9 +6,19 @@ from uuid import UUID
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
-from app.application.checking import (ActiveRunConflict, ConcurrentConflict, CreateRunCommand, CreatePaperRunCommand,
-    IdempotencyConflict, InvalidPersistenceCommand, SourceSubmissionNotFound, safe_event_details,
-    validate_finding, validate_result, validate_transition)
+from app.application.checking import (
+    ActiveRunConflict,
+    ConcurrentConflict,
+    CreatePaperRunCommand,
+    CreateRunCommand,
+    IdempotencyConflict,
+    InvalidPersistenceCommand,
+    SourceSubmissionNotFound,
+    safe_event_details,
+    validate_finding,
+    validate_result,
+    validate_transition,
+)
 from app.infrastructure.model_registry import register_all_models
 
 # Checking's mapped rows reference tables owned by several bounded contexts.  Make
@@ -17,16 +27,44 @@ from app.infrastructure.model_registry import register_all_models
 # those model modules first.
 register_all_models()
 
+from app.application.checking_items import (
+    CheckingItemKey,
+    CheckingItemKind,
+    InvalidCheckingItemIdentity,
+    find_snapshot_item,
+    snapshot_item_key,
+)
+from app.application.checking_provider import (
+    MAX_ATTEMPTS,
+    AttemptDisposition,
+    AttemptState,
+    Pricing,
+    PromptSpec,
+    ProviderExecutionKey,
+    ProviderRequest,
+    ProviderResponse,
+    RequestConflict,
+    canonical_json,
+    retry_allowed,
+    thaw_json,
+)
+from app.application.checking_results import (
+    OBSERVABILITY_SCHEMA_VERSION,
+    ResultReplayConflict,
+    RunObservability,
+    prepare_result,
+)
 from app.infrastructure.assessment_models import StudentSubmission
+from app.infrastructure.checking_models import (
+    CheckerEvent,
+    CheckFinding,
+    CheckResult,
+    CheckRun,
+    CostEvent,
+    ModelRun,
+    PromptVersion,
+)
 from app.infrastructure.scan_checking_models import PaperSubmission
-from app.infrastructure.checking_models import CostEvent, CheckFinding, CheckResult, CheckRun, CheckerEvent, ModelRun, PromptVersion
-from app.application.checking_provider import (MAX_ATTEMPTS, AttemptDisposition, AttemptState,
-    Pricing, PromptSpec, ProviderExecutionKey, ProviderRequest, ProviderResponse, canonical_json,
-    RequestConflict, retry_allowed, thaw_json)
-from app.application.checking_results import (ConfidenceGatePolicy, PreparedCheckingResult,
-    ResultReplayConflict, RunObservability, prepare_result, OBSERVABILITY_SCHEMA_VERSION)
-from app.application.checking_items import (CheckingItemKey, CheckingItemKind,
-    InvalidCheckingItemIdentity, find_snapshot_item, snapshot_item_key)
 
 
 def _prompt_lock_key(spec: PromptSpec) -> str:
@@ -34,7 +72,9 @@ def _prompt_lock_key(spec: PromptSpec) -> str:
 
 
 class CheckingRepository:
-    def __init__(self, session): self.session = session
+    def __init__(self, session, *, actor_id=None):
+        self.session = session
+        self.actor_id = actor_id
 
     async def create_run(self, command: CreateRunCommand) -> CheckRun:
         command.validate()
@@ -57,6 +97,13 @@ class CheckingRepository:
 
     async def create_paper_run(self, command: CreatePaperRunCommand) -> CheckRun:
         command.validate()
+        from app.infrastructure.paper_batch_orchestration_repository import (
+            PaperBatchOrchestrationRepository,
+        )
+        batch_id = await self.session.scalar(select(PaperSubmission.batch_id).where(
+            PaperSubmission.id == command.paper_submission_id))
+        orchestration = PaperBatchOrchestrationRepository(self.session)
+        batch = await orchestration.load(batch_id, lock=True) if batch_id else None
         source = await self.session.scalar(select(PaperSubmission).where(
             PaperSubmission.id == command.paper_submission_id).with_for_update())
         if source is None:
@@ -79,6 +126,7 @@ class CheckingRepository:
             CheckRun.status.in_(("pending", "running"))))
         if active is not None:
             raise ActiveRunConflict(str(active))
+        await orchestration.begin_attempt(batch, actor_id=self.actor_id)
         attempt = (await self.session.scalar(select(func.coalesce(func.max(CheckRun.attempt_no), 0))
             .where(CheckRun.paper_submission_id == source.id))) + 1
         values = dict(command.__dict__)
@@ -259,34 +307,33 @@ class SQLAlchemyProviderAttemptStore:
                               prompt: PromptSpec, maximum_attempts: int) -> AttemptState:
         if type(maximum_attempts) is not int or maximum_attempts != MAX_ATTEMPTS:
             raise InvalidPersistenceCommand("invalid provider attempt budget")
-        async with self.session_factory() as session:
-            async with session.begin():
-                repository = CheckingRepository(session)
-                prompt_row = await repository.register_prompt(prompt)
-                # claim_model_attempt locks the run. Lock here before inspecting history,
-                # so concurrent callers cannot both decide to insert the same next row.
-                run = await session.scalar(select(CheckRun).where(
-                    CheckRun.id == key.check_run_id).with_for_update())
-                if run is None: raise InvalidPersistenceCommand("run not found")
-                item_key=CheckingItemKey(key.item_kind,key.item_id)
-                try: find_snapshot_item(run.input_snapshot,item_key)
-                except InvalidCheckingItemIdentity as exc: raise InvalidPersistenceCommand(str(exc)) from exc
-                attempts = await repository.model_attempts(key.check_run_id, item_key)
-                if any(row.request_fingerprint != request.request_fingerprint for row in attempts):
-                    raise RequestConflict("request fingerprint conflict")
-                if [row.attempt_no for row in attempts] != list(range(1, len(attempts) + 1)):
-                    raise InvalidPersistenceCommand("attempt history is noncontiguous")
-                if attempts:
-                    last = attempts[-1]
-                    if last.status == "running": return _attempt_state(last, AttemptDisposition.RUNNING_EXISTING)
-                    if last.status == "succeeded" or not retry_allowed(last.error_code or "unknown", last.attempt_no):
-                        return _attempt_state(last, AttemptDisposition.TERMINAL_EXISTING)
-                if prompt_row.retired_at is not None: raise InvalidPersistenceCommand("prompt is retired")
-                if len(attempts) >= maximum_attempts:
-                    return _attempt_state(attempts[-1], AttemptDisposition.TERMINAL_EXISTING)
-                row = await repository.claim_model_attempt(key.check_run_id,
-                    item_key, prompt_row, request, maximum_attempts)
-                return _attempt_state(row, AttemptDisposition.CLAIMED)
+        async with self.session_factory() as session, session.begin():
+            repository = CheckingRepository(session)
+            prompt_row = await repository.register_prompt(prompt)
+            # claim_model_attempt locks the run. Lock here before inspecting history,
+            # so concurrent callers cannot both decide to insert the same next row.
+            run = await session.scalar(select(CheckRun).where(
+                CheckRun.id == key.check_run_id).with_for_update())
+            if run is None: raise InvalidPersistenceCommand("run not found")
+            item_key=CheckingItemKey(key.item_kind,key.item_id)
+            try: find_snapshot_item(run.input_snapshot,item_key)
+            except InvalidCheckingItemIdentity as exc: raise InvalidPersistenceCommand(str(exc)) from exc
+            attempts = await repository.model_attempts(key.check_run_id, item_key)
+            if any(row.request_fingerprint != request.request_fingerprint for row in attempts):
+                raise RequestConflict("request fingerprint conflict")
+            if [row.attempt_no for row in attempts] != list(range(1, len(attempts) + 1)):
+                raise InvalidPersistenceCommand("attempt history is noncontiguous")
+            if attempts:
+                last = attempts[-1]
+                if last.status == "running": return _attempt_state(last, AttemptDisposition.RUNNING_EXISTING)
+                if last.status == "succeeded" or not retry_allowed(last.error_code or "unknown", last.attempt_no):
+                    return _attempt_state(last, AttemptDisposition.TERMINAL_EXISTING)
+            if prompt_row.retired_at is not None: raise InvalidPersistenceCommand("prompt is retired")
+            if len(attempts) >= maximum_attempts:
+                return _attempt_state(attempts[-1], AttemptDisposition.TERMINAL_EXISTING)
+            row = await repository.claim_model_attempt(key.check_run_id,
+                item_key, prompt_row, request, maximum_attempts)
+            return _attempt_state(row, AttemptDisposition.CLAIMED)
 
     async def finalize(self, key: ProviderExecutionKey, attempt: AttemptState, *, status: str,
                        response: ProviderResponse | None, validated_output,
@@ -296,20 +343,19 @@ class SQLAlchemyProviderAttemptStore:
             raise InvalidPersistenceCommand("invalid measured latency")
         if attempt.disposition is not AttemptDisposition.CLAIMED:
             raise InvalidPersistenceCommand("only a claimed attempt can be finalized")
-        async with self.session_factory() as session:
-            async with session.begin():
-                row = await session.get(ModelRun, attempt.attempt_id)
-                columns=CheckingItemKey(key.item_kind,key.item_id).columns
-                if row is None or row.check_run_id != key.check_run_id or any(getattr(row,k)!=v for k,v in columns.items()):
-                    raise InvalidPersistenceCommand("attempt execution mismatch")
-                validation = ({"code": error_code} if status == "invalid" and error_code else None)
-                row = await CheckingRepository(session).finalize_provider_attempt(
-                    attempt.attempt_id, status=status, response=response,
-                    validated_output=validated_output, error_code=error_code,
-                    validation_errors=validation, pricing=pricing,
-                    measured_latency_ms=measured_latency_ms)
-                await session.flush()
-                return _attempt_state(row, AttemptDisposition.TERMINAL_EXISTING)
+        async with self.session_factory() as session, session.begin():
+            row = await session.get(ModelRun, attempt.attempt_id)
+            columns=CheckingItemKey(key.item_kind,key.item_id).columns
+            if row is None or row.check_run_id != key.check_run_id or any(getattr(row,k)!=v for k,v in columns.items()):
+                raise InvalidPersistenceCommand("attempt execution mismatch")
+            validation = ({"code": error_code} if status == "invalid" and error_code else None)
+            row = await CheckingRepository(session).finalize_provider_attempt(
+                attempt.attempt_id, status=status, response=response,
+                validated_output=validated_output, error_code=error_code,
+                validation_errors=validation, pricing=pricing,
+                measured_latency_ms=measured_latency_ms)
+            await session.flush()
+            return _attempt_state(row, AttemptDisposition.TERMINAL_EXISTING)
 
 
 def _confidence_details(value):
@@ -324,56 +370,55 @@ class SQLAlchemyCheckingResultPersistence:
     def __init__(self, session_factory): self.session_factory=session_factory
 
     async def finalize(self, run_id, expected_row_version, policy, drafts):
-        async with self.session_factory() as session:
-          async with session.begin():
-            run=await session.scalar(select(CheckRun).where(CheckRun.id==run_id).with_for_update())
-            if run is None: raise InvalidPersistenceCommand("run not found")
-            if run.threshold_policy_version!=policy.semantic_version: raise IdempotencyConflict("confidence policy conflict")
-            items=tuple(run.input_snapshot.get("items",()))
-            try: keys=[snapshot_item_key(x) for x in items]
-            except InvalidCheckingItemIdentity as exc: raise InvalidPersistenceCommand(str(exc)) from exc
-            expected=[str(x.item_id) for x in keys]; supplied=[x.assessment_item_id for x in drafts]
-            if len(supplied)!=len(set(supplied)) or set(supplied)!=set(expected): raise InvalidPersistenceCommand("result batch identity mismatch")
-            by_id={x.assessment_item_id:x for x in drafts}
-            prepared=tuple(prepare_result(item,by_id[str(key.item_id)],policy) for item,key in zip(items,keys))
-            existing=tuple((await session.scalars(select(CheckResult).where(CheckResult.check_run_id==run_id))).all())
-            if run.status in {"completed","completed_with_review_required"}:
-                if len(existing)!=len(prepared): raise ResultReplayConflict("completed result set differs")
-                for row,value in zip(sorted(existing,key=lambda x:str(x.assessment_item_id or x.remediation_plan_item_id)),sorted(prepared,key=lambda x:str(x.assessment_item_id))):
-                    if row.validated_result!=dict(value.validated_result): raise ResultReplayConflict("prepared result differs")
-                return await self._observability(session,run)
-            if run.status!="running" or run.row_version!=expected_row_version or existing: raise ConcurrentConflict("run cannot be finalized")
-            for value in prepared:
-                key=next(x for x in keys if x.item_id==value.assessment_item_id)
-                row=CheckResult(check_run_id=run.id,**key.columns,task_version_id=value.task_version_id,
-                    checker_type=value.checker_type,checker_version=value.checker_version,schema_version=value.schema_version,
-                    result_status=value.outcome,reason_code=value.reason_code,score_suggested=value.score_suggested,max_score=value.max_score,
-                    confidence=value.confidence.effective,confidence_policy_version=policy.semantic_version,
-                    confidence_details=_confidence_details(value.confidence),summary=value.summary,
-                    student_feedback_draft=value.student_feedback_draft,teacher_summary=value.teacher_summary,
-                    needs_human_review=value.confidence.needs_human_review,review_reason=value.confidence.review_reason,
-                    model_limitations="; ".join(value.model_limitations) or None,validated_result=dict(value.validated_result))
-                session.add(row); await session.flush()
-                for f in value.findings: session.add(CheckFinding(check_result_id=row.id,finding_type=f.finding_type,
-                    rubric_item_id=f.rubric_item_id,typical_error_id=f.typical_error_id,skill_id=f.skill_id,snapshot_code=f.snapshot_code,
-                    snapshot_title=f.snapshot_title,snapshot_criterion=f.snapshot_criterion,severity=f.severity,confidence=f.confidence,evidence=dict(f.evidence)))
-                attempt_column=ModelRun.assessment_item_id if key.kind is CheckingItemKind.ASSESSMENT else ModelRun.remediation_plan_item_id
-                attempts=tuple((await session.scalars(select(ModelRun).where(ModelRun.check_run_id==run.id,attempt_column==key.item_id).with_for_update())).all())
-                if any(x.status=="running" for x in attempts): raise InvalidPersistenceCommand("model attempt still running")
-                if value.checker_type=="llm_rubric":
-                    for attempt in attempts:
-                        if attempt.check_result_id not in (None,row.id): raise IdempotencyConflict("model result association conflict")
-                        attempt.check_result_id=row.id
-                elif attempts: raise InvalidPersistenceCommand("deterministic result has model attempts")
-                session.add(CheckerEvent(check_run_id=run.id,check_result_id=row.id,**key.columns,
-                    event_type="result_recorded",reason_code=value.reason_code,details={"checker_type":value.checker_type,
-                    "result_status":value.outcome,"reason_code":value.reason_code,"confidence":format(value.confidence.effective,".4f"),
-                    "needs_human_review":value.confidence.needs_human_review,"finding_count":len(value.findings)}))
-            review=sum(x.confidence.needs_human_review for x in prepared); target="completed_with_review_required" if review else "completed"
-            await session.flush(); now=await session.scalar(select(func.clock_timestamp())); run.status=target; run.finished_at=now; run.row_version+=1
-            session.add(CheckerEvent(check_run_id=run.id,event_type="run_transition",from_status="running",to_status=target,
-                details={"item_count":len(prepared),"review_required_count":review,"retry_count":run.retry_count}))
-            await session.flush(); return await self._observability(session,run)
+        async with self.session_factory() as session, session.begin():
+          run=await session.scalar(select(CheckRun).where(CheckRun.id==run_id).with_for_update())
+          if run is None: raise InvalidPersistenceCommand("run not found")
+          if run.threshold_policy_version!=policy.semantic_version: raise IdempotencyConflict("confidence policy conflict")
+          items=tuple(run.input_snapshot.get("items",()))
+          try: keys=[snapshot_item_key(x) for x in items]
+          except InvalidCheckingItemIdentity as exc: raise InvalidPersistenceCommand(str(exc)) from exc
+          expected=[str(x.item_id) for x in keys]; supplied=[x.assessment_item_id for x in drafts]
+          if len(supplied)!=len(set(supplied)) or set(supplied)!=set(expected): raise InvalidPersistenceCommand("result batch identity mismatch")
+          by_id={x.assessment_item_id:x for x in drafts}
+          prepared=tuple(prepare_result(item,by_id[str(key.item_id)],policy) for item,key in zip(items,keys))
+          existing=tuple((await session.scalars(select(CheckResult).where(CheckResult.check_run_id==run_id))).all())
+          if run.status in {"completed","completed_with_review_required"}:
+              if len(existing)!=len(prepared): raise ResultReplayConflict("completed result set differs")
+              for row,value in zip(sorted(existing,key=lambda x:str(x.assessment_item_id or x.remediation_plan_item_id)),sorted(prepared,key=lambda x:str(x.assessment_item_id))):
+                  if row.validated_result!=dict(value.validated_result): raise ResultReplayConflict("prepared result differs")
+              return await self._observability(session,run)
+          if run.status!="running" or run.row_version!=expected_row_version or existing: raise ConcurrentConflict("run cannot be finalized")
+          for value in prepared:
+              key=next(x for x in keys if x.item_id==value.assessment_item_id)
+              row=CheckResult(check_run_id=run.id,**key.columns,task_version_id=value.task_version_id,
+                  checker_type=value.checker_type,checker_version=value.checker_version,schema_version=value.schema_version,
+                  result_status=value.outcome,reason_code=value.reason_code,score_suggested=value.score_suggested,max_score=value.max_score,
+                  confidence=value.confidence.effective,confidence_policy_version=policy.semantic_version,
+                  confidence_details=_confidence_details(value.confidence),summary=value.summary,
+                  student_feedback_draft=value.student_feedback_draft,teacher_summary=value.teacher_summary,
+                  needs_human_review=value.confidence.needs_human_review,review_reason=value.confidence.review_reason,
+                  model_limitations="; ".join(value.model_limitations) or None,validated_result=dict(value.validated_result))
+              session.add(row); await session.flush()
+              for f in value.findings: session.add(CheckFinding(check_result_id=row.id,finding_type=f.finding_type,
+                  rubric_item_id=f.rubric_item_id,typical_error_id=f.typical_error_id,skill_id=f.skill_id,snapshot_code=f.snapshot_code,
+                  snapshot_title=f.snapshot_title,snapshot_criterion=f.snapshot_criterion,severity=f.severity,confidence=f.confidence,evidence=dict(f.evidence)))
+              attempt_column=ModelRun.assessment_item_id if key.kind is CheckingItemKind.ASSESSMENT else ModelRun.remediation_plan_item_id
+              attempts=tuple((await session.scalars(select(ModelRun).where(ModelRun.check_run_id==run.id,attempt_column==key.item_id).with_for_update())).all())
+              if any(x.status=="running" for x in attempts): raise InvalidPersistenceCommand("model attempt still running")
+              if value.checker_type=="llm_rubric":
+                  for attempt in attempts:
+                      if attempt.check_result_id not in (None,row.id): raise IdempotencyConflict("model result association conflict")
+                      attempt.check_result_id=row.id
+              elif attempts: raise InvalidPersistenceCommand("deterministic result has model attempts")
+              session.add(CheckerEvent(check_run_id=run.id,check_result_id=row.id,**key.columns,
+                  event_type="result_recorded",reason_code=value.reason_code,details={"checker_type":value.checker_type,
+                  "result_status":value.outcome,"reason_code":value.reason_code,"confidence":format(value.confidence.effective,".4f"),
+                  "needs_human_review":value.confidence.needs_human_review,"finding_count":len(value.findings)}))
+          review=sum(x.confidence.needs_human_review for x in prepared); target="completed_with_review_required" if review else "completed"
+          await session.flush(); now=await session.scalar(select(func.clock_timestamp())); run.status=target; run.finished_at=now; run.row_version+=1
+          session.add(CheckerEvent(check_run_id=run.id,event_type="run_transition",from_status="running",to_status=target,
+              details={"item_count":len(prepared),"review_required_count":review,"retry_count":run.retry_count}))
+          await session.flush(); return await self._observability(session,run)
 
     async def _observability(self,session,run):
         results=tuple((await session.execute(select(CheckResult.result_status,CheckResult.checker_type,CheckResult.reason_code,CheckResult.needs_human_review).where(CheckResult.check_run_id==run.id))).all())

@@ -238,7 +238,7 @@ class ScanCheckingEvent(IdMixin, Base):
             name="ck_scan_checking_events_aggregate",
         ),
         CheckConstraint(
-            "event_type IN ('batch.created','batch.cancelled','artifact.attached','artifact.extraction_status_changed','page.created','page.status_changed','grouping.draft_created','grouping.updated','grouping.confirmed','paper_submission.created')",
+            "event_type IN ('batch.created','batch.cancelled','artifact.attached','artifact.extraction_status_changed','page.created','page.status_changed','grouping.draft_created','grouping.updated','grouping.confirmed','paper_submission.created','batch.checking_started','batch.checking_completed','batch.checking_reopened','batch.completed')",
             name="ck_scan_checking_events_type",
         ),
         Index(

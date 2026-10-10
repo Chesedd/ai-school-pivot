@@ -14,10 +14,6 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import text
-from sqlalchemy.exc import DBAPIError, IntegrityError
-from sqlalchemy.ext.asyncio import async_sessionmaker
-
 from app.application.paper_checking_execution import (
     PaperCheckingExecutionError,
     PaperCheckingExecutionService,
@@ -28,6 +24,9 @@ from app.infrastructure.artifact_storage import FilesystemArtifactStorage
 from app.infrastructure.paper_checking_execution_repository import (
     SQLAlchemyPaperCheckingExecutionRepository,
 )
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.ext.asyncio import async_sessionmaker
 from tests.integration.c10a_postgres import rolled_back_connection
 from tests.integration.test_paper_checking_intake_database import (
     constraint,
@@ -72,7 +71,7 @@ def source_pdf():
 
 
 @pytest_asyncio.fixture
-async def execution_database(tmp_path):
+async def execution_database(tmp_path, *, confirmed=True):
     names = (
         "teacher",
         "group",
@@ -177,6 +176,13 @@ async def execution_database(tmp_path):
             join_transaction_mode="create_savepoint",
         )
         for statement in statements:
+            if not confirmed:
+                if statement.startswith(("INSERT INTO paper_submissions", "INSERT INTO paper_submission_pages")):
+                    continue
+                if statement.startswith("INSERT INTO assessment_scan_batches"):
+                    statement = statement.replace("'ready_for_checking'", "'matching_review_required'")
+                if statement.startswith("INSERT INTO scan_grouping_revisions"):
+                    statement = statement.replace("'confirmed',clock_timestamp(),:teacher", "'draft',NULL,NULL")
             await connection.execute(text(statement), ids)
         yield connection, factory, ids, storage
 
@@ -291,7 +297,7 @@ async def test_both_papers_complete_without_batch_publication(execution_database
             text("SELECT status FROM assessment_scan_batches WHERE id=:id"),
             {"id": ids["batch"]},
         )
-        == "checking"
+        == "checking_completed"
     )
 
 
@@ -548,7 +554,7 @@ async def test_invalid_response_is_atomic_and_paper_failure_isolated(
             text("SELECT status FROM assessment_scan_batches WHERE id=:id"),
             {"id": ids["batch"]},
         )
-        == "checking"
+        == "checking_completed"
     )
 
 

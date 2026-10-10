@@ -2,6 +2,7 @@
 # FastAPI dependency declarations intentionally use call expressions in defaults.
 # ruff: noqa: B008
 
+from dataclasses import asdict
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
@@ -12,6 +13,10 @@ from starlette.datastructures import UploadFile
 from app.application.capabilities import ASSESSMENT_SCAN_CHECK_MANAGE
 from app.application.checking_intake import InvalidCheckingInput
 from app.application.input_artifacts import MAX_ARTIFACT_SIZE_BYTES, ArtifactError
+from app.application.paper_batch_orchestration import (
+    PaperBatchError,
+    PaperBatchOrchestrationService,
+)
 from app.application.paper_checking_execution import (
     PaperCheckingExecutionError,
     PaperCheckingExecutionService,
@@ -36,6 +41,9 @@ from app.db.session import get_session
 from app.infrastructure.artifact_storage import FilesystemArtifactStorage
 from app.infrastructure.authoring_models import InputArtifact
 from app.infrastructure.classroom_repository import SQLAlchemyClassroomAccessRepository
+from app.infrastructure.paper_batch_orchestration_repository import (
+    PaperBatchOrchestrationRepository,
+)
 from app.infrastructure.paper_checking_execution_repository import (
     SQLAlchemyPaperCheckingExecutionRepository,
 )
@@ -109,6 +117,40 @@ async def _authorized_batch(db, batch_id, principal):
     ):
         raise HTTPException(404, "scan_batch_not_found")
     return row
+
+
+async def _batch_checking_action(db, batch_id, principal, action):
+    await _authorized_batch(db, batch_id, principal)
+    service = PaperBatchOrchestrationService(PaperBatchOrchestrationRepository(db))
+    try:
+        result = (await service.progress(batch_id) if action == "progress" else
+                  await getattr(service, action)(batch_id, principal.user_id))
+        if action != "progress":
+            await db.commit()
+        return asdict(result)
+    except PaperBatchError as exc:
+        await db.rollback()
+        raise HTTPException(exc.status, exc.code) from None
+
+
+@router.get("/scan-batches/{batch_id}/checking")
+async def paper_batch_progress(batch_id: UUID, db=Depends(get_session), principal: Principal=PrincipalDep):
+    return await _batch_checking_action(db, batch_id, principal, "progress")
+
+
+@router.post("/scan-batches/{batch_id}/checking/start")
+async def start_batch_checking(batch_id: UUID, db=Depends(get_session), principal: Principal=PrincipalDep):
+    return await _batch_checking_action(db, batch_id, principal, "start")
+
+
+@router.post("/scan-batches/{batch_id}/checking/reconcile")
+async def reconcile_batch_checking(batch_id: UUID, db=Depends(get_session), principal: Principal=PrincipalDep):
+    return await _batch_checking_action(db, batch_id, principal, "reconcile")
+
+
+@router.post("/scan-batches/{batch_id}/complete")
+async def complete_paper_batch(batch_id: UUID, db=Depends(get_session), principal: Principal=PrincipalDep):
+    return await _batch_checking_action(db, batch_id, principal, "finalize")
 
 
 def _artifact(row, source):
@@ -574,7 +616,9 @@ async def create_paper_check_run(paper_submission_id:UUID,payload:PaperCheckRunC
             SQLAlchemyPaperCheckingIntakeUnitOfWork,
         )
         class RequestUow(SQLAlchemyPaperCheckingIntakeUnitOfWork):
-            def __init__(self): self.session=db
+            def __init__(self):
+                self.session=db
+                self.actor_id=principal.user_id
             async def __aenter__(self): return self
             async def __aexit__(self,exc_type,exc,tb):
                 if exc_type: await db.rollback()

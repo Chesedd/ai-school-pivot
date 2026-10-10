@@ -44,9 +44,9 @@ Token = Annotated[
         pattern=r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
     ),
 ]
-Confidence = Annotated[Decimal, Field(strict=True, ge=Decimal("0"), le=Decimal("1"))]
+Confidence = Annotated[Decimal, Field(strict=True, ge=Decimal(0), le=Decimal(1))]
 UnitCoordinate = Annotated[
-    Decimal, Field(strict=True, ge=Decimal("0"), le=Decimal("1"))
+    Decimal, Field(strict=True, ge=Decimal(0), le=Decimal(1))
 ]
 
 
@@ -117,9 +117,13 @@ _TRANSITIONS = {
 
 
 def validate_batch_transition(
-    current: AssessmentScanBatchState, target: AssessmentScanBatchState
+    current: AssessmentScanBatchState, target: AssessmentScanBatchState,
+    *, new_attempt: bool = False,
 ) -> None:
     """Reject skips; confirmation is deliberately a visible mandatory state."""
+    if (new_attempt and current == AssessmentScanBatchState.CHECKING_COMPLETED
+            and target == AssessmentScanBatchState.CHECKING):
+        return
     if target not in _TRANSITIONS[current]:
         raise ValueError(f"invalid_batch_transition:{current.value}:{target.value}")
 
@@ -140,7 +144,7 @@ class NormalizedBox(_Contract):
     height: UnitCoordinate
 
     @model_validator(mode="after")
-    def fits_page(self) -> "NormalizedBox":
+    def fits_page(self) -> NormalizedBox:
         if self.x + self.width > 1 or self.y + self.height > 1:
             raise ValueError("region_outside_page")
         return self
@@ -182,7 +186,7 @@ class PageMatchingRequest(_Contract):
     pages: tuple[MatchingPage, ...] = Field(min_length=1, max_length=MAX_PAGES)
 
     @model_validator(mode="after")
-    def unique_tokens(self) -> "PageMatchingRequest":
+    def unique_tokens(self) -> PageMatchingRequest:
         if len({entry.roster_token for entry in self.roster}) != len(self.roster):
             raise ValueError("duplicate_roster_token")
         if len({page.page_token for page in self.pages}) != len(self.pages):
@@ -213,7 +217,7 @@ class PageMatchResult(_Contract):
     requires_human_review: StrictBool
 
     @model_validator(mode="after")
-    def disposition_is_consistent(self) -> "PageMatchResult":
+    def disposition_is_consistent(self) -> PageMatchResult:
         if len(set(self.candidate_roster_tokens)) != len(self.candidate_roster_tokens):
             raise ValueError("duplicate_candidate")
         if (
@@ -238,7 +242,7 @@ class PageMatchingResponse(_Contract):
     pages: tuple[PageMatchResult, ...] = Field(min_length=1, max_length=MAX_PAGES)
 
     @model_validator(mode="after")
-    def unique_pages(self) -> "PageMatchingResponse":
+    def unique_pages(self) -> PageMatchingResponse:
         if len({page.page_token for page in self.pages}) != len(self.pages):
             raise ValueError("duplicate_page_result")
         return self
@@ -267,7 +271,7 @@ class ConfirmedPaperGroup(_Contract):
     ordered_scan_page_ids: tuple[UUID, ...] = Field(min_length=1, max_length=MAX_PAGES)
 
     @model_validator(mode="after")
-    def unique_pages(self) -> "ConfirmedPaperGroup":
+    def unique_pages(self) -> ConfirmedPaperGroup:
         if len(set(self.ordered_scan_page_ids)) != len(self.ordered_scan_page_ids):
             raise ValueError("duplicate_page_order")
         return self
@@ -316,7 +320,7 @@ class PaperCheckPage(_Contract):
 class PaperCheckAssessmentItem(_Contract):
     item_token: Token
     position: StrictInt = Field(ge=0)
-    max_score: Annotated[Decimal, Field(strict=True, gt=Decimal("0"))]
+    max_score: Annotated[Decimal, Field(strict=True, gt=Decimal(0))]
     task_context: StrictStr = Field(min_length=1, max_length=30_000)
     rubric_context: StrictStr = Field(min_length=1, max_length=30_000)
 
@@ -342,7 +346,7 @@ class PaperCheckRequest(_Contract):
     prompt_contract: PromptContractMetadata
 
     @model_validator(mode="after")
-    def tokens_and_orders_are_unique(self) -> "PaperCheckRequest":
+    def tokens_and_orders_are_unique(self) -> PaperCheckRequest:
         for values, error in (
             ([p.page_token for p in self.pages], "duplicate_page_token"),
             ([p.order for p in self.pages], "duplicate_page_order"),
@@ -393,14 +397,14 @@ class PaperItemResult(_Contract):
         "unreadable",
         "insufficient_evidence",
     ]
-    rubric_score: Annotated[Decimal, Field(strict=True, ge=Decimal("0"))] | None
-    rubric_max_score: Annotated[Decimal, Field(strict=True, gt=Decimal("0"))]
+    rubric_score: Annotated[Decimal, Field(strict=True, ge=Decimal(0))] | None
+    rubric_max_score: Annotated[Decimal, Field(strict=True, gt=Decimal(0))]
     confidence: Confidence
     requires_human_review: StrictBool
     findings: tuple[PaperFinding, ...] = Field(default=(), max_length=MAX_FINDINGS)
 
     @model_validator(mode="after")
-    def score_is_bounded(self) -> "PaperItemResult":
+    def score_is_bounded(self) -> PaperItemResult:
         if self.rubric_score is not None and self.rubric_score > self.rubric_max_score:
             raise ValueError("rubric_score_out_of_range")
         if (
@@ -433,7 +437,7 @@ class PaperCheckResponse(_Contract):
     requires_human_review: StrictBool
 
     @model_validator(mode="after")
-    def unique_items(self) -> "PaperCheckResponse":
+    def unique_items(self) -> PaperCheckResponse:
         if len({item.item_token for item in self.items}) != len(self.items):
             raise ValueError("duplicate_item_result")
         return self
