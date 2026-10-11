@@ -23,7 +23,7 @@ async def test_paper_batch_migration_roundtrip_and_fresh_head(tmp_path):
         async with engine.connect() as db:
             assert await db.scalar(text("SELECT version_num FROM alembic_version")) == revision
             definition = await db.scalar(text("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname='ck_scan_checking_events_type'"))
-            assert ("batch.checking_started" in definition) == (revision == "20261011_01")
+            assert ("batch.checking_started" in definition) == (revision in {"20261011_01", "20261011_02"})
 
     try:
         # Prove rollback does not require deleting new audit history on a
@@ -52,7 +52,8 @@ async def test_paper_batch_migration_roundtrip_and_fresh_head(tmp_path):
             await db.execute(text("DROP SCHEMA public CASCADE"))
             await db.execute(text("CREATE SCHEMA public"))
         migrate(url, "upgrade", "head")
-        await at("20261011_01")
+        from tests.integration.test_migrations import repository_head
+        await at(repository_head())
     finally:
         migrate(url, "upgrade", "head")
         await engine.dispose()
