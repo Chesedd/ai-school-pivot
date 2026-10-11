@@ -27,7 +27,23 @@ clock = text("clock_timestamp()")
 class PaperCheckReview(IdMixin, Base):
     __tablename__ = "paper_check_reviews"
     __table_args__ = (
+        CheckConstraint(
+            "(source_kind='ai' AND check_run_id IS NOT NULL AND ai_revision_id IS NOT NULL) OR (source_kind='manual' AND check_run_id IS NULL AND ai_revision_id IS NULL)",
+            name="ck_paper_check_reviews_source",
+        ),
         UniqueConstraint("check_run_id", name="uq_paper_check_reviews_run"),
+        Index(
+            "uq_paper_check_reviews_manual",
+            "paper_submission_id",
+            unique=True,
+            postgresql_where=text("source_kind = 'manual'"),
+        ),
+        UniqueConstraint(
+            "id",
+            "paper_submission_id",
+            "source_kind",
+            name="uq_paper_check_reviews_source",
+        ),
         UniqueConstraint(
             "id",
             "paper_submission_id",
@@ -68,10 +84,11 @@ class PaperCheckReview(IdMixin, Base):
     paper_submission_id: Mapped[UUID] = mapped_column(
         ForeignKey("paper_submissions.id", ondelete="RESTRICT")
     )
-    check_run_id: Mapped[UUID] = mapped_column(
+    source_kind: Mapped[str] = mapped_column(String(16), server_default="ai")
+    check_run_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("check_runs.id", ondelete="RESTRICT")
     )
-    ai_revision_id: Mapped[UUID] = mapped_column(uuid_type)
+    ai_revision_id: Mapped[UUID | None] = mapped_column(uuid_type)
     state: Mapped[str] = mapped_column(String(16), server_default="reviewing")
     draft: Mapped[object] = mapped_column(JSONB)
     version: Mapped[int] = mapped_column(Integer, server_default="1")
@@ -93,6 +110,20 @@ class PaperCheckReview(IdMixin, Base):
 class PaperCheckReviewRevision(IdMixin, Base):
     __tablename__ = "paper_check_review_revisions"
     __table_args__ = (
+        CheckConstraint(
+            "(source_kind='ai' AND check_run_id IS NOT NULL AND ai_revision_id IS NOT NULL) OR (source_kind='manual' AND check_run_id IS NULL AND ai_revision_id IS NULL)",
+            name="ck_paper_check_review_revisions_source",
+        ),
+        ForeignKeyConstraint(
+            ["review_id", "paper_submission_id", "source_kind"],
+            [
+                "paper_check_reviews.id",
+                "paper_check_reviews.paper_submission_id",
+                "paper_check_reviews.source_kind",
+            ],
+            name="fk_paper_check_review_revisions_source",
+            ondelete="RESTRICT",
+        ),
         UniqueConstraint(
             "review_id",
             "revision_number",
@@ -113,7 +144,7 @@ class PaperCheckReviewRevision(IdMixin, Base):
             ondelete="RESTRICT",
         ),
         CheckConstraint(
-            "revision_number >= 0 AND revision_kind IN ('ai_seed','human_edit','approved') AND ((revision_number=0) = (revision_kind='ai_seed'))",
+            "revision_number >= 0 AND revision_kind IN ('ai_seed','manual_seed','human_edit','approved') AND ((revision_number=0) = (revision_kind IN ('ai_seed','manual_seed'))) AND (revision_kind <> 'ai_seed' OR source_kind='ai') AND (revision_kind <> 'manual_seed' OR source_kind='manual')",
             name="ck_paper_check_review_revisions_kind",
         ),
         CheckConstraint(
@@ -142,8 +173,9 @@ class PaperCheckReviewRevision(IdMixin, Base):
     )
     review_id: Mapped[UUID] = mapped_column(uuid_type)
     paper_submission_id: Mapped[UUID] = mapped_column(uuid_type)
-    check_run_id: Mapped[UUID] = mapped_column(uuid_type)
-    ai_revision_id: Mapped[UUID] = mapped_column(uuid_type)
+    source_kind: Mapped[str] = mapped_column(String(16), server_default="ai")
+    check_run_id: Mapped[UUID | None] = mapped_column(uuid_type)
+    ai_revision_id: Mapped[UUID | None] = mapped_column(uuid_type)
     revision_number: Mapped[int] = mapped_column(Integer)
     revision_kind: Mapped[str] = mapped_column(String(16))
     snapshot: Mapped[object] = mapped_column(JSONB)

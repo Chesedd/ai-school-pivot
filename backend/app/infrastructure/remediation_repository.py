@@ -428,7 +428,7 @@ class RemediationRepository:
                 row[0].student_id,
                 row[4].id,
                 row[0].assignment_participant_id,
-                row[5].id,
+                row[5].id if row[5] else None,
                 row[4].class_group_id,
             ):
                 raise RemediationError("remediation_source_publication_invalid")

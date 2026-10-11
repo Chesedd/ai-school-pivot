@@ -27,7 +27,7 @@ class RemediationPlan(IdMixin, Base):
     __tablename__ = "remediation_plans"
     __table_args__ = (
         CheckConstraint(
-            "(source_submission_id IS NOT NULL AND source_paper_submission_id IS NULL AND source_paper_publication_id IS NULL) OR (source_submission_id IS NULL AND source_paper_submission_id IS NOT NULL AND source_paper_publication_id IS NOT NULL)",
+            "(source_submission_id IS NOT NULL AND source_check_run_id IS NOT NULL AND source_paper_submission_id IS NULL AND source_paper_publication_id IS NULL) OR (source_submission_id IS NULL AND source_paper_submission_id IS NOT NULL AND source_paper_publication_id IS NOT NULL)",
             name="ck_remediation_plans_source_xor",
         ),
         UniqueConstraint(
@@ -124,7 +124,7 @@ class RemediationPlan(IdMixin, Base):
     source_submission_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("student_submissions.id", ondelete="RESTRICT", onupdate="RESTRICT")
     )
-    source_check_run_id: Mapped[UUID] = mapped_column(
+    source_check_run_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("check_runs.id", ondelete="RESTRICT", onupdate="RESTRICT")
     )
     status: Mapped[str] = mapped_column(String(16), server_default="draft")

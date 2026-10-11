@@ -19,6 +19,7 @@ from app.application.paper_checking_review import (
     PaperReviewError,
     PaperReviewFinding,
     PaperReviewGrade,
+    PaperReviewItem,
     PaperReviewResponse,
     PaperReviewRevision,
     approve_scores,
@@ -58,7 +59,63 @@ class PaperCheckingReviewRepository:
     def __init__(self, db):
         self.db = db
 
+    async def _manual_policy(self, paper, review=None):
+        query = select(ScanGradingPolicyRevision).where(
+            ScanGradingPolicyRevision.batch_id == paper.batch_id,
+            ScanGradingPolicyRevision.assessment_variant_id
+            == paper.assigned_variant_id,
+        )
+        if review is not None:
+            seed = await self.db.scalar(
+                select(PaperCheckReviewRevision).where(
+                    PaperCheckReviewRevision.review_id == review.id,
+                    PaperCheckReviewRevision.revision_number == 0,
+                )
+            )
+            if seed is None:
+                raise PaperReviewError("paper_review_policy_mismatch")
+            query = query.where(
+                ScanGradingPolicyRevision.revision == seed.grading_policy_revision,
+                ScanGradingPolicyRevision.policy_fingerprint
+                == seed.grading_policy_fingerprint,
+            )
+        row = await self.db.scalar(
+            query.order_by(ScanGradingPolicyRevision.revision.desc()).limit(1)
+        )
+        if row is None:
+            raise PaperReviewError("paper_grading_policy_incomplete", 409)
+        policy = ScanGradingPolicy.model_validate_json(json.dumps(row.policy_json))
+        if (
+            policy.fingerprint != row.policy_fingerprint
+            or policy.schema_version != row.policy_schema_version
+        ):
+            raise PaperReviewError("paper_review_policy_mismatch")
+        return row
+
     async def _source(self, paper_id, run_id, *, lock=False):
+        if run_id is None:
+            from app.infrastructure.paper_batch_orchestration_repository import (
+                PaperBatchOrchestrationRepository,
+            )
+
+            batch_id = await self.db.scalar(
+                select(PaperSubmission.batch_id).where(PaperSubmission.id == paper_id)
+            )
+            if batch_id is None:
+                raise PaperReviewError("paper_submission_not_found", 404)
+            if lock:
+                await PaperBatchOrchestrationRepository(self.db).load(
+                    batch_id, lock=True
+                )
+            query = (
+                select(PaperSubmission)
+                .where(PaperSubmission.id == paper_id)
+                .execution_options(populate_existing=True)
+            )
+            paper = await self.db.scalar(query.with_for_update() if lock else query)
+            review = await self._review(paper_id, None)
+            return paper, None, await self._manual_policy(paper, review)
+
         paper = await self.db.get(PaperSubmission, paper_id)
         query = select(CheckRun).where(CheckRun.id == run_id)
         run = await self.db.scalar(query.with_for_update() if lock else query)
@@ -82,6 +139,9 @@ class PaperCheckingReviewRepository:
 
     async def _policy(self, paper, run, ai):
         """Use the exact immutable revision, never current assessment configuration."""
+        if run is None:
+            policy = ScanGradingPolicy.model_validate_json(json.dumps(ai.policy_json))
+            return policy, tuple(x.assessment_item_id for x in policy.assessment_items)
         try:
             snapshot = run.input_snapshot
             frozen = snapshot["grading_policy"]
@@ -222,6 +282,29 @@ class PaperCheckingReviewRepository:
         # Revalidate even when a caller used Pydantic's unchecked model_copy.
         draft = _draft(draft.model_dump(mode="json"))
         policy, order = await self._policy(paper, run, ai)
+        if run is None:
+            if draft.source_kind != "manual" or draft.paper_submission_id != paper.id:
+                raise PaperReviewError("paper_review_provenance_mismatch")
+            draft = canonicalize_draft(draft, order)
+            maxima = {
+                x.assessment_item_id: x.max_score for x in policy.assessment_items
+            }
+            if any(x.max_score != maxima[x.assessment_item_id] for x in draft.items):
+                raise PaperReviewError("paper_review_policy_mismatch")
+            pages = set(
+                (
+                    await self.db.scalars(
+                        select(PaperSubmissionPage.scan_page_id).where(
+                            PaperSubmissionPage.paper_submission_id == paper.id
+                        )
+                    )
+                ).all()
+            )
+            if any(x.scan_page_id not in pages for x in draft.findings):
+                raise PaperReviewError("paper_review_foreign_page")
+            return draft, policy
+        if draft.source_kind != "ai":
+            raise PaperReviewError("paper_review_provenance_mismatch")
         results, pairs = await self._evidence(paper, run, ai)
         if (draft.paper_submission_id, draft.check_run_id, draft.ai_revision_id) != (
             paper.id,
@@ -292,18 +375,122 @@ class PaperCheckingReviewRepository:
             paper_submission_id=review.paper_submission_id,
             check_run_id=review.check_run_id,
             ai_revision_id=review.ai_revision_id,
+            source_kind=review.source_kind,
             revision_number=number,
             revision_kind=kind,
             snapshot=draft.model_dump(mode="json"),
             actor_user_id=actor,
-            grading_policy_revision=ai.grading_policy_revision,
-            grading_policy_fingerprint=ai.grading_policy_fingerprint,
+            grading_policy_revision=ai.revision
+            if review.source_kind == "manual"
+            else ai.grading_policy_revision,
+            grading_policy_fingerprint=ai.policy_fingerprint
+            if review.source_kind == "manual"
+            else ai.grading_policy_fingerprint,
             change_summary=list(changes),
             approved_at=approved_at,
             **(grade.model_dump() if grade else {}),
         )
         self.db.add(row)
         return row
+
+    async def start_manual(self, paper_id, actor):
+        from app.application.paper_batch_orchestration import PaperBatchError
+        from app.infrastructure.paper_batch_orchestration_repository import (
+            PaperBatchOrchestrationRepository,
+        )
+        from app.infrastructure.scan_checking_models import ScanCheckingEvent
+
+        batch_id = await self.db.scalar(
+            select(PaperSubmission.batch_id).where(PaperSubmission.id == paper_id)
+        )
+        if batch_id is None:
+            raise PaperReviewError("paper_submission_not_found", 404)
+        orchestration = PaperBatchOrchestrationRepository(self.db)
+        batch = await orchestration.load(batch_id, lock=True)
+        paper = await self.db.scalar(
+            select(PaperSubmission)
+            .where(PaperSubmission.id == paper_id)
+            .with_for_update()
+        )
+        existing = await self.db.scalar(
+            select(PaperCheckReview).where(
+                PaperCheckReview.paper_submission_id == paper_id,
+                PaperCheckReview.source_kind == "manual",
+            )
+        )
+        if existing:
+            return await self._response(existing)
+        if await self.db.scalar(
+            select(PaperCheckReview.id).where(
+                PaperCheckReview.paper_submission_id == paper_id
+            )
+        ):
+            raise PaperReviewError("paper_manual_review_ai_result_available", 409)
+        runs = (
+            await self.db.scalars(
+                select(CheckRun)
+                .where(CheckRun.paper_submission_id == paper_id)
+                .order_by(CheckRun.attempt_no.desc())
+            )
+        ).all()
+        if any(x.status in {"pending", "running"} for x in runs):
+            raise PaperReviewError("paper_manual_review_check_in_progress", 409)
+        if any(
+            x.status in {"completed", "completed_with_review_required"} for x in runs
+        ):
+            raise PaperReviewError("paper_manual_review_ai_result_available", 409)
+        if runs and runs[0].status not in {"failed_retryable", "failed_terminal"}:
+            raise PaperReviewError("paper_manual_review_not_available", 409)
+        policy_row = await self._manual_policy(paper)
+        policy, _ = await self._policy(paper, None, policy_row)
+        try:
+            await orchestration.begin_attempt(batch, actor_id=actor)
+        except PaperBatchError as exc:
+            raise PaperReviewError(exc.code, exc.status) from None
+        draft = PaperReviewDraft(
+            paper_submission_id=paper_id,
+            source_kind="manual",
+            check_run_id=None,
+            ai_revision_id=None,
+            summary="",
+            items=tuple(
+                PaperReviewItem(
+                    assessment_item_id=x.assessment_item_id,
+                    source_check_result_id=None,
+                    status=None,
+                    accepted_score=None,
+                    max_score=x.max_score,
+                )
+                for x in policy.assessment_items
+            ),
+        )
+        review = PaperCheckReview(
+            id=uuid4(),
+            paper_submission_id=paper_id,
+            source_kind="manual",
+            check_run_id=None,
+            ai_revision_id=None,
+            state="reviewing",
+            version=1,
+            draft=draft.model_dump(mode="json"),
+            created_by_user_id=actor,
+            updated_by_user_id=actor,
+        )
+        self.db.add(review)
+        await self.db.flush()
+        self._revision(review, policy_row, actor, 0, "manual_seed", draft, ())
+        self.db.add(
+            ScanCheckingEvent(
+                batch_id=batch_id,
+                aggregate_type="paper_submission",
+                aggregate_id=paper_id,
+                event_type="paper.manual_review_started",
+                actor_user_id=actor,
+                details={"review_id": str(review.id)},
+            )
+        )
+        await self.db.flush()
+        return await self._response(review)
 
     async def start(self, paper_id, run_id, actor):
         paper, run, ai = await self._source(paper_id, run_id, lock=True)
@@ -377,7 +564,7 @@ class PaperCheckingReviewRepository:
         return await self._response(await self._review(paper_id, run_id))
 
     async def edit(self, paper_id, run_id, actor, draft, expected_version):
-        paper, run, ai = await self._source(paper_id, run_id)
+        paper, run, ai = await self._source(paper_id, run_id, lock=run_id is None)
         review = await self._review(paper_id, run_id, lock=True)
         if review.version != expected_version:
             raise PaperReviewError("paper_review_version_conflict", 409)
@@ -395,7 +582,7 @@ class PaperCheckingReviewRepository:
         return await self._response(review)
 
     async def approve(self, paper_id, run_id, actor, command: PaperReviewApproval):
-        paper, run, ai = await self._source(paper_id, run_id)
+        paper, run, ai = await self._source(paper_id, run_id, lock=run_id is None)
         review = await self._review(paper_id, run_id, lock=True)
         if review.version != command.expected_version:
             raise PaperReviewError("paper_review_version_conflict", 409)
@@ -417,6 +604,17 @@ class PaperCheckingReviewRepository:
         await self._advance(
             review, command.expected_version, actor, draft, "approved", revision.id
         )
+        if run_id is None:
+            from app.application.paper_batch_orchestration import (
+                PaperBatchOrchestrationService,
+            )
+            from app.infrastructure.paper_batch_orchestration_repository import (
+                PaperBatchOrchestrationRepository,
+            )
+
+            await PaperBatchOrchestrationService(
+                PaperBatchOrchestrationRepository(self.db)
+            ).reconcile(paper.batch_id, actor)
         return await self._response(review)
 
     async def _advance(self, review, expected, actor, draft, state, pointer=None):
@@ -472,6 +670,7 @@ class PaperCheckingReviewRepository:
             paper_submission_id=row.paper_submission_id,
             check_run_id=row.check_run_id,
             ai_revision_id=row.ai_revision_id,
+            source_kind=row.source_kind,
             revision_number=row.revision_number,
             revision_kind=row.revision_kind,
             snapshot=_draft(row.snapshot),
@@ -497,6 +696,7 @@ class PaperCheckingReviewRepository:
             paper_submission_id=row.paper_submission_id,
             check_run_id=row.check_run_id,
             ai_revision_id=row.ai_revision_id,
+            source_kind=row.source_kind,
             state=row.state,
             version=row.version,
             draft=_draft(row.draft),

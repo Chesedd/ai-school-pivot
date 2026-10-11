@@ -115,6 +115,11 @@ class CheckingRepository:
             if prior.request_hash != command.request_hash:
                 raise IdempotencyConflict(command.request_key)
             return prior
+        from app.infrastructure.paper_checking_review_models import PaperCheckReview
+        if await self.session.scalar(select(PaperCheckReview.id).where(
+            PaperCheckReview.paper_submission_id == source.id,
+            PaperCheckReview.source_kind == "manual")):
+            raise InvalidPersistenceCommand("paper_manual_review_active")
         if command.supersedes_run_id:
             old = await self.session.get(CheckRun, command.supersedes_run_id)
             if old is None or old.paper_submission_id != source.id:
@@ -146,6 +151,18 @@ class CheckingRepository:
     async def transition_run(self, run_id: UUID, expected_version: int, target: str, *, failure_code: str | None = None, failure_detail: str | None = None, details=None) -> CheckRun:
         row = await self.session.get(CheckRun, run_id)
         if row is None: raise InvalidPersistenceCommand("run not found")
+        if row.paper_submission_id and target == "pending":
+            from app.infrastructure.paper_batch_orchestration_repository import (
+                PaperBatchOrchestrationRepository,
+            )
+            from app.infrastructure.paper_checking_review_models import PaperCheckReview
+            paper = await self.session.get(PaperSubmission, row.paper_submission_id)
+            await PaperBatchOrchestrationRepository(self.session).load(paper.batch_id, lock=True)
+            await self.session.scalar(select(PaperSubmission).where(PaperSubmission.id == paper.id).with_for_update())
+            if await self.session.scalar(select(PaperCheckReview.id).where(
+                PaperCheckReview.paper_submission_id == paper.id,
+                PaperCheckReview.source_kind == "manual")):
+                raise InvalidPersistenceCommand("paper_manual_review_active")
         from_status = row.status
         validate_transition(from_status, target); safe = safe_event_details(details or {})
         now = await self.session.scalar(select(func.clock_timestamp())); values = {"status": target, "row_version": expected_version + 1}

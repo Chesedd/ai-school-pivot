@@ -39,17 +39,37 @@ class ReviewContract(BaseModel):
     model_config = ConfigDict(strict=True, frozen=True, extra="forbid")
 
 
+class ReviewSource(ReviewContract):
+    source_kind: Literal["ai", "manual"] = "ai"
+    check_run_id: UUID | None
+    ai_revision_id: UUID | None
+
+    @model_validator(mode="after")
+    def source_provenance(self):
+        valid = (
+            self.check_run_id is not None and self.ai_revision_id is not None
+            if self.source_kind == "ai"
+            else self.check_run_id is None and self.ai_revision_id is None
+        )
+        if not valid:
+            raise ValueError("invalid_review_provenance")
+        return self
+
+
 class PaperReviewItem(ReviewContract):
     assessment_item_id: UUID
-    source_check_result_id: UUID
-    status: Literal[
-        "correct",
-        "partially_correct",
-        "incorrect",
-        "not_attempted",
-        "unreadable",
-        "insufficient_evidence",
-    ]
+    source_check_result_id: UUID | None
+    status: (
+        Literal[
+            "correct",
+            "partially_correct",
+            "incorrect",
+            "not_attempted",
+            "unreadable",
+            "insufficient_evidence",
+        ]
+        | None
+    )
     accepted_score: Score | None
     max_score: Score
     teacher_comment: StrictStr | None = Field(
@@ -108,22 +128,40 @@ def seed_review_item(
     )
 
 
-class PaperReviewDraft(ReviewContract):
+class PaperReviewDraft(ReviewSource):
     schema_version: Literal["paper_check_review_draft.v1"] = (
         "paper_check_review_draft.v1"
     )
     paper_submission_id: UUID
-    check_run_id: UUID
-    ai_revision_id: UUID
-    summary: StrictStr = Field(min_length=1, max_length=4000)
+    source_kind: Literal["ai", "manual"] = "ai"
+    check_run_id: UUID | None
+    ai_revision_id: UUID | None
+    summary: StrictStr = Field(max_length=4000)
     items: tuple[PaperReviewItem, ...] = Field(min_length=1, max_length=256)
     findings: tuple[PaperReviewFinding, ...] = Field(default=(), max_length=16384)
 
     @model_validator(mode="after")
     def unique_identifiers(self):
+        if self.source_kind == "ai":
+            if (
+                self.check_run_id is None
+                or self.ai_revision_id is None
+                or not self.summary
+            ):
+                raise ValueError("invalid_ai_review_provenance")
+            if any(
+                x.source_check_result_id is None or x.status is None for x in self.items
+            ):
+                raise ValueError("invalid_ai_review_item")
+        elif self.check_run_id is not None or self.ai_revision_id is not None:
+            raise ValueError("invalid_manual_review_provenance")
+        elif any(x.source_check_result_id is not None for x in self.items) or any(
+            x.source_check_finding_id is not None for x in self.findings
+        ):
+            raise ValueError("invalid_manual_review_lineage")
         for values in (
             [x.assessment_item_id for x in self.items],
-            [x.source_check_result_id for x in self.items],
+            [x.source_check_result_id for x in self.items if x.source_check_result_id],
             [x.finding_id for x in self.findings],
             [
                 x.source_check_finding_id
@@ -171,17 +209,18 @@ class PaperReviewGrade(ReviewContract):
     )
 
 
-class PaperReviewRevision(ReviewContract):
+class PaperReviewRevision(ReviewSource):
     schema_version: Literal["paper_check_review_revision.v1"] = (
         "paper_check_review_revision.v1"
     )
     id: UUID
     review_id: UUID
     paper_submission_id: UUID
-    check_run_id: UUID
-    ai_revision_id: UUID
+    source_kind: Literal["ai", "manual"] = "ai"
+    check_run_id: UUID | None
+    ai_revision_id: UUID | None
     revision_number: StrictInt = Field(ge=0)
-    revision_kind: Literal["ai_seed", "human_edit", "approved"]
+    revision_kind: Literal["ai_seed", "manual_seed", "human_edit", "approved"]
     snapshot: PaperReviewDraft
     actor_user_id: UUID
     grading_policy_revision: StrictInt = Field(gt=0)
@@ -195,14 +234,15 @@ class PaperReviewRevision(ReviewContract):
     created_at: datetime
 
 
-class PaperReviewResponse(ReviewContract):
+class PaperReviewResponse(ReviewSource):
     schema_version: Literal["paper_check_review_response.v1"] = (
         "paper_check_review_response.v1"
     )
     review_id: UUID
     paper_submission_id: UUID
-    check_run_id: UUID
-    ai_revision_id: UUID
+    source_kind: Literal["ai", "manual"] = "ai"
+    check_run_id: UUID | None
+    ai_revision_id: UUID | None
     state: Literal["reviewing", "approved"]
     version: StrictInt = Field(gt=0)
     draft: PaperReviewDraft
@@ -247,6 +287,8 @@ def approve_scores(
     override: PaperReviewOverride | None = None,
 ) -> PaperReviewGrade:
     maxima = {x.assessment_item_id: x.max_score for x in policy.assessment_items}
+    if not draft.summary:
+        raise PaperReviewError("paper_review_summary_required")
     if set(maxima) != {x.assessment_item_id for x in draft.items}:
         raise PaperReviewError("paper_review_item_coverage_mismatch")
     scores = []
@@ -254,7 +296,10 @@ def approve_scores(
         if item.max_score != maxima[item.assessment_item_id]:
             raise PaperReviewError("paper_review_policy_mismatch")
         score = item.accepted_score
-        if item.status in {"unreadable", "insufficient_evidence"} or score is None:
+        if (
+            item.status in {None, "unreadable", "insufficient_evidence"}
+            or score is None
+        ):
             raise PaperReviewError("paper_review_unresolved_item")
         valid = (
             (item.status == "correct" and score == item.max_score)

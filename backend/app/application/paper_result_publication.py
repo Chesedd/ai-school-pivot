@@ -89,7 +89,8 @@ def build_publication_snapshot(
         raise PaperPublicationError("paper_publication_revision_not_approved")
     draft = revision.snapshot
     if (
-        revision.grade_result is None
+        revision.source_kind != draft.source_kind
+        or revision.grade_result is None
         or revision.approved_at is None
         or (
             revision.paper_submission_id,

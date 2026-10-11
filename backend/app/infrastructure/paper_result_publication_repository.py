@@ -76,8 +76,12 @@ class PaperResultPublicationRepository:
             _, run, ai = await repo._source(paper.id, row.check_run_id)
             policy, order = await repo._policy(paper, run, ai)
             if (row.grading_policy_revision, row.grading_policy_fingerprint) != (
-                ai.grading_policy_revision,
-                ai.grading_policy_fingerprint,
+                ai.revision
+                if row.source_kind == "manual"
+                else ai.grading_policy_revision,
+                ai.policy_fingerprint
+                if row.source_kind == "manual"
+                else ai.grading_policy_fingerprint,
             ):
                 raise ValueError("policy_provenance")
             revision = repo._revision_response(row)
@@ -92,9 +96,10 @@ class PaperResultPublicationRepository:
             )
             if pages != {p.id for p in (await self._page_rows(paper.id))}:
                 raise ValueError("invalid_membership")
-            frozen = {x["scan_page_id"] for x in run.input_snapshot["pages"]}
-            if {str(x) for x in pages} != frozen:
-                raise ValueError("page_provenance")
+            if run is not None:
+                frozen = {x["scan_page_id"] for x in run.input_snapshot["pages"]}
+                if {str(x) for x in pages} != frozen:
+                    raise ValueError("page_provenance")
             revision = revision.model_copy(
                 update={"snapshot": canonicalize_draft(revision.snapshot, order)}
             )

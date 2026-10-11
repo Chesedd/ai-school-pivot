@@ -74,14 +74,18 @@ class PaperRemediationRepository:
         revision = await self.s.get(
             PaperCheckReviewRevision, publication.approved_review_revision_id
         )
-        run = await self.s.get(CheckRun, revision.check_run_id) if revision else None
+        run = (
+            await self.s.get(CheckRun, revision.check_run_id)
+            if revision and revision.check_run_id
+            else None
+        )
         if (
             not assignment
             or not participant
             or not student
             or not variant
             or not revision
-            or not run
+            or (revision.source_kind == "ai" and not run)
             or assignment.id != batch.assignment_id
             or assignment.class_group_id != batch.class_group_id
             or participant.assignment_id != assignment.id
@@ -90,7 +94,7 @@ class PaperRemediationRepository:
             or revision.paper_submission_id != paper.id
             or revision.review_id != publication.review_id
             or revision.revision_kind != "approved"
-            or run.paper_submission_id != paper.id
+            or (run is not None and run.paper_submission_id != paper.id)
         ):
             raise RemediationError("remediation_source_publication_invalid")
         rows = (
@@ -203,7 +207,7 @@ class PaperRemediationRepository:
             source_assignment_id=assignment.id,
             source_assignment_participant_id=paper.assignment_participant_id,
             source_submission_id=None,
-            source_check_run_id=run.id,
+            source_check_run_id=run.id if run else None,
             source_paper_submission_id=paper.id,
             source_paper_publication_id=pub.id,
             title=payload.title,

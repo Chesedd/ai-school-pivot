@@ -81,7 +81,7 @@ def test_deterministic_counts_and_order():
     first = derive_progress(batch, "checking", [a, b], runs, {a})
     second = derive_progress(batch, "checking", [b, a], reversed(runs), {a})
     assert first == second
-    assert list(asdict(first))[3:10] == list(CHECK_STATUSES)
+    assert list(asdict(first))[3:3 + len(CHECK_STATUSES)] == list(CHECK_STATUSES)
 
 
 def test_unknown_status_fails_closed():

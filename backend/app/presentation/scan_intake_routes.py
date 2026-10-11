@@ -683,7 +683,7 @@ async def _review_action(db, principal, paper_id, run_id, action, payload=None):
     repository = PaperCheckingReviewRepository(db)
     try:
         if action == "start":
-            result = await repository.start(paper_id, run_id, principal.user_id)
+            result = await repository.start_manual(paper_id, principal.user_id) if run_id is None else await repository.start(paper_id, run_id, principal.user_id)
         elif action == "edit":
             result = await repository.edit(paper_id, run_id, principal.user_id, payload.draft, payload.expected_version)
         elif action == "approve":
@@ -736,3 +736,54 @@ async def paper_review_history(paper_submission_id: UUID, check_run_id: UUID,
 async def approve_paper_review(paper_submission_id: UUID, check_run_id: UUID, payload: PaperReviewApproval,
     db=Depends(get_session), principal: Principal=PrincipalDep):
     return await _review_action(db, principal, paper_submission_id, check_run_id, "approve", payload)
+
+
+@router.post("/paper-submissions/{paper_submission_id}/manual-review")
+async def start_manual_paper_review(
+    paper_submission_id: UUID,
+    db=Depends(get_session),
+    principal: Principal = PrincipalDep,
+):
+    return await _review_action(db, principal, paper_submission_id, None, "start")
+
+
+@router.get("/paper-submissions/{paper_submission_id}/manual-review")
+async def get_manual_paper_review(
+    paper_submission_id: UUID,
+    db=Depends(get_session),
+    principal: Principal = PrincipalDep,
+):
+    return await _review_action(db, principal, paper_submission_id, None, "get")
+
+
+@router.put("/paper-submissions/{paper_submission_id}/manual-review")
+async def edit_manual_paper_review(
+    paper_submission_id: UUID,
+    payload: PaperReviewEdit = Depends(_paper_review_edit_body),
+    db=Depends(get_session),
+    principal: Principal = PrincipalDep,
+):
+    return await _review_action(
+        db, principal, paper_submission_id, None, "edit", payload
+    )
+
+
+@router.get("/paper-submissions/{paper_submission_id}/manual-review/history")
+async def manual_paper_review_history(
+    paper_submission_id: UUID,
+    db=Depends(get_session),
+    principal: Principal = PrincipalDep,
+):
+    return await _review_action(db, principal, paper_submission_id, None, "history")
+
+
+@router.post("/paper-submissions/{paper_submission_id}/manual-review/approve")
+async def approve_manual_paper_review(
+    paper_submission_id: UUID,
+    payload: PaperReviewApproval,
+    db=Depends(get_session),
+    principal: Principal = PrincipalDep,
+):
+    return await _review_action(
+        db, principal, paper_submission_id, None, "approve", payload
+    )
