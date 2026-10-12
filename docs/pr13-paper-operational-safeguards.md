@@ -261,6 +261,34 @@ Ruff on all 16 changed Python files, compileall on `app`, `alembic` and `tests`,
 head successfully. There is no PR13 migration ID/down revision or PR13 migration
 roundtrip because no migration was introduced.
 
+## Local continuation verification (2026-10-12)
+
+The continuation found the implementation already committed as
+`c080f5eb7168e8b5494c2963a8e806591a12027e`; no production changes were required.
+Fresh Docker verification of that exact implementation reported:
+
+- Dedicated PostgreSQL PR13: **27 passed**.
+- Full Linux units: **1231 passed**, zero failures or errors.
+- PR13/PR7/PR10/PR12, scan intake/grouping and image-solving regression
+  modules: **201 passed in each order**. Input-artifact database tests ran
+  separately: **4 passed**. The earlier eight-module orders above included
+  these four cases in their 205-test totals.
+- Exact requested broad selector: **453 passed, 4 skipped, 253 deselected,
+  0 failed, 15 errors**. All errors are the documented source-database clone
+  conflict during fixture setup. The final independent-global-slot race adds
+  the fifteenth setup error compared with the earlier broad run. That case
+  passes in the dedicated and both regression-order runs.
+- Ruff on all changed Python files (run from `backend`), compileall,
+  baseline-to-HEAD diff whitespace checking, Compose config validation and
+  Alembic heads pass; the sole head remains **20261011_03**.
+
+Fresh local logs are `local-backups/pr13-reverification-selector.txt`,
+`local-backups/pr13-reverification-forward.txt`, and
+`local-backups/pr13-reverification-reverse.txt`. The Windows issues and prior
+fresh-database upgrade evidence above remain unchanged. The broad selector
+is still not fully green; no unrelated production change was made to hide
+the harness errors. No push or merge was performed.
+
 ## Defects addressed
 
 - Unbounded aggregate uploads and partial page persistence are replaced by
