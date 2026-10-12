@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import timedelta
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from app.application.checking_provider import PromptSpec
 from app.application.paper_checking_execution import (
@@ -16,6 +17,11 @@ from app.application.paper_checking_execution import (
     CompiledPaperRequest,
     PaperCheckingExecutionError,
     compile_paper_request,
+)
+from app.application.paper_operational_limits import (
+    PAPER_CHECK_GLOBAL_LOCK_KEY,
+    PAPER_PROVIDER_TIMEOUT_SECONDS,
+    PaperOperationalLimits,
 )
 from app.application.scan_checking_contracts import PAPER_CHECK_OUTPUT_VERSION
 from app.infrastructure.authoring_models import InputArtifact
@@ -29,19 +35,48 @@ from app.infrastructure.checking_models import (
     PaperCheckFindingRegion,
 )
 from app.infrastructure.checking_repository import CheckingRepository
+from app.infrastructure.scan_checking_models import AssessmentScanBatch, PaperSubmission
 
 
 @dataclass
 class PreparedExecution:
-    compiled: CompiledPaperRequest
+    compiled: CompiledPaperRequest | None
     model_run_id: UUID | None
     paper_submission_id: UUID
     artifacts: dict[str, InputArtifact]
     replay: object | None = None
+    rejection_code: str | None = None
 
 
 class SQLAlchemyPaperCheckingExecutionRepository:
-    def __init__(self, session_factory): self.session_factory=session_factory
+    def __init__(self, session_factory, limits=None):
+        self.session_factory = session_factory
+        self.limits = limits or PaperOperationalLimits()
+
+    async def _lock_batch(self, session, paper_id):
+        batch_id = await session.scalar(select(PaperSubmission.batch_id).where(PaperSubmission.id == paper_id))
+        if batch_id is None:
+            raise PaperCheckingExecutionError("paper_check_run_not_found")
+        return await session.scalar(select(AssessmentScanBatch).where(
+            AssessmentScanBatch.id == batch_id).with_for_update())
+
+    async def _reject(self, session, run, paper_id, code):
+        # A local precondition failure settles the run for explicit PR12 fallback;
+        # it creates no provider attempt and consumes no provider retry budget.
+        await CheckingRepository(session).transition_run(run.id, run.row_version,
+            "failed_terminal", failure_code=code)
+        return PreparedExecution(None, None, paper_id, {}, rejection_code=code)
+
+    async def validate_claim(self, prepared):
+        """Recheck after image reads; leave enough lease for the bounded AI call."""
+        async with self.session_factory() as session, session.begin():
+            await self._lock_batch(session, prepared.paper_submission_id)
+            attempt = await session.get(ModelRun, prepared.model_run_id)
+            now = await session.scalar(select(func.clock_timestamp()))
+            if attempt is None or attempt.status != "running" or (
+                attempt.started_at + timedelta(milliseconds=attempt.timeout_ms) <= now + timedelta(seconds=PAPER_PROVIDER_TIMEOUT_SECONDS)
+            ):
+                raise PaperCheckingExecutionError("paper_check_execution_claim_expired")
 
     async def reconcile_batch(self, paper_id):
         from app.application.paper_batch_orchestration import (
@@ -59,46 +94,88 @@ class SQLAlchemyPaperCheckingExecutionRepository:
 
     async def prepare(self,paper_id,run_id,provider_id,model_id):
         async with self.session_factory() as session, session.begin():
+          await session.execute(select(func.pg_advisory_xact_lock(*PAPER_CHECK_GLOBAL_LOCK_KEY)))
+          batch = await self._lock_batch(session, paper_id)
           run=await session.scalar(select(CheckRun).where(CheckRun.id==run_id).with_for_update())
           if run is None or run.paper_submission_id!=paper_id or run.submission_id is not None:
               raise PaperCheckingExecutionError("paper_check_run_not_found")
-          compiled=compile_paper_request(run.input_snapshot,provider_id=provider_id,model_id=model_id,
-                                         settings={"temperature":"0","max_output_tokens":8192})
           existing=await session.scalar(select(PaperAIRevision).where(PaperAIRevision.check_run_id==run.id))
-          if existing is not None: return PreparedExecution(compiled,None,paper_id,{},await self._result(session,run.id))
-          if run.status=="pending":
-              await CheckingRepository(session).transition_run(run.id,run.row_version,"running")
-          elif run.status!="running": raise PaperCheckingExecutionError("paper_check_run_not_executable")
-          prompt=await CheckingRepository(session).register_prompt(PromptSpec(PAPER_CHECK_PROMPT_NAME,
-              PAPER_CHECK_PROMPT_VERSION,PAPER_CHECK_SYSTEM_PROMPT,PAPER_CHECK_OUTPUT_VERSION))
+          if existing is not None: return PreparedExecution(None,None,paper_id,{},await self._result(session,run.id))
+          if run.status not in {"pending", "running"}:
+              raise PaperCheckingExecutionError("paper_check_run_not_executable")
+          current = await session.scalar(select(ModelRun).where(
+              ModelRun.check_run_id == run.id, ModelRun.status == "running",
+              ModelRun.started_at + ModelRun.timeout_ms * text("interval '1 millisecond'") > func.clock_timestamp()))
+          if current is not None:
+              if current.provider_id != provider_id or current.model_id != model_id:
+                  raise PaperCheckingExecutionError("paper_request_conflict")
+              raise PaperCheckingExecutionError("paper_check_in_progress")
+          try:
+              compiled=compile_paper_request(run.input_snapshot,provider_id=provider_id,model_id=model_id,
+                  settings={"temperature":"0","max_output_tokens":8192}, limits=self.limits)
+          except PaperCheckingExecutionError as exc:
+              if exc.code == "paper_check_provider_page_limit_exceeded":
+                  return await self._reject(session, run, paper_id, exc.code)
+              raise
           attempts=tuple((await session.scalars(select(ModelRun).where(ModelRun.check_run_id==run.id,
               ModelRun.paper_submission_id==paper_id).order_by(ModelRun.attempt_no))).all())
           if any(x.request_fingerprint!=compiled.request_fingerprint for x in attempts):
               raise PaperCheckingExecutionError("paper_request_conflict")
           if attempts and attempts[-1].status=="running":
-              raise PaperCheckingExecutionError("paper_check_in_progress")
+              now = await session.scalar(select(func.clock_timestamp()))
+              if attempts[-1].started_at + timedelta(milliseconds=attempts[-1].timeout_ms) > now:
+                  raise PaperCheckingExecutionError("paper_check_in_progress")
+              attempts[-1].status = "failed"
+              attempts[-1].error_code = "paper_execution_lease_expired"
+              attempts[-1].finished_at = now
+              await session.flush()
           if attempts and attempts[-1].status=="succeeded":
               raise PaperCheckingExecutionError("paper_result_finalize_incomplete")
-          if len(attempts)>=3: raise PaperCheckingExecutionError("paper_attempt_budget_exhausted")
-          attempt=ModelRun(check_run_id=run.id,assessment_item_id=None,remediation_plan_item_id=None,
-              paper_submission_id=paper_id,prompt_version_id=prompt.id,check_result_id=None,
-              provider_id=provider_id,model_id=model_id,settings_snapshot={"temperature":"0","max_output_tokens":8192},
-              request_fingerprint=compiled.request_fingerprint,attempt_no=len(attempts)+1,timeout_ms=30000,status="running")
-          session.add(attempt); await session.flush()
-          session.add(CheckerEvent(check_run_id=run.id,event_type="model_attempt",details={"model_run_id":str(attempt.id),"attempt_no":attempt.attempt_no,"source":"paper"}))
+          used = sum(x.error_code != "paper_execution_lease_expired" for x in attempts)
+          if used>=3: raise PaperCheckingExecutionError("paper_attempt_budget_exhausted")
           rows=(await session.scalars(select(InputArtifact).where(InputArtifact.id.in_(compiled.artifact_ids.values())))).all()
           by_id={x.id:x for x in rows}; artifacts={token:by_id.get(aid) for token,aid in compiled.artifact_ids.items()}
           if any(x is None for x in artifacts.values()): raise PaperCheckingExecutionError("paper_render_missing")
+          if sum(x.size_bytes for x in artifacts.values()) > self.limits.max_provider_image_bytes_per_paper:
+              return await self._reject(session, run, paper_id, "paper_check_provider_payload_too_large")
+          global_active = await session.scalar(select(func.count(ModelRun.id)).where(
+              ModelRun.paper_submission_id.is_not(None), ModelRun.status == "running",
+              ModelRun.started_at + ModelRun.timeout_ms * text("interval '1 millisecond'") > func.clock_timestamp()))
+          if global_active >= self.limits.max_parallel_paper_checks_global:
+              raise PaperCheckingExecutionError("paper_check_capacity_unavailable")
+          active = await session.scalar(select(func.count(ModelRun.id)).join(
+              PaperSubmission, PaperSubmission.id == ModelRun.paper_submission_id).where(
+                  PaperSubmission.batch_id == batch.id, ModelRun.status == "running",
+                  ModelRun.started_at + ModelRun.timeout_ms * text("interval '1 millisecond'") > func.clock_timestamp()))
+          if active >= self.limits.max_parallel_paper_checks_per_batch:
+              raise PaperCheckingExecutionError("paper_check_capacity_unavailable")
+          prompt=await CheckingRepository(session).register_prompt(PromptSpec(PAPER_CHECK_PROMPT_NAME,
+              PAPER_CHECK_PROMPT_VERSION,PAPER_CHECK_SYSTEM_PROMPT,PAPER_CHECK_OUTPUT_VERSION))
+          if run.status == "pending":
+              await CheckingRepository(session).transition_run(run.id,run.row_version,"running")
+          attempt=ModelRun(check_run_id=run.id,assessment_item_id=None,remediation_plan_item_id=None,
+              paper_submission_id=paper_id,prompt_version_id=prompt.id,check_result_id=None,
+              provider_id=provider_id,model_id=model_id,settings_snapshot={"temperature":"0","max_output_tokens":8192},
+              request_fingerprint=compiled.request_fingerprint,attempt_no=len(attempts)+1,
+              timeout_ms=self.limits.execution_lease_seconds * 1000,status="running")
+          session.add(attempt); await session.flush()
+          session.add(CheckerEvent(check_run_id=run.id,event_type="model_attempt",details={"model_run_id":str(attempt.id),"attempt_no":attempt.attempt_no,"source":"paper"}))
           return PreparedExecution(compiled,attempt.id,paper_id,artifacts)
 
     async def fail(self,prepared,code,response):
         async with self.session_factory() as session, session.begin():
-          attempt=await session.get(ModelRun,prepared.model_run_id)
+          await self._lock_batch(session, prepared.paper_submission_id)
+          attempt=await session.scalar(select(ModelRun).where(ModelRun.id == prepared.model_run_id).with_for_update())
+          now = await session.scalar(select(func.clock_timestamp()))
+          if attempt is None or attempt.status != "running" or attempt.started_at + timedelta(milliseconds=attempt.timeout_ms) <= now:
+              raise PaperCheckingExecutionError("paper_check_execution_claim_expired")
           if attempt and attempt.status=="running":
               attempt.status="invalid" if code=="semantic_invalid" else "failed"; attempt.error_code=code
               attempt.finished_at=await session.scalar(select(func.clock_timestamp()))
           run=await session.scalar(select(CheckRun).where(CheckRun.id==attempt.check_run_id).with_for_update())
-          retryable=code!="semantic_invalid" and attempt.attempt_no<3
+          used = await session.scalar(select(func.count(ModelRun.id)).where(
+              ModelRun.check_run_id == run.id, ModelRun.error_code.is_distinct_from("paper_execution_lease_expired")))
+          retryable=code!="semantic_invalid" and used<3
           if run.status=="running" and not retryable:
               await CheckingRepository(session).transition_run(run.id,run.row_version,
                   "failed_terminal" if code=="semantic_invalid" else "failed_retryable",failure_code=code)
@@ -106,10 +183,14 @@ class SQLAlchemyPaperCheckingExecutionRepository:
 
     async def succeed(self,prepared,response,telemetry):
         async with self.session_factory() as session, session.begin():
+          await self._lock_batch(session, prepared.paper_submission_id)
           attempt=await session.scalar(select(ModelRun).where(ModelRun.id==prepared.model_run_id).with_for_update())
           run=await session.scalar(select(CheckRun).where(CheckRun.id==attempt.check_run_id).with_for_update())
           prior=await session.scalar(select(PaperAIRevision).where(PaperAIRevision.check_run_id==run.id))
           if prior is not None: return await self._result(session,run.id)
+          now = await session.scalar(select(func.clock_timestamp()))
+          if attempt.status != "running" or attempt.started_at + timedelta(milliseconds=attempt.timeout_ms) <= now:
+              raise PaperCheckingExecutionError("paper_check_execution_claim_expired")
           payload=response.model_dump(mode="json")
           attempt.status="succeeded"; attempt.finished_at=await session.scalar(select(func.clock_timestamp()))
           attempt.provider_request_id=telemetry.provider_request_id; attempt.latency_ms=telemetry.latency_ms

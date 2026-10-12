@@ -12,7 +12,7 @@ from starlette.datastructures import UploadFile
 
 from app.application.capabilities import ASSESSMENT_SCAN_CHECK_MANAGE
 from app.application.checking_intake import InvalidCheckingInput
-from app.application.input_artifacts import MAX_ARTIFACT_SIZE_BYTES, ArtifactError
+from app.application.input_artifacts import ArtifactError
 from app.application.paper_batch_orchestration import (
     PaperBatchError,
     PaperBatchOrchestrationService,
@@ -73,6 +73,7 @@ from app.presentation.scan_intake_schemas import (
     PaperCheckRunCreate,
     ScanBatchCreate,
 )
+from app.presentation.scan_upload_form import scan_upload_form
 
 router = APIRouter(
     prefix="/api/assessment-core",
@@ -248,36 +249,29 @@ async def upload(
     principal: Principal = PrincipalDep,
 ):
     await _authorized_batch(db, batch_id, principal)
-    form = await request.form()
-    if (
-        set(form.keys()) != {"file", "upload_position"}
-        or len(form.getlist("file")) != 1
-    ):
-        raise HTTPException(422, "invalid_upload_form")
-    file = form.get("file")
-    if not isinstance(file, UploadFile):
-        raise HTTPException(422, "file_required")
-    try:
-        position = int(form.get("upload_position"))
-        content = await file.read(MAX_ARTIFACT_SIZE_BYTES + 1)
-    except (TypeError, ValueError):
-        raise HTTPException(422, "invalid_upload_position") from None
-    try:
-        row, source = await ScanPagePipeline(
-            db, FilesystemArtifactStorage(settings.artifact_storage_path)
-        ).upload(
-            batch_id=batch_id,
-            actor_id=principal.user_id,
-            content=content,
-            claimed_mime_type=file.content_type or "",
-            upload_position=position,
-            filename=file.filename or "upload",
-        )
-        return _artifact(row, source)
-    except (ArtifactError, ScanIntakeError) as exc:
-        raise _error(exc) from None
-    finally:
-        await file.close()
+    async with scan_upload_form(request, settings.paper_operational_limits) as form:
+        if set(form.keys()) != {"file", "upload_position"} or len(form.getlist("file")) != 1:
+            raise HTTPException(422, "invalid_upload_form")
+        file = form.get("file")
+        if not isinstance(file, UploadFile):
+            raise HTTPException(422, "file_required")
+        try:
+            position = int(form.get("upload_position"))
+        except (TypeError, ValueError):
+            raise HTTPException(422, "invalid_upload_position") from None
+        content = await file.read(settings.paper_operational_limits.max_single_artifact_bytes + 1)
+        try:
+            row, source = await ScanPagePipeline(
+                db, FilesystemArtifactStorage(settings.artifact_storage_path),
+                limits=settings.paper_operational_limits,
+            ).upload(
+                batch_id=batch_id, actor_id=principal.user_id, content=content,
+                claimed_mime_type=file.content_type or "", upload_position=position,
+                filename=file.filename or "upload",
+            )
+            return _artifact(row, source)
+        except (ArtifactError, ScanIntakeError) as exc:
+            raise _error(exc) from None
 
 
 @router.get("/scan-batches/{batch_id}/artifacts")
@@ -341,7 +335,7 @@ async def extract(
     await _authorized_batch(db, batch_id, principal)
     try:
         return await ScanPagePipeline(
-            db, FilesystemArtifactStorage(settings.artifact_storage_path)
+            db, FilesystemArtifactStorage(settings.artifact_storage_path), limits=settings.paper_operational_limits
         ).extract(batch_id=batch_id, actor_id=principal.user_id)
     except ScanIntakeError as exc:
         raise _error(exc) from None
@@ -395,7 +389,7 @@ def _error(exc):
         404
         if code.endswith("not_found")
         else 413
-        if code in {"artifact_too_large", "artifact_too_small"}
+        if code in {"artifact_too_large", "artifact_too_small", "scan_artifact_too_large", "scan_batch_artifact_limit_exceeded", "scan_batch_byte_limit_exceeded"}
         else 415
         if code in {"invalid_artifact_signature", "unsupported_artifact_type"}
         else 409
@@ -442,6 +436,7 @@ async def match_pages(
             db,
             FilesystemArtifactStorage(settings.artifact_storage_path),
             _matching_provider(request, settings),
+            settings.paper_operational_limits,
         ).run(batch_id, principal.user_id)
     except ScanMatchingError as exc:
         raise HTTPException(
@@ -476,8 +471,8 @@ async def matching_results(
         raise HTTPException(404, exc.code) from None
 
 
-def _grouping_service(db):
-    return ScanGroupingService(SqlAlchemyScanGroupingRepository(db))
+def _grouping_service(db, limits=None):
+    return ScanGroupingService(SqlAlchemyScanGroupingRepository(db, limits))
 
 
 def _grouping_error(exc):
@@ -566,10 +561,11 @@ async def confirm_grouping(
     payload: GroupingConfirmation,
     db=Depends(get_session),
     principal: Principal = PrincipalDep,
+    settings: Settings = Depends(get_settings),
 ):
     await _authorized_batch(db, batch_id, principal)
     try:
-        return await _grouping_service(db).confirm(
+        return await _grouping_service(db, settings.paper_operational_limits).confirm(
             batch_id,
             payload.expected_revision,
             payload.expected_row_version,
@@ -655,10 +651,10 @@ async def execute_paper_check(paper_submission_id:UUID,check_run_id:UUID,request
     if paper is None: raise HTTPException(404,"paper_submission_not_found")
     await _authorized_batch(db,paper.batch_id,principal)
     try:
-        return await PaperCheckingExecutionService(SQLAlchemyPaperCheckingExecutionRepository(async_session_factory),
-            FilesystemArtifactStorage(settings.artifact_storage_path),_paper_provider(request,settings)).execute(paper_submission_id,check_run_id)
+        return await PaperCheckingExecutionService(SQLAlchemyPaperCheckingExecutionRepository(async_session_factory, settings.paper_operational_limits),
+            FilesystemArtifactStorage(settings.artifact_storage_path),_paper_provider(request,settings), settings.paper_operational_limits).execute(paper_submission_id,check_run_id)
     except PaperCheckingExecutionError as exc:
-        raise HTTPException(409 if "conflict" in exc.code or "progress" in exc.code else 422,exc.code) from None
+        raise HTTPException(409 if "conflict" in exc.code or "progress" in exc.code or "capacity" in exc.code else 422,exc.code) from None
 
 
 @router.get("/paper-submissions/{paper_submission_id}/check-runs/{check_run_id}/ai-result")

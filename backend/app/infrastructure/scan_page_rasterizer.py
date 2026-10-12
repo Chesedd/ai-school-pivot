@@ -6,17 +6,24 @@ pypdfium2 rasterizes PDFs in process without a Poppler executable.
 
 from __future__ import annotations
 
+import warnings
+from collections.abc import Iterator
 from dataclasses import dataclass
 from hashlib import sha256
 from io import BytesIO
-from typing import Iterator, Protocol
-import warnings
+from typing import Protocol
+
+from app.application.paper_operational_limits import (
+    MAX_SECURITY_PAGE_PIXELS,
+    MAX_SECURITY_PDF_PAGES,
+    PaperOperationalLimits,
+)
 
 PDF_DPI = 200
-MAX_PDF_PAGES = 200
+MAX_PDF_PAGES = MAX_SECURITY_PDF_PAGES
 MAX_SOURCE_LONG_EDGE = 20_000
 MAX_NORMALIZED_LONG_EDGE = 5_000
-MAX_PAGE_PIXELS = 25_000_000
+MAX_PAGE_PIXELS = MAX_SECURITY_PAGE_PIXELS
 MAX_NORMALIZED_PNG_BYTES = 25 * 1024 * 1024
 
 
@@ -41,7 +48,7 @@ class PageRasterizer(Protocol):
     def rasterize(self, content: bytes, mime_type: str) -> Iterator[NormalizedPage]: ...
 
 
-def _png(image, index: int) -> NormalizedPage:
+def _png(image, index: int, limits=None) -> NormalizedPage:
     from PIL import Image
 
     if image.width <= 0 or image.height <= 0:
@@ -54,7 +61,7 @@ def _png(image, index: int) -> NormalizedPage:
             (MAX_NORMALIZED_LONG_EDGE, MAX_NORMALIZED_LONG_EDGE),
             Image.Resampling.LANCZOS,
         )
-    if image.width * image.height > MAX_PAGE_PIXELS:
+    if image.width * image.height > (limits or PaperOperationalLimits()).max_pixels_per_page:
         raise RasterizationError("normalized_page_too_large")
     # RGB/RGBA/L are browser-safe and avoid mode-specific metadata/palette behavior.
     if image.mode not in {"RGB", "RGBA", "L"}:
@@ -70,6 +77,23 @@ def _png(image, index: int) -> NormalizedPage:
 
 
 class PillowPdfiumPageRasterizer:
+    def __init__(self, limits=None):
+        self.limits = limits or PaperOperationalLimits()
+
+    def page_count(self, content: bytes, mime_type: str) -> int:
+        if mime_type != "application/pdf":
+            return 1
+        document = self._document(content)
+        try:
+            count = len(document)
+            if count < 1:
+                raise RasterizationError("invalid_pdf")
+            self.limits.guard("max_pages_per_artifact", count,
+                "scan_artifact_page_limit_exceeded", RasterizationError)
+            return count
+        finally:
+            document.close()
+
     def rasterize(self, content: bytes, mime_type: str) -> Iterator[NormalizedPage]:
         if mime_type == "application/pdf":
             return self._pdf(content)
@@ -94,27 +118,27 @@ class PillowPdfiumPageRasterizer:
                         raise RasterizationError("invalid_image")
                     if (
                         max(opened.size) > MAX_SOURCE_LONG_EDGE
-                        or opened.width * opened.height > MAX_PAGE_PIXELS
+                        or opened.width * opened.height > self.limits.max_pixels_per_page
                     ):
                         raise RasterizationError("image_too_large")
                     opened.load()
                     upright = ImageOps.exif_transpose(opened)
                     upright.load()
-                    page = _png(upright, 0)
+                    page = _png(upright, 0, self.limits)
         except RasterizationError:
             raise
         except (Image.DecompressionBombError, Image.DecompressionBombWarning):
             raise RasterizationError("image_too_large") from None
-        except Exception:
+        except Exception:  # noqa: BLE001 - Pillow plugins have diverse decoding exceptions.
             raise RasterizationError("invalid_image") from None
         return iter((page,))
 
-    def _pdf(self, content: bytes) -> Iterator[NormalizedPage]:
+    def _document(self, content: bytes):
         try:
             import pypdfium2 as pdfium
 
-            document = pdfium.PdfDocument(content)
-        except Exception as exc:
+            return pdfium.PdfDocument(content)
+        except Exception as exc:  # noqa: BLE001 - PDFium errors vary across builds.
             # PDFium reports password/security failures differently across builds.
             message = type(exc).__name__.lower() + " " + str(exc).lower()
             code = (
@@ -123,6 +147,9 @@ class PillowPdfiumPageRasterizer:
                 else "invalid_pdf"
             )
             raise RasterizationError(code) from None
+    def _pdf(self, content: bytes) -> Iterator[NormalizedPage]:
+        self.page_count(content, "application/pdf")
+        document = self._document(content)
         count = len(document)
         if count < 1:
             document.close()
@@ -144,15 +171,15 @@ class PillowPdfiumPageRasterizer:
                             or height_pt <= 0
                             or target_w > MAX_NORMALIZED_LONG_EDGE
                             or target_h > MAX_NORMALIZED_LONG_EDGE
-                            or target_w * target_h > MAX_PAGE_PIXELS
+                            or target_w * target_h > self.limits.max_pixels_per_page
                         ):
                             raise RasterizationError("pdf_page_too_large")
                         bitmap = page.render(scale=PDF_DPI / 72, rotation=0)
                         image = bitmap.to_pil()
-                        yield _png(image, index)
+                        yield _png(image, index, self.limits)
                     except RasterizationError:
                         raise
-                    except Exception:
+                    except Exception:  # noqa: BLE001 - native rendering boundary.
                         raise RasterizationError(
                             "page_render_failed", retryable=True
                         ) from None

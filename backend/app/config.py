@@ -2,8 +2,11 @@
 
 from datetime import timedelta
 from functools import lru_cache
-from pydantic import PostgresDsn, SecretStr, field_validator
+
+from pydantic import Field, PostgresDsn, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.application.paper_operational_limits import PaperOperationalLimits
 
 
 class Settings(BaseSettings):
@@ -12,6 +15,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=None, extra="ignore")
 
     database_url: PostgresDsn
+    paper_operational_limits: PaperOperationalLimits = Field(default_factory=PaperOperationalLimits)
     database_echo: bool = False
     cors_origins: str = "http://localhost:5173"
     attachment_storage_path: str = "/tmp/ai-school-pivot-attachments"

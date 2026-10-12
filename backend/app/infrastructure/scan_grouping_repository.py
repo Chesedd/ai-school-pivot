@@ -1,14 +1,18 @@
 """PostgreSQL persistence boundary for teacher-owned scan grouping."""
 
 from __future__ import annotations
-from datetime import datetime, timezone
+
+from datetime import UTC, datetime
+
 from sqlalchemy import delete, func, select
+
+from app.application.paper_operational_limits import PaperOperationalLimits
 from app.application.scan_checking_contracts import (
+    AssessmentScanBatchState,
     ConfirmedPaperGroup,
     PageGroupingRevision,
     validate_batch_transition,
     validate_grouping_revision,
-    AssessmentScanBatchState,
 )
 from app.application.scan_grouping import GroupingSeedPage, seed_grouping_pages
 from app.infrastructure.assessment_models import AssignmentParticipant, Student
@@ -37,8 +41,9 @@ class GroupingRepositoryError(RuntimeError):
 
 
 class SqlAlchemyScanGroupingRepository:
-    def __init__(self, session):
+    def __init__(self, session, limits=None):
         self.s = session
+        self.limits = limits or PaperOperationalLimits()
 
     async def initialize(self, batch_id, actor_id):
         batch = await self._lock_batch(batch_id)
@@ -58,7 +63,7 @@ class SqlAlchemyScanGroupingRepository:
             raise GroupingRepositoryError("grouping_initialization_not_allowed")
         if existing and existing.status == "draft":
             existing.status = "superseded"
-            existing.updated_at = datetime.now(timezone.utc)
+            existing.updated_at = datetime.now(UTC)
             await self.s.flush()
         number = (
             await self.s.scalar(
@@ -375,7 +380,15 @@ class SqlAlchemyScanGroupingRepository:
                     .order_by(ScanGroupingEntry.position)
                 )
             ).all()
-            now = datetime.now(timezone.utc)
+            self.limits.guard("max_paper_submissions_per_batch", len(entries),
+                "scan_batch_paper_limit_exceeded", GroupingRepositoryError)
+            counts = (await self.s.execute(select(ScanGroupingPage.grouping_entry_id,
+                func.count()).where(ScanGroupingPage.grouping_revision_id == rev.id)
+                .group_by(ScanGroupingPage.grouping_entry_id))).all()
+            for _, count in counts:
+                self.limits.guard("max_pages_per_paper", count,
+                    "paper_submission_page_limit_exceeded", GroupingRepositoryError)
+            now = datetime.now(UTC)
             rev.status = "confirmed"
             rev.confirmed_at = now
             rev.confirmed_by_user_id = actor_id
@@ -609,7 +622,7 @@ class SqlAlchemyScanGroupingRepository:
         if rev.based_on_matching_revision != batch.matching_revision:
             raise GroupingRepositoryError("grouping_based_on_stale_matching")
         rev.row_version += 1
-        rev.updated_at = datetime.now(timezone.utc)
+        rev.updated_at = datetime.now(UTC)
         return batch, rev
 
     async def _validate(self, batch, rev):
@@ -753,6 +766,7 @@ class SqlAlchemyScanGroupingRepository:
             select(AssessmentScanBatch)
             .where(AssessmentScanBatch.id == batch_id)
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
 
     async def _current_revision(self, batch_id, lock=False):
@@ -763,7 +777,7 @@ class SqlAlchemyScanGroupingRepository:
             .limit(1)
         )
         if lock:
-            q = q.with_for_update()
+            q = q.with_for_update().execution_options(populate_existing=True)
         return await self.s.scalar(q)
 
     def _event(self, batch, aggregate_type, aggregate_id, event, actor, details):

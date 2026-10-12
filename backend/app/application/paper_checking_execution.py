@@ -5,6 +5,7 @@ content is carried beside the request and is deliberately absent from its hash.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 from collections.abc import Mapping
@@ -17,6 +18,10 @@ from pydantic import ValidationError
 
 from app.application.checking_provider import canonical_json
 from app.application.paper_checking_intake import PAPER_SNAPSHOT_SCHEMA_VERSION
+from app.application.paper_operational_limits import (
+    PAPER_PROVIDER_TIMEOUT_SECONDS,
+    PaperOperationalLimits,
+)
 from app.application.scan_checking_contracts import (
     NORMALIZED_UPRIGHT_V1,
     PAPER_CHECK_OUTPUT_VERSION,
@@ -84,11 +89,13 @@ def _context(value: Any) -> str:
 
 
 def compile_paper_request(snapshot: Mapping[str, Any], *, provider_id: str, model_id: str,
-                          settings: Mapping[str, Any] | None = None) -> CompiledPaperRequest:
+                          settings: Mapping[str, Any] | None = None, limits=None) -> CompiledPaperRequest:
     try:
         if snapshot.get("snapshot_schema_version") != PAPER_SNAPSHOT_SCHEMA_VERSION:
             raise PaperCheckingExecutionError("paper_snapshot_invalid")
         raw_pages, raw_items = snapshot["pages"], snapshot["items"]
+        (limits or PaperOperationalLimits()).guard("max_provider_pages_per_paper", len(raw_pages),
+            "paper_check_provider_page_limit_exceeded", PaperCheckingExecutionError)
         if not raw_pages or [p["page_order"] for p in raw_pages] != list(range(len(raw_pages))):
             raise PaperCheckingExecutionError("paper_pages_invalid")
         pages=[]; page_ids={}; artifacts={}
@@ -136,8 +143,9 @@ def verify_png(content: bytes, expected_hash: str) -> None:
 
 
 class PaperCheckingExecutionService:
-    def __init__(self, repository, storage, provider: PaperCheckingProvider):
+    def __init__(self, repository, storage, provider: PaperCheckingProvider, limits=None):
         self.repository,self.storage,self.provider=repository,storage,provider
+        self.limits = limits or PaperOperationalLimits()
 
     async def _reconcile(self, paper_id):
         hook = getattr(self.repository, "reconcile_batch", None)
@@ -151,6 +159,9 @@ class PaperCheckingExecutionService:
     async def execute(self, paper_submission_id: UUID, check_run_id: UUID):
         while True:
             prepared=await self.repository.prepare(paper_submission_id,check_run_id,self.provider.provider_id,self.provider.model_id)
+            if prepared.rejection_code:
+                await self._reconcile(paper_submission_id)
+                raise PaperCheckingExecutionError(prepared.rejection_code)
             if prepared.replay is not None:
                 await self._reconcile(paper_submission_id)
                 return prepared.replay
@@ -159,11 +170,27 @@ class PaperCheckingExecutionService:
                 for page in prepared.compiled.request.pages:
                     artifact=prepared.artifacts.get(page.content.content_token)
                     if artifact is None or artifact.mime_type != "image/png": raise PaperCheckingExecutionError("paper_render_missing")
-                    raw=await self.storage.read(artifact.storage_reference)
+                    reader = getattr(self.storage, "read_bounded", None)
+                    remaining = self.limits.max_provider_image_bytes_per_paper - sum(len(value) for value in content.values())
+                    raw = (await reader(artifact.storage_reference, remaining) if reader else
+                           await self.storage.read(artifact.storage_reference))
+                    self.limits.guard("max_provider_image_bytes_per_paper",
+                        sum(len(value) for value in content.values()) + len(raw),
+                        "paper_check_provider_payload_too_large", PaperCheckingExecutionError)
                     verify_png(raw,page.content.content_sha256); content[page.content.content_token]=raw
-                response,telemetry=await self.provider.check(prepared.compiled.request,content)
+                validate_claim = getattr(self.repository, "validate_claim", None)
+                if validate_claim is not None:
+                    await validate_claim(prepared)
+                response,telemetry=await asyncio.wait_for(
+                    self.provider.check(prepared.compiled.request,content), timeout=PAPER_PROVIDER_TIMEOUT_SECONDS)
                 validate_checking_response(prepared.compiled.request,response)
             except PaperCheckingExecutionError as exc:
+                if exc.code == "paper_check_execution_claim_expired":
+                    raise
+                if exc.code == "paper_check_provider_payload_too_large":
+                    await self.repository.fail(prepared, "semantic_invalid", None)
+                    await self._reconcile(paper_submission_id)
+                    raise
                 semantic=exc.code in {"paper_response_invalid","paper_render_missing","paper_render_not_png","paper_render_hash_mismatch"}
                 retry=await self.repository.fail(prepared,"semantic_invalid" if semantic else "transport",None)
                 if retry: continue

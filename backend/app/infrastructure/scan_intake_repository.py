@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application.paper_operational_limits import PaperOperationalLimits
 from app.application.scan_checking_contracts import AssessmentScanBatchState
 from app.application.scan_intake import (
     ArtifactExtractionStatus,
@@ -20,6 +21,7 @@ from app.application.scan_intake import (
     ScanPageStatus,
 )
 from app.infrastructure.model_registry import register_all_models
+from app.infrastructure.paper_operational_guards import guard_attachment, page_count
 
 # Scan intake rows reference tables owned by auth, assessment, classroom, and
 # authoring.  Register the complete shared metadata graph when this persistence
@@ -27,9 +29,9 @@ from app.infrastructure.model_registry import register_all_models
 # order to make those foreign-key targets resolvable during flush.
 register_all_models()
 
-from app.infrastructure.assessment_models import Assignment  # noqa: E402
-from app.infrastructure.authoring_models import InputArtifact  # noqa: E402
-from app.infrastructure.scan_checking_models import (  # noqa: E402
+from app.infrastructure.assessment_models import Assignment
+from app.infrastructure.authoring_models import InputArtifact
+from app.infrastructure.scan_checking_models import (
     AssessmentScanBatch,
     ScanBatchArtifact,
     ScanCheckingEvent,
@@ -106,8 +108,9 @@ def _page(r: ScanPage) -> ScanPageRecord:
 
 
 class SqlAlchemyScanIntakeRepository:
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, limits=None):
         self.db = db
+        self.limits = limits or PaperOperationalLimits()
 
     async def assignment_class(self, assignment_id: UUID) -> UUID | None:
         return await self.db.scalar(
@@ -125,7 +128,9 @@ class SqlAlchemyScanIntakeRepository:
 
     async def get_batch(self, batch_id: UUID, *, lock: bool = False):
         query = select(AssessmentScanBatch).where(AssessmentScanBatch.id == batch_id)
-        row = await self.db.scalar(query.with_for_update() if lock else query)
+        row = await self.db.scalar(
+            query.with_for_update().execution_options(populate_existing=True) if lock else query
+        )
         return _batch(row) if row else None
 
     async def list_batches(self, assignment_id: UUID):
@@ -196,6 +201,12 @@ class SqlAlchemyScanIntakeRepository:
         return _batch(row)
 
     async def attach_artifact(self, **values: Any):
+        batch = await self.db.scalar(select(AssessmentScanBatch).where(
+            AssessmentScanBatch.id == values["batch_id"]).with_for_update().execution_options(populate_existing=True))
+        if batch is None:
+            raise ScanIntakeError("scan_batch_not_found")
+        if batch.status not in {"draft", "uploading"}:
+            raise ScanIntakeError("artifact_attachment_not_allowed")
         owner = await self.db.scalar(
             select(InputArtifact.owner_id).where(
                 InputArtifact.id == values["input_artifact_id"]
@@ -205,6 +216,9 @@ class SqlAlchemyScanIntakeRepository:
             raise ScanIntakeError("artifact_not_found")
         if owner != values["actor_user_id"]:
             raise ScanIntakeError("artifact_not_owned")
+        size = await self.db.scalar(select(InputArtifact.size_bytes).where(
+            InputArtifact.id == values["input_artifact_id"]))
+        await guard_attachment(self.db, batch.id, size, self.limits)
         actor = values.pop("actor_user_id")
         row = ScanBatchArtifact(**values, extraction_status="pending")
         self.db.add(row)
@@ -237,6 +251,15 @@ class SqlAlchemyScanIntakeRepository:
         artifact = await self.db.get(ScanBatchArtifact, values["batch_artifact_id"])
         if artifact is None:
             raise ScanIntakeError("batch_artifact_not_found")
+        await self.db.scalar(select(AssessmentScanBatch).where(
+            AssessmentScanBatch.id == artifact.batch_id).with_for_update())
+        self.limits.guard("max_pages_per_batch", await page_count(self.db, artifact.batch_id) + 1,
+            "scan_batch_page_limit_exceeded", ScanIntakeError)
+        self.limits.guard("max_pages_per_artifact", values["source_page_index"] + 1,
+            "scan_artifact_page_limit_exceeded", ScanIntakeError)
+        if values.get("width_px") and values.get("height_px"):
+            self.limits.guard("max_pixels_per_page", values["width_px"] * values["height_px"],
+                "image_too_large", ScanIntakeError)
         if (
             values.get("derived_render_artifact_id") is not None
             and await self.db.get(InputArtifact, values["derived_render_artifact_id"])

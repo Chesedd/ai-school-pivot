@@ -1,10 +1,14 @@
 """Orchestration for immutable AI scan matching with no transaction over AI calls."""
 
 from __future__ import annotations
-from datetime import datetime, timezone
-from hashlib import sha256
+
 import json
+from datetime import UTC, datetime
+from hashlib import sha256
+
 from sqlalchemy import select
+
+from app.application.paper_operational_limits import PaperOperationalLimits
 from app.application.scan_checking_contracts import (
     MATCHING_OUTPUT_VERSION,
     MatchingAssessmentContext,
@@ -23,12 +27,13 @@ from app.application.scan_matching import (
     prepare_matching_preview,
 )
 from app.infrastructure.assessment_models import (
+    Assessment,
     Assignment,
     AssignmentParticipant,
-    Assessment,
     Student,
 )
 from app.infrastructure.authoring_models import InputArtifact
+from app.infrastructure.paper_operational_guards import page_count
 from app.infrastructure.scan_checking_models import (
     ScanBatchArtifact,
     ScanMatchingChunk,
@@ -49,7 +54,8 @@ class ScanMatchingError(RuntimeError):
 
 
 class ScanMatchingService:
-    def __init__(self, session, storage, provider):
+    def __init__(self, session, storage, provider, limits=None):
+        self.limits = limits or PaperOperationalLimits()
         self.s = session
         self.storage = storage
         self.provider = provider
@@ -70,7 +76,7 @@ class ScanMatchingService:
                 continue
             try:
                 await self._execute(run, claimed)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - provider boundary has diverse SDK exceptions.
                 await self.s.rollback()
                 chunk = await self.s.get(ScanMatchingChunk, claimed.id)
                 retryable = getattr(
@@ -86,7 +92,7 @@ class ScanMatchingService:
                     getattr(getattr(exc, "code", None), "value", None)
                     or "unexpected_internal_error"
                 )
-                chunk.completed_at = datetime.now(timezone.utc)
+                chunk.completed_at = datetime.now(UTC)
                 runrow = await self.s.get(ScanMatchingRun, run.id)
                 runrow.status = chunk.status
                 runrow.failure_code = chunk.failure_code
@@ -113,6 +119,8 @@ class ScanMatchingService:
             raise ScanMatchingError("matching_already_completed")
         if batch.status != "extracting":
             raise ScanMatchingError("scan_batch_not_ready_for_matching")
+        self.limits.guard("max_pages_per_batch", await page_count(self.s, batch_id),
+            "scan_batch_page_limit_exceeded", ScanMatchingError)
         artifacts = (
             await self.s.scalars(
                 select(ScanBatchArtifact)
@@ -326,7 +334,7 @@ class ScanMatchingService:
         chunk.cached_tokens = telemetry.cached_tokens
         chunk.cache_write_tokens = telemetry.cache_write_tokens
         chunk.latency_ms = telemetry.latency_ms
-        chunk.completed_at = datetime.now(timezone.utc)
+        chunk.completed_at = datetime.now(UTC)
         await self.s.commit()
 
     async def _finalize(self, run_id, batch_id):
@@ -344,7 +352,7 @@ class ScanMatchingService:
             raise ScanMatchingError("matching_page_coverage_mismatch")
         batch = await self.repo.lock_batch(batch_id)
         run.status = "succeeded"
-        run.completed_at = datetime.now(timezone.utc)
+        run.completed_at = datetime.now(UTC)
         run.failure_code = None
         batch.status = "matching_review_required"
         batch.row_version += 1

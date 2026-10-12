@@ -1,8 +1,7 @@
 """Filesystem implementation of the private artifact binary boundary."""
 import hashlib
 from pathlib import Path
-from uuid import UUID
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 
 class FilesystemArtifactStorage:
@@ -23,6 +22,11 @@ class FilesystemArtifactStorage:
 
     async def read(self, storage_reference: str) -> bytes:
         return self._path(storage_reference).read_bytes()
+
+    async def read_bounded(self, storage_reference: str, max_bytes: int) -> bytes:
+        """Read at most the remaining budget plus one rejection sentinel byte."""
+        with self._path(storage_reference).open("rb") as source:
+            return source.read(max_bytes + 1)
 
     async def delete(self, storage_reference: str) -> None:
         self._path(storage_reference).unlink(missing_ok=True)

@@ -1,8 +1,11 @@
 """Short-transaction SQLAlchemy persistence for immutable matching evidence."""
 
 from __future__ import annotations
-from datetime import datetime, timezone
+
+from datetime import UTC, datetime
+
 from sqlalchemy import func, select
+
 from app.infrastructure.scan_checking_models import (
     AssessmentScanBatch,
     ScanMatchingChunk,
@@ -20,6 +23,7 @@ class SqlAlchemyScanMatchingRepository:
             select(AssessmentScanBatch)
             .where(AssessmentScanBatch.id == batch_id)
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
 
     async def current_run(self, batch_id):
@@ -28,6 +32,7 @@ class SqlAlchemyScanMatchingRepository:
             .where(ScanMatchingRun.batch_id == batch_id)
             .order_by(ScanMatchingRun.revision.desc())
             .limit(1)
+            .execution_options(populate_existing=True)
         )
 
     async def claim_chunk(self, run_id, index):
@@ -38,11 +43,12 @@ class SqlAlchemyScanMatchingRepository:
                 ScanMatchingChunk.chunk_index == index,
             )
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if row is None or row.status not in {"pending", "failed_retryable"}:
             return None
         row.status = "running"
-        row.started_at = datetime.now(timezone.utc)
+        row.started_at = datetime.now(UTC)
         row.completed_at = None
         row.failure_code = None
         await self.session.commit()
