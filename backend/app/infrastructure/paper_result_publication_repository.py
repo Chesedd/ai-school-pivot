@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert
 
 from app.application.paper_checking_review import PaperReviewError, canonicalize_draft
 from app.application.paper_result_publication import (
@@ -15,6 +16,8 @@ from app.application.paper_result_publication import (
     WithdrawalEntry,
     WithdrawPublication,
     build_publication_snapshot,
+    publication_command_fingerprint,
+    validate_publication_request_key,
 )
 from app.config import get_settings
 from app.infrastructure.artifact_storage import FilesystemArtifactStorage
@@ -28,6 +31,8 @@ from app.infrastructure.paper_checking_review_repository import (
 )
 from app.infrastructure.paper_result_publication_models import (
     PaperResultPublication,
+    PaperResultPublicationCommand,
+    PaperResultPublicationCommandItem,
     PaperResultPublicationState,
     PaperResultPublicationWithdrawal,
 )
@@ -47,6 +52,91 @@ class PaperResultPublicationRepository:
         self.storage = storage or FilesystemArtifactStorage(
             get_settings().artifact_storage_path
         )
+
+    async def _claim_command(self, actor, request_key, kind, fingerprint):
+        request_key = validate_publication_request_key(request_key)
+        # INSERT's unique-key wait serializes contenders before paper locks.
+        # Failure/rollback releases the key and all effects in the same transaction.
+        command_id = await self.db.scalar(
+            insert(PaperResultPublicationCommand)
+            .values(
+                id=uuid4(),
+                actor_user_id=actor,
+                request_key=request_key,
+                command_kind=kind,
+                request_fingerprint=fingerprint,
+            )
+            .on_conflict_do_nothing(index_elements=["actor_user_id", "request_key"])
+            .returning(PaperResultPublicationCommand.id)
+        )
+        if command_id is not None:
+            return command_id, None
+        command = await self.db.scalar(
+            select(PaperResultPublicationCommand).where(
+                PaperResultPublicationCommand.actor_user_id == actor,
+                PaperResultPublicationCommand.request_key == request_key,
+            )
+        )
+        if command.request_fingerprint != fingerprint or command.command_kind != kind:
+            raise PaperPublicationError("paper_publication_request_key_conflict", 409)
+        items = (
+            await self.db.scalars(
+                select(PaperResultPublicationCommandItem)
+                .where(PaperResultPublicationCommandItem.command_id == command.id)
+                .order_by(PaperResultPublicationCommandItem.position)
+            )
+        ).all()
+        results = []
+        for item in items:
+            if item.publication_id is not None:
+                row = await self.db.get(PaperResultPublication, item.publication_id)
+                # `active` describes the original command outcome, not today's state.
+                results.append(self.project(row, True, item.outcome))
+            else:
+                row = await self.db.get(
+                    PaperResultPublicationWithdrawal, item.withdrawal_id
+                )
+                results.append(self.project_withdrawal(row))
+        return command.id, results
+
+    async def _record_command(self, command_id, results, *, withdrawal=False):
+        command = await self.db.get(PaperResultPublicationCommand, command_id)
+        for position, result in enumerate(results):
+            self.db.add(
+                PaperResultPublicationCommandItem(
+                    command_id=command_id,
+                    position=position,
+                    publication_id=None if withdrawal else result["id"],
+                    withdrawal_id=result["id"] if withdrawal else None,
+                    outcome=result.get("outcome"),
+                )
+            )
+        await self.db.flush()
+        # Automatic bulk freezes its resolved paper/revision set on first execution.
+        resolved = [
+            {
+                name: str(result[name])
+                for name in (
+                    ("publication_id", "reason")
+                    if withdrawal
+                    else ("paper_submission_id", "approved_review_revision_id")
+                )
+            }
+            for result in results
+        ]
+        command.resolved_fingerprint = hashlib.sha256(
+            json.dumps(
+                {
+                    "request_fingerprint": command.request_fingerprint,
+                    "entries": resolved,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        command.item_count = len(results)
+        await self.db.flush()
+        return results
 
     async def _lock_papers(self, paper_ids, batch_id=None):
         # Finalization locks the batch. Always take batch, paper, then page locks.
@@ -184,7 +274,19 @@ class PaperResultPublicationRepository:
         except (PaperReviewError, ValidationError, ValueError, KeyError, TypeError):
             raise PaperPublicationError("paper_publication_invalid_snapshot") from None
 
-    async def publish_selected(self, entries, actor, batch_id=None):
+    async def publish_selected(self, entries, actor, batch_id=None, *, request_key):
+        command_id, replay = await self._claim_command(
+            actor,
+            request_key,
+            "selected",
+            publication_command_fingerprint("selected", entries, batch_id=batch_id),
+        )
+        if replay is not None:
+            return replay
+        results = await self._publish_selected(entries, actor, batch_id)
+        return await self._record_command(command_id, results)
+
+    async def _publish_selected(self, entries, actor, batch_id=None):
         identifiers = [x.paper_submission_id for x in entries]
         if (
             not identifiers
@@ -268,20 +370,34 @@ class PaperResultPublicationRepository:
             results.append(self.project(publication, True, "published"))
         return results
 
-    async def publish(self, paper_id, revision_id, actor):
-        return (
-            await self.publish_selected(
-                [
-                    PublicationEntry(
-                        paper_submission_id=paper_id,
-                        approved_review_revision_id=revision_id,
-                    )
-                ],
-                actor,
+    async def publish(self, paper_id, revision_id, actor, *, request_key):
+        entries = [
+            PublicationEntry(
+                paper_submission_id=paper_id, approved_review_revision_id=revision_id
             )
-        )[0]
+        ]
+        command_id, replay = await self._claim_command(
+            actor,
+            request_key,
+            "single",
+            publication_command_fingerprint("single", entries),
+        )
+        if replay is not None:
+            return replay[0]
+        results = await self._publish_selected(entries, actor)
+        return (await self._record_command(command_id, results))[0]
 
-    async def bulk(self, batch_id, actor):
+    async def bulk(self, batch_id, actor, *, request_key):
+        # Automatic bulk means resolve latest approvals once, on first execution.
+        # Replays must never resolve this selector again against changing state.
+        command_id, replay = await self._claim_command(
+            actor,
+            request_key,
+            "bulk",
+            publication_command_fingerprint("bulk", batch_id=batch_id),
+        )
+        if replay is not None:
+            return replay
         papers = (
             await self.db.scalars(
                 select(PaperSubmission.id)
@@ -318,7 +434,10 @@ class PaperResultPublicationRepository:
             raise PaperPublicationError(
                 "paper_publication_batch_has_ineligible_papers", 409
             )
-        return await self.publish_selected(entries, actor, batch_id) if entries else []
+        results = (
+            await self._publish_selected(entries, actor, batch_id) if entries else []
+        )
+        return await self._record_command(command_id, results)
 
     @staticmethod
     def project(row, active, outcome=None):
@@ -385,7 +504,16 @@ class PaperResultPublicationRepository:
             "created_at": row.created_at,
         }
 
-    async def withdraw_selected(self, entries, reason, actor, batch_id=None):
+    async def withdraw_selected(
+        self,
+        entries,
+        reason,
+        actor,
+        batch_id=None,
+        *,
+        request_key,
+        _kind="withdraw_selected",
+    ):
         try:
             reason = WithdrawPublication(reason=reason).reason
         except ValidationError:
@@ -394,6 +522,16 @@ class PaperResultPublicationRepository:
                 if isinstance(reason, str) and not reason.strip()
                 else "paper_publication_withdrawal_reason_invalid"
             ) from None
+        command_id, replay = await self._claim_command(
+            actor,
+            request_key,
+            _kind,
+            publication_command_fingerprint(
+                _kind, entries, batch_id=batch_id, reason=reason
+            ),
+        )
+        if replay is not None:
+            return replay
         ids = [e.paper_submission_id for e in entries]
         if not ids or len(ids) > 500 or len(set(ids)) != len(ids):
             raise PaperPublicationError("paper_publication_invalid_selection")
@@ -448,9 +586,13 @@ class PaperResultPublicationRepository:
                 state.active_publication_id = None
                 state.updated_at = await self.db.scalar(select(func.clock_timestamp()))
                 await self.db.flush()
-        return [self.project_withdrawal(row) for row, _ in pending]
+        return await self._record_command(
+            command_id,
+            [self.project_withdrawal(row) for row, _ in pending],
+            withdrawal=True,
+        )
 
-    async def withdraw(self, paper_id, publication_id, reason, actor):
+    async def withdraw(self, paper_id, publication_id, reason, actor, *, request_key):
         return (
             await self.withdraw_selected(
                 [
@@ -460,6 +602,8 @@ class PaperResultPublicationRepository:
                 ],
                 reason,
                 actor,
+                request_key=request_key,
+                _kind="withdraw_single",
             )
         )[0]
 

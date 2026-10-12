@@ -119,3 +119,49 @@ class PaperResultPublicationWithdrawal(IdMixin, Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("clock_timestamp()")
     )
+
+
+class PaperResultPublicationCommand(IdMixin, Base):
+    __tablename__ = "paper_result_publication_commands"
+    __table_args__ = (
+        UniqueConstraint(
+            "actor_user_id", "request_key", name="uq_paper_publication_command_key"
+        ),
+        CheckConstraint(
+            "length(request_key) BETWEEN 1 AND 128", name="ck_paper_command_key"
+        ),
+    )
+    actor_user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT")
+    )
+    request_key: Mapped[str] = mapped_column(String(128))
+    request_fingerprint: Mapped[str] = mapped_column(String(64))
+    resolved_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    command_kind: Mapped[str] = mapped_column(String(32))
+    item_count: Mapped[int] = mapped_column(Integer, server_default=text("-1"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("clock_timestamp()")
+    )
+
+
+class PaperResultPublicationCommandItem(Base):
+    __tablename__ = "paper_result_publication_command_items"
+    __table_args__ = (
+        CheckConstraint("position >= 0", name="ck_paper_command_position"),
+        CheckConstraint(
+            "(publication_id IS NULL) <> (withdrawal_id IS NULL)",
+            name="ck_paper_command_result",
+        ),
+    )
+    command_id: Mapped[UUID] = mapped_column(
+        ForeignKey("paper_result_publication_commands.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    position: Mapped[int] = mapped_column(Integer, primary_key=True)
+    publication_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("paper_result_publications.id", ondelete="RESTRICT")
+    )
+    withdrawal_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("paper_result_publication_withdrawals.id", ondelete="RESTRICT")
+    )
+    outcome: Mapped[str | None] = mapped_column(String(32))

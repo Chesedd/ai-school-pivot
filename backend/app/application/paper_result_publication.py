@@ -1,5 +1,7 @@
 """Explicit publication contracts; student material is an allowlisted frozen copy."""
 
+import hashlib
+import json
 from decimal import Decimal
 from typing import Literal
 from uuid import UUID
@@ -162,3 +164,25 @@ def build_publication_snapshot(
         ),
         grade=PublishedGrade(**grade.model_dump(exclude={"grade_override_reason"})),
     )
+
+
+def publication_command_fingerprint(kind, entries=(), *, batch_id=None, reason=None):
+    """UUID-sorted results make selection order immaterial; selectors are explicit."""
+    payload = {
+        "kind": kind,
+        "batch_id": str(batch_id) if batch_id is not None else None,
+        "entries": sorted(
+            (entry.model_dump(mode="json") for entry in entries),
+            key=lambda entry: entry["paper_submission_id"],
+        ),
+        "reason": reason,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def validate_publication_request_key(key):
+    if not isinstance(key, str) or not 1 <= len(key) <= 128 or not key.strip():
+        raise PaperPublicationError("paper_publication_request_key_invalid")
+    return key

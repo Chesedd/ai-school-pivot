@@ -9,12 +9,6 @@ from uuid import uuid4
 import httpx
 import pytest
 import pytest_asyncio
-from fastapi import FastAPI
-from sqlalchemy import text
-from sqlalchemy.engine import make_url
-from sqlalchemy.exc import DBAPIError
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
 from app.application.capabilities import capabilities_for_roles
 from app.application.paper_checking_review import (
     PaperReviewApproval,
@@ -35,6 +29,11 @@ from app.presentation.auth_dependencies import require_principal
 from app.presentation.image_artifact_routes import router as artifact_router
 from app.presentation.paper_result_publication_routes import router
 from app.presentation.scan_intake_routes import router as scan_router
+from fastapi import FastAPI
+from sqlalchemy import text
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from tests.integration import c10a_postgres
 from tests.integration.test_paper_checking_execution_database import PNG
 from tests.integration.test_paper_checking_execution_database import (
@@ -120,12 +119,18 @@ async def test_real_concurrent_publications_serialize(
             first_pid = await first.scalar(text("SELECT pg_backend_pid()"))
             second_pid = await second.scalar(text("SELECT pg_backend_pid()"))
             row_a = await PaperResultPublicationRepository(first).publish(
-                ids["paper_a"], a.latest_approved_revision_id, ids["teacher"]
+                ids["paper_a"],
+                a.latest_approved_revision_id,
+                ids["teacher"],
+                request_key=str(uuid4()),
             )
 
             async def contender():
                 row = await PaperResultPublicationRepository(second).publish(
-                    ids["paper_a"], b.latest_approved_revision_id, ids["teacher"]
+                    ids["paper_a"],
+                    b.latest_approved_revision_id,
+                    ids["teacher"],
+                    request_key=str(uuid4()),
                 )
                 await second.commit()
                 return row
@@ -173,17 +178,28 @@ async def approval(context, paper="a"):
     return run, review
 
 
-async def publish(context, revision, paper="a"):
+async def publish(context, revision, paper="a", *, request_key=None):
     _, factory, ids, _ = context
     async with factory() as db, db.begin():
         return await PaperResultPublicationRepository(db).publish(
-            ids[f"paper_{paper}"], revision, ids["teacher"]
+            ids[f"paper_{paper}"],
+            revision,
+            ids["teacher"],
+            request_key=request_key or str(uuid4()),
         )
 
 
-async def repo_call(context, method, *args):
+async def repo_call(context, method, *args, request_key=None):
     async with context[1]() as db, db.begin():
-        return await getattr(PaperResultPublicationRepository(db), method)(*args)
+        kwargs = (
+            {"request_key": request_key or str(uuid4())}
+            if method
+            in {"publish", "publish_selected", "bulk", "withdraw", "withdraw_selected"}
+            else {}
+        )
+        return await getattr(PaperResultPublicationRepository(db), method)(
+            *args, **kwargs
+        )
 
 
 async def test_correction_republication_is_explicit_frozen_and_idempotent(
@@ -454,7 +470,7 @@ async def test_student_http_owner_isolation_and_source_pdf_denial(execution_data
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://test",
-        headers={"Origin": "http://localhost:5173"},
+        headers={"Origin": "http://localhost:5173", "Idempotency-Key": "single"},
     ) as client:
         assert (await client.get(own + "/result")).status_code == 404
         assert (await client.get(own + f"/pages/{ids['page_a']}")).status_code == 404
@@ -546,7 +562,7 @@ async def test_teacher_routes_authorization(execution_database, role, route):
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://test",
-        headers={"Origin": "http://localhost:5173"},
+        headers={"Origin": "http://localhost:5173", "Idempotency-Key": "single"},
     ) as client:
         accepted = await client.post(single, json=payload)
         assert accepted.status_code == 200, accepted.text
@@ -557,6 +573,7 @@ async def test_teacher_routes_authorization(execution_database, role, route):
         elif route == "selected":
             selected = await client.post(
                 batch + "/selected",
+                headers={"Idempotency-Key": "selected"},
                 json={
                     "entries": [{**payload, "paper_submission_id": str(ids["paper_a"])}]
                 },
@@ -565,11 +582,15 @@ async def test_teacher_routes_authorization(execution_database, role, route):
             assert selected.json()["items"][0]["outcome"] == "already_current"
         elif route == "bulk":
             await approval(context, "b")
-            bulk = await client.post(batch + "/bulk")
+            bulk = await client.post(
+                batch + "/bulk", headers={"Idempotency-Key": "bulk"}
+            )
             assert bulk.status_code == 200, bulk.text
             assert len(bulk.json()["items"]) == 2
-            replay = await client.post(batch + "/bulk")
-            assert {x["outcome"] for x in replay.json()["items"]} == {"already_current"}
+            replay = await client.post(
+                batch + "/bulk", headers={"Idempotency-Key": "bulk"}
+            )
+            assert replay.json() == bulk.json()
         identity.update(id=uuid4(), role=role)
         if route == "history":
             response = await client.get(single)
@@ -578,12 +599,15 @@ async def test_teacher_routes_authorization(execution_database, role, route):
         elif route == "selected":
             response = await client.post(
                 batch + "/selected",
+                headers={"Idempotency-Key": "selected"},
                 json={
                     "entries": [{**payload, "paper_submission_id": str(ids["paper_a"])}]
                 },
             )
         else:
-            response = await client.post(batch + "/bulk")
+            response = await client.post(
+                batch + "/bulk", headers={"Idempotency-Key": "bulk"}
+            )
         assert response.status_code == (404 if role == "teacher" else 403)
 
 

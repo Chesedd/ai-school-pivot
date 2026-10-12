@@ -4,7 +4,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 
 from app.application.capabilities import STUDENT_RESULTS_READ
 from app.application.paper_result_publication import (
@@ -67,6 +67,9 @@ async def _action(db, operation, *, commit=False):
 async def publish_paper(
     paper_submission_id: UUID,
     payload: PublishPaper,
+    request_key: Annotated[
+        str, Header(alias="Idempotency-Key", min_length=1, max_length=128)
+    ],
     db=Depends(get_session),
     principal: Principal = PrincipalDep,
     settings: Settings = Depends(get_settings),
@@ -77,7 +80,10 @@ async def publish_paper(
         PaperResultPublicationRepository(
             db, FilesystemArtifactStorage(settings.artifact_storage_path)
         ).publish(
-            paper_submission_id, payload.approved_review_revision_id, principal.user_id
+            paper_submission_id,
+            payload.approved_review_revision_id,
+            principal.user_id,
+            request_key=request_key,
         ),
         commit=True,
     )
@@ -101,6 +107,9 @@ async def publication_history(
 async def publish_selected(
     batch_id: UUID,
     payload: SelectedPublications,
+    request_key: Annotated[
+        str, Header(alias="Idempotency-Key", min_length=1, max_length=128)
+    ],
     db=Depends(get_session),
     principal: Principal = PrincipalDep,
     settings: Settings = Depends(get_settings),
@@ -111,7 +120,9 @@ async def publish_selected(
             db,
             PaperResultPublicationRepository(
                 db, FilesystemArtifactStorage(settings.artifact_storage_path)
-            ).publish_selected(payload.entries, principal.user_id, batch_id),
+            ).publish_selected(
+                payload.entries, principal.user_id, batch_id, request_key=request_key
+            ),
             commit=True,
         )
     }
@@ -120,6 +131,9 @@ async def publish_selected(
 @router.post("/scan-batches/{batch_id}/publications/bulk")
 async def publish_bulk(
     batch_id: UUID,
+    request_key: Annotated[
+        str, Header(alias="Idempotency-Key", min_length=1, max_length=128)
+    ],
     db=Depends(get_session),
     principal: Principal = PrincipalDep,
     settings: Settings = Depends(get_settings),
@@ -130,7 +144,7 @@ async def publish_bulk(
             db,
             PaperResultPublicationRepository(
                 db, FilesystemArtifactStorage(settings.artifact_storage_path)
-            ).bulk(batch_id, principal.user_id),
+            ).bulk(batch_id, principal.user_id, request_key=request_key),
             commit=True,
         )
     }
@@ -143,6 +157,9 @@ async def withdraw_publication(
     paper_submission_id: UUID,
     publication_id: UUID,
     payload: WithdrawPublication,
+    request_key: Annotated[
+        str, Header(alias="Idempotency-Key", min_length=1, max_length=128)
+    ],
     db=Depends(get_session),
     principal: Principal = PrincipalDep,
 ):
@@ -150,7 +167,11 @@ async def withdraw_publication(
     return await _action(
         db,
         PaperResultPublicationRepository(db).withdraw(
-            paper_submission_id, publication_id, payload.reason, principal.user_id
+            paper_submission_id,
+            publication_id,
+            payload.reason,
+            principal.user_id,
+            request_key=request_key,
         ),
         commit=True,
     )
@@ -161,6 +182,9 @@ async def withdraw_publication(
 async def withdraw_selected(
     batch_id: UUID,
     payload: SelectedWithdrawals,
+    request_key: Annotated[
+        str, Header(alias="Idempotency-Key", min_length=1, max_length=128)
+    ],
     db=Depends(get_session),
     principal: Principal = PrincipalDep,
 ):
@@ -171,7 +195,11 @@ async def withdraw_selected(
         "items": await _action(
             db,
             PaperResultPublicationRepository(db).withdraw_selected(
-                payload.entries, payload.reason, principal.user_id, batch_id
+                payload.entries,
+                payload.reason,
+                principal.user_id,
+                batch_id,
+                request_key=request_key,
             ),
             commit=True,
         )

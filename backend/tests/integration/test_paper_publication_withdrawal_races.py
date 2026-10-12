@@ -89,7 +89,7 @@ async def test_bulk_http_atomic_authorization(execution_database, endpoint, case
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://test",
-        headers={"Origin": "http://localhost:5173"},
+        headers={"Origin": "http://localhost:5173", "Idempotency-Key": "withdraw"},
     ) as client:
         response = await client.post(
             f"/api/assessment-core/scan-batches/{ids['batch']}/publications/withdraw/{endpoint}",
@@ -241,7 +241,11 @@ async def test_real_remediation_withdrawal_races(
 
             async def do_withdraw(db):
                 return await PaperResultPublicationRepository(db).withdraw(
-                    ids["paper_a"], a["id"], "Correction", ids["teacher"]
+                    ids["paper_a"],
+                    a["id"],
+                    "Correction",
+                    ids["teacher"],
+                    request_key=str(uuid4()),
                 )
 
             await (do_withdraw(first) if withdraw_first else remediate(first))
@@ -314,7 +318,11 @@ async def test_real_withdraw_first_blocks_finalize_and_student_read_is_atomic(
             p1 = await first.scalar(text("SELECT pg_backend_pid()"))
             p2 = await second.scalar(text("SELECT pg_backend_pid()"))
             await PaperResultPublicationRepository(first).withdraw(
-                ids["paper_a"], a["id"], "Secret", ids["teacher"]
+                ids["paper_a"],
+                a["id"],
+                "Secret",
+                ids["teacher"],
+                request_key=str(uuid4()),
             )
             repo = PaperResultPublicationRepository(reader)
             assert (await repo.student_result(ids["paper_a"], ids["student_a"]))[
@@ -372,7 +380,11 @@ async def test_real_storage_retention_races(concurrent_database, winner):
         if winner == "withdraw":
             async with factory() as db:
                 await PaperResultPublicationRepository(db).withdraw(
-                    ids["paper_a"], a["id"], "Correction", ids["teacher"]
+                    ids["paper_a"],
+                    a["id"],
+                    "Correction",
+                    ids["teacher"],
+                    request_key=str(uuid4()),
                 )
                 assert ids["page_a"] not in {
                     t.target_id for t in await retention.discover(settings)
@@ -402,6 +414,7 @@ async def test_real_storage_retention_races(concurrent_database, winner):
                         ids["paper_a"],
                         review.latest_approved_revision_id,
                         ids["teacher"],
+                        request_key=str(uuid4()),
                     )
                     assert (
                         await retention.claim(target, settings) is None
@@ -426,6 +439,7 @@ async def test_real_storage_retention_races(concurrent_database, winner):
                             ids["paper_a"],
                             review.latest_approved_revision_id,
                             ids["teacher"],
+                            request_key=str(uuid4()),
                         )
                     await db.rollback()
                     assert (
@@ -467,7 +481,10 @@ async def test_downgrade_refuses_null_pointer_and_preserves_republish_history(
     try:
         async with async_sessionmaker(engine, expire_on_commit=False)() as db:
             b = await PaperResultPublicationRepository(db).publish(
-                c[2]["paper_a"], review.latest_approved_revision_id, c[2]["teacher"]
+                c[2]["paper_a"],
+                review.latest_approved_revision_id,
+                c[2]["teacher"],
+                request_key=str(uuid4()),
             )
             await db.commit()
         # PR9 already represents duplicate revision publications. With an active

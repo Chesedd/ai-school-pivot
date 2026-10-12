@@ -355,7 +355,9 @@ async def test_claim_prevents_later_publication(execution_database):
     repo = ScanStorageRetentionRepository(c[1])
     target = next(t for t in await targets(c) if t.target_id == c[2]["page_a"])
     assert await repo.claim(target, PaperRetentionSettings())
-    with pytest.raises(PaperPublicationError, match="paper_publication_pages_unavailable"):
+    with pytest.raises(
+        PaperPublicationError, match="paper_publication_pages_unavailable"
+    ):
         await publish(c, a.latest_approved_revision_id)
 
 
@@ -877,7 +879,10 @@ async def test_publication_page_lock_prevents_concurrent_retention_claim(
         )
         async with factory() as publisher:
             await PaperResultPublicationRepository(publisher).publish(
-                c[2]["paper_a"], review.latest_approved_revision_id, c[2]["teacher"]
+                c[2]["paper_a"],
+                review.latest_approved_revision_id,
+                c[2]["teacher"],
+                request_key=str(uuid4()),
             )
             assert await repo.claim(page, settings) is None
             await publisher.commit()

@@ -189,7 +189,7 @@ async def test_http_authorization_and_reason_privacy(execution_database, role):
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://test",
-        headers={"Origin": "http://localhost:5173"},
+        headers={"Origin": "http://localhost:5173", "Idempotency-Key": "withdraw"},
     ) as client:
         response = await client.post(
             f"/api/assessment-core/paper-submissions/{ids['paper_a']}/publications/{pub['id']}/withdraw",
@@ -499,10 +499,19 @@ async def test_real_withdraw_publish_finalize_duplicate_races(
                 PaperResultPublicationRepository(second),
             )
             if winner in {"withdraw", "duplicate"}:
-                await r1.withdraw(ids["paper_a"], a["id"], "Correction", ids["teacher"])
+                await r1.withdraw(
+                    ids["paper_a"],
+                    a["id"],
+                    "Correction",
+                    ids["teacher"],
+                    request_key=str(uuid4()),
+                )
             elif winner == "publish":
                 await r1.publish(
-                    ids["paper_a"], rb.latest_approved_revision_id, ids["teacher"]
+                    ids["paper_a"],
+                    rb.latest_approved_revision_id,
+                    ids["teacher"],
+                    request_key=str(uuid4()),
                 )
             else:
                 from app.application.paper_batch_orchestration import (
@@ -524,12 +533,17 @@ async def test_real_withdraw_publish_finalize_duplicate_races(
                                 ids["paper_a"],
                                 rb.latest_approved_revision_id,
                                 ids["teacher"],
+                                request_key=str(uuid4()),
                             )
                         )
                         if winner == "withdraw"
                         else (
                             await r2.withdraw(
-                                ids["paper_a"], a["id"], "Correction", ids["teacher"]
+                                ids["paper_a"],
+                                a["id"],
+                                "Correction",
+                                ids["teacher"],
+                                request_key=str(uuid4()),
                             )
                         )
                     )

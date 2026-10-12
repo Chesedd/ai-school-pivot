@@ -49,8 +49,8 @@ PNG = base64.b64decode(
 )
 
 
-def source_pdf():
-    """Build a deterministic two-page source PDF with a real cross-reference table."""
+def source_pdf(*, three_pages=False):
+    """Build a deterministic source PDF with a real cross-reference table."""
     objects = (
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>",
@@ -58,20 +58,28 @@ def source_pdf():
         b"<< /Length 0 >>\nstream\n\nendstream",
         b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1 1] /Contents 4 0 R >>",
     )
+    if three_pages:
+        objects = (
+            objects[0],
+            b"<< /Type /Pages /Kids [3 0 R 5 0 R 7 0 R] /Count 3 >>",
+            *objects[2:],
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1 1] /Contents 8 0 R >>",
+            b"<< /Length 0 >>\nstream\n\nendstream",
+        )
     body = b"%PDF-1.4\n"
     offsets = [0]
     for number, value in enumerate(objects, 1):
         offsets.append(len(body))
         body += f"{number} 0 obj\n".encode() + value + b"\nendobj\n"
     start = len(body)
-    body += b"xref\n0 6\n0000000000 65535 f \n"
+    body += f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode()
     body += b"".join(f"{offset:010d} 00000 n \n".encode() for offset in offsets[1:])
-    body += f"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{start}\n%%EOF\n".encode()
+    body += f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{start}\n%%EOF\n".encode()
     return body
 
 
 @pytest_asyncio.fixture
-async def execution_database(tmp_path, *, confirmed=True):
+async def execution_database(tmp_path, *, confirmed=True, three_papers=False):
     names = (
         "teacher",
         "group",
@@ -110,7 +118,7 @@ async def execution_database(tmp_path, *, confirmed=True):
     ids.update(
         hash_a=hashlib.sha256(PNG).hexdigest(),
         hash_b=hashlib.sha256(PNG).hexdigest(),
-        source_hash=hashlib.sha256(source_pdf()).hexdigest(),
+        source_hash=hashlib.sha256(source_pdf(three_pages=three_papers)).hexdigest(),
         suffix=suffix,
         subject_code=suffix,
         subject_name=suffix,
@@ -121,11 +129,16 @@ async def execution_database(tmp_path, *, confirmed=True):
         topic_name=suffix,
         topic_normalized_name=suffix,
     )
+    if three_papers:
+        ids.update({name[:-1] + "c": uuid4() for name in names if name.endswith("_b")})
+        ids["hash_c"] = ids["hash_b"]
     storage = FilesystemArtifactStorage(str(tmp_path))
     ids["storage_a"] = await storage.store(PNG, "image/png")
     ids["storage_b"] = await storage.store(PNG, "image/png")
-    ids["storage_source"] = await storage.store(source_pdf(), "application/pdf")
-    ids["source_size"] = len(source_pdf())
+    if three_papers:
+        ids["storage_c"] = await storage.store(PNG, "image/png")
+    ids["storage_source"] = await storage.store(source_pdf(three_pages=three_papers), "application/pdf")
+    ids["source_size"] = len(source_pdf(three_pages=three_papers))
     ids["png_size"] = len(PNG)
     statements = (
         "INSERT INTO users(id,login,normalized_login,display_name,password_hash) VALUES (:teacher,:suffix,:suffix,'Paper teacher','hash')",
@@ -153,6 +166,27 @@ async def execution_database(tmp_path, *, confirmed=True):
         "INSERT INTO paper_submissions(id,batch_id,grouping_revision_id,assignment_id,assignment_participant_id,student_id,assigned_variant_id,status,created_by_user_id) VALUES (:paper_a,:batch,:revision,:assignment,:participant_a,:student_a,:variant_a,'ready_for_checking',:teacher),(:paper_b,:batch,:revision,:assignment,:participant_b,:student_b,:variant_b,'ready_for_checking',:teacher)",
         "INSERT INTO paper_submission_pages(paper_submission_id,scan_page_id,page_order) VALUES (:paper_a,:page_a,0),(:paper_b,:page_b,0)",
     )
+    if three_papers:
+        # Add a third target to the same confirmed batch before identity is frozen.
+        import re
+
+        expanded = []
+        for statement in statements:
+            expanded.append(statement.replace("'completed',2)", "'completed',3)"))
+            if ":student_b" not in statement and not any(
+                f":{name}_b" in statement
+                for name in ("task", "version", "variant", "item", "render", "page", "entry", "paper")
+            ):
+                continue
+            if "),(" not in statement:
+                continue
+            row = statement[statement.rfind("),(") + 2:]
+            row = re.sub(r":(\w+)_b\b", r":\1_c", row)
+            row = row.replace("'Private B'", "'Private C'").replace("'Paper B'", "'Paper C'")
+            row = row.replace("'B',2)", "'C',3)").replace(":batch_artifact,1,", ":batch_artifact,2,")
+            row = row.replace(":participant_c,1)", ":participant_c,2)")
+            expanded.append(statement.split(" VALUES ")[0] + " VALUES " + row)
+        statements = tuple(expanded)
     async with rolled_back_connection() as connection:
         grade_id = await connection.scalar(
             text(
@@ -278,6 +312,8 @@ async def start(context, paper="a"):
     ):
         await freeze(factory, ids, "a")
         await freeze(factory, ids, "b")
+        if "variant_c" in ids:
+            await freeze(factory, ids, "c")
     return await intake(factory).create(request(ids, paper, f"execution-{paper}"))
 
 
