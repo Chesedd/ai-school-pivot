@@ -11,6 +11,8 @@ from app.application.paper_result_publication import (
     PaperPublicationError,
     PublishPaper,
     SelectedPublications,
+    SelectedWithdrawals,
+    WithdrawPublication,
 )
 from app.application.principal import Principal
 from app.config import Settings, get_settings
@@ -67,11 +69,14 @@ async def publish_paper(
     payload: PublishPaper,
     db=Depends(get_session),
     principal: Principal = PrincipalDep,
+    settings: Settings = Depends(get_settings),
 ):
     await _teacher_paper(db, paper_submission_id, principal)
     return await _action(
         db,
-        PaperResultPublicationRepository(db).publish(
+        PaperResultPublicationRepository(
+            db, FilesystemArtifactStorage(settings.artifact_storage_path)
+        ).publish(
             paper_submission_id, payload.approved_review_revision_id, principal.user_id
         ),
         commit=True,
@@ -98,14 +103,15 @@ async def publish_selected(
     payload: SelectedPublications,
     db=Depends(get_session),
     principal: Principal = PrincipalDep,
+    settings: Settings = Depends(get_settings),
 ):
     await _authorized_batch(db, batch_id, principal)
     return {
         "items": await _action(
             db,
-            PaperResultPublicationRepository(db).publish_selected(
-                payload.entries, principal.user_id, batch_id
-            ),
+            PaperResultPublicationRepository(
+                db, FilesystemArtifactStorage(settings.artifact_storage_path)
+            ).publish_selected(payload.entries, principal.user_id, batch_id),
             commit=True,
         )
     }
@@ -113,13 +119,60 @@ async def publish_selected(
 
 @router.post("/scan-batches/{batch_id}/publications/bulk")
 async def publish_bulk(
-    batch_id: UUID, db=Depends(get_session), principal: Principal = PrincipalDep
+    batch_id: UUID,
+    db=Depends(get_session),
+    principal: Principal = PrincipalDep,
+    settings: Settings = Depends(get_settings),
 ):
     await _authorized_batch(db, batch_id, principal)
     return {
         "items": await _action(
             db,
-            PaperResultPublicationRepository(db).bulk(batch_id, principal.user_id),
+            PaperResultPublicationRepository(
+                db, FilesystemArtifactStorage(settings.artifact_storage_path)
+            ).bulk(batch_id, principal.user_id),
+            commit=True,
+        )
+    }
+
+
+@router.post(
+    "/paper-submissions/{paper_submission_id}/publications/{publication_id}/withdraw"
+)
+async def withdraw_publication(
+    paper_submission_id: UUID,
+    publication_id: UUID,
+    payload: WithdrawPublication,
+    db=Depends(get_session),
+    principal: Principal = PrincipalDep,
+):
+    await _teacher_paper(db, paper_submission_id, principal)
+    return await _action(
+        db,
+        PaperResultPublicationRepository(db).withdraw(
+            paper_submission_id, publication_id, payload.reason, principal.user_id
+        ),
+        commit=True,
+    )
+
+
+@router.post("/scan-batches/{batch_id}/publications/withdraw/selected")
+@router.post("/scan-batches/{batch_id}/publications/withdraw/bulk")
+async def withdraw_selected(
+    batch_id: UUID,
+    payload: SelectedWithdrawals,
+    db=Depends(get_session),
+    principal: Principal = PrincipalDep,
+):
+    await _authorized_batch(db, batch_id, principal)
+    for entry in payload.entries:
+        await _teacher_paper(db, entry.paper_submission_id, principal)
+    return {
+        "items": await _action(
+            db,
+            PaperResultPublicationRepository(db).withdraw_selected(
+                payload.entries, payload.reason, principal.user_id, batch_id
+            ),
             commit=True,
         )
     }

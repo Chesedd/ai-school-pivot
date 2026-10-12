@@ -44,10 +44,11 @@ def test_defaults_and_policy_are_stable():
     assert PaperRetentionSettings().model_dump() == {
         "source_retention_days": 30,
         "unpublished_page_retention_days": 30,
+        "withdrawal_page_grace_days": 30,
         "retention_max_targets_per_run": 100,
         "retention_claim_ttl_seconds": 300,
     }
-    assert POLICY_VERSION == "paper_storage_retention.v1"
+    assert POLICY_VERSION == "paper_storage_retention.v2"
 
 
 def repository():

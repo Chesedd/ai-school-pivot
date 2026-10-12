@@ -199,7 +199,7 @@ async def test_source_and_page_purge_preserve_all_metadata_and_replay(
     assert all(
         r["state"] == "purged"
         and r["attempt_count"] == 1
-        and r["policy_version"] == "paper_storage_retention.v1"
+        and r["policy_version"] == "paper_storage_retention.v2"
         for r in await ledger(c)
     )
     assert (
@@ -355,7 +355,7 @@ async def test_claim_prevents_later_publication(execution_database):
     repo = ScanStorageRetentionRepository(c[1])
     target = next(t for t in await targets(c) if t.target_id == c[2]["page_a"])
     assert await repo.claim(target, PaperRetentionSettings())
-    with pytest.raises(PaperPublicationError, match="scan_page_content_purged"):
+    with pytest.raises(PaperPublicationError, match="paper_publication_pages_unavailable"):
         await publish(c, a.latest_approved_revision_id)
 
 

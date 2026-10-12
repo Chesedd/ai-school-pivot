@@ -12,8 +12,12 @@ from app.application.paper_result_publication import (
     PaperPublicationError,
     PublicationEntry,
     PublicationSnapshot,
+    WithdrawalEntry,
+    WithdrawPublication,
     build_publication_snapshot,
 )
+from app.config import get_settings
+from app.infrastructure.artifact_storage import FilesystemArtifactStorage
 from app.infrastructure.authoring_models import InputArtifact
 from app.infrastructure.paper_checking_review_models import (
     PaperCheckReview,
@@ -25,8 +29,10 @@ from app.infrastructure.paper_checking_review_repository import (
 from app.infrastructure.paper_result_publication_models import (
     PaperResultPublication,
     PaperResultPublicationState,
+    PaperResultPublicationWithdrawal,
 )
 from app.infrastructure.scan_checking_models import (
+    AssessmentScanBatch,
     PaperSubmission,
     PaperSubmissionPage,
     ScanBatchArtifact,
@@ -36,10 +42,26 @@ from app.infrastructure.scan_storage_retention_models import ScanStorageRetentio
 
 
 class PaperResultPublicationRepository:
-    def __init__(self, db):
+    def __init__(self, db, storage=None):
         self.db = db
+        self.storage = storage or FilesystemArtifactStorage(
+            get_settings().artifact_storage_path
+        )
 
     async def _lock_papers(self, paper_ids, batch_id=None):
+        # Finalization locks the batch. Always take batch, paper, then page locks.
+        await self.db.scalars(
+            select(AssessmentScanBatch.id)
+            .where(
+                AssessmentScanBatch.id.in_(
+                    select(PaperSubmission.batch_id).where(
+                        PaperSubmission.id.in_(paper_ids)
+                    )
+                )
+            )
+            .order_by(AssessmentScanBatch.id)
+            .with_for_update()
+        )
         papers = (
             await self.db.scalars(
                 select(PaperSubmission)
@@ -55,20 +77,59 @@ class PaperResultPublicationRepository:
             raise PaperPublicationError("paper_publication_selection_mismatch", 404)
         # Same page locks as retention, after paper locks in deterministic order.
         # Once a committed claim exists, publishing cannot promise those bytes.
-        pages = (await self.db.scalars(
+        await self.db.scalars(
             select(ScanPage.id)
             .join(PaperSubmissionPage, PaperSubmissionPage.scan_page_id == ScanPage.id)
             .where(PaperSubmissionPage.paper_submission_id.in_(paper_ids))
             .order_by(ScanPage.id)
             .with_for_update(of=ScanPage)
-        )).all()
-        if await self.db.scalar(
-            select(ScanStorageRetentionEntry.id)
-            .where(ScanStorageRetentionEntry.scan_page_id.in_(pages))
-            .limit(1)
-        ):
-            raise PaperPublicationError("scan_page_content_purged", 410)
+        )
         return {p.id: p for p in papers}
+
+    async def _available_pages(self, paper_id):
+        pages = await self._page_rows(paper_id)
+        count = await self.db.scalar(
+            select(func.count())
+            .select_from(PaperSubmissionPage)
+            .where(PaperSubmissionPage.paper_submission_id == paper_id)
+        )
+        if (
+            not pages
+            or len(pages) != count
+            or await self.db.scalar(
+                select(ScanStorageRetentionEntry.id)
+                .where(
+                    ScanStorageRetentionEntry.scan_page_id.in_([p.id for p in pages])
+                )
+                .limit(1)
+            )
+        ):
+            raise PaperPublicationError("paper_publication_pages_unavailable", 409)
+        for page in pages:
+            artifact = await self.db.get(InputArtifact, page.derived_render_artifact_id)
+            source = await self.db.scalar(
+                select(ScanBatchArtifact.id)
+                .where(
+                    ScanBatchArtifact.input_artifact_id
+                    == page.derived_render_artifact_id
+                )
+                .limit(1)
+            )
+            if artifact is None or source or artifact.mime_type != "image/png":
+                raise PaperPublicationError("paper_publication_pages_unavailable", 409)
+            try:
+                content = await self.storage.read(artifact.storage_reference)
+            except (OSError, ValueError):
+                raise PaperPublicationError(
+                    "paper_publication_pages_unavailable", 409
+                ) from None
+            if (
+                not content.startswith(b"\x89PNG\r\n\x1a\n")
+                or len(content) != artifact.size_bytes
+                or hashlib.sha256(content).hexdigest() != page.content_fingerprint
+                or artifact.content_hash_sha256 != page.content_fingerprint
+            ):
+                raise PaperPublicationError("paper_publication_pages_unavailable", 409)
 
     async def _snapshot(self, paper, revision_id):
         row = await self.db.get(PaperCheckReviewRevision, revision_id)
@@ -149,7 +210,7 @@ class PaperResultPublicationRepository:
             )
             previous = (
                 await self.db.get(PaperResultPublication, state.active_publication_id)
-                if state
+                if state and state.active_publication_id
                 else None
             )
             if (
@@ -160,6 +221,17 @@ class PaperResultPublicationRepository:
                 results.append(self.project(previous, True, "already_current"))
                 continue
             number = state.version + 1 if state else 1
+            await self._available_pages(paper_id)
+            predecessor = (
+                await self.db.scalar(
+                    select(PaperResultPublication).where(
+                        PaperResultPublication.paper_submission_id == paper_id,
+                        PaperResultPublication.publication_number == state.version,
+                    )
+                )
+                if state
+                else None
+            )
             publication = PaperResultPublication(
                 id=uuid4(),
                 paper_submission_id=paper_id,
@@ -171,7 +243,7 @@ class PaperResultPublicationRepository:
                 approved_review_revision_id=entry.approved_review_revision_id,
                 published_by_user_id=actor,
                 publication_number=number,
-                supersedes_publication_id=previous.id if previous else None,
+                supersedes_publication_id=predecessor.id if predecessor else None,
                 publication_snapshot=snapshots[paper_id].model_dump(mode="json"),
             )
             self.db.add(publication)
@@ -268,18 +340,128 @@ class PaperResultPublicationRepository:
         return result
 
     async def history(self, paper_id):
-        state = await self.db.get(PaperResultPublicationState, paper_id)
         rows = (
-            await self.db.scalars(
-                select(PaperResultPublication)
+            await self.db.execute(
+                select(
+                    PaperResultPublication,
+                    PaperResultPublicationState.active_publication_id,
+                    PaperResultPublicationWithdrawal,
+                )
+                .outerjoin(
+                    PaperResultPublicationState,
+                    PaperResultPublicationState.paper_submission_id
+                    == PaperResultPublication.paper_submission_id,
+                )
+                .outerjoin(
+                    PaperResultPublicationWithdrawal,
+                    PaperResultPublicationWithdrawal.publication_id
+                    == PaperResultPublication.id,
+                )
                 .where(PaperResultPublication.paper_submission_id == paper_id)
                 .order_by(PaperResultPublication.publication_number)
+                .execution_options(populate_existing=True)
             )
         ).all()
-        return [
-            self.project(x, bool(state and state.active_publication_id == x.id))
-            for x in rows
-        ]
+        result = []
+        for row, active_id, w in rows:
+            item = self.project(row, active_id == row.id)
+            item.update(
+                is_active=item["active"],
+                is_withdrawn=w is not None,
+                withdrawn_at=w.created_at if w else None,
+                withdrawn_by_user_id=w.withdrawn_by_user_id if w else None,
+                withdrawal_reason=w.reason if w else None,
+            )
+            result.append(item)
+        return result
+
+    @staticmethod
+    def project_withdrawal(row):
+        return {
+            "id": row.id,
+            "publication_id": row.publication_id,
+            "withdrawn_by_user_id": row.withdrawn_by_user_id,
+            "reason": row.reason,
+            "created_at": row.created_at,
+        }
+
+    async def withdraw_selected(self, entries, reason, actor, batch_id=None):
+        try:
+            reason = WithdrawPublication(reason=reason).reason
+        except ValidationError:
+            raise PaperPublicationError(
+                "paper_publication_withdrawal_reason_required"
+                if isinstance(reason, str) and not reason.strip()
+                else "paper_publication_withdrawal_reason_invalid"
+            ) from None
+        ids = [e.paper_submission_id for e in entries]
+        if not ids or len(ids) > 500 or len(set(ids)) != len(ids):
+            raise PaperPublicationError("paper_publication_invalid_selection")
+        await self._lock_papers(ids, batch_id)
+        pending = []
+        for entry in sorted(entries, key=lambda e: str(e.paper_submission_id)):
+            publication = await self.db.get(
+                PaperResultPublication, entry.publication_id
+            )
+            if (
+                publication is None
+                or publication.paper_submission_id != entry.paper_submission_id
+            ):
+                raise PaperPublicationError("paper_publication_selection_mismatch", 404)
+            existing = await self.db.scalar(
+                select(PaperResultPublicationWithdrawal).where(
+                    PaperResultPublicationWithdrawal.publication_id == publication.id
+                )
+            )
+            if existing:
+                if existing.reason != reason:
+                    raise PaperPublicationError(
+                        "paper_publication_already_withdrawn", 409
+                    )
+                pending.append((existing, None))
+                continue
+            state = await self.db.scalar(
+                select(PaperResultPublicationState)
+                .where(
+                    PaperResultPublicationState.paper_submission_id
+                    == entry.paper_submission_id
+                )
+                .execution_options(populate_existing=True)
+            )
+            if state is None or state.active_publication_id != publication.id:
+                raise PaperPublicationError("paper_publication_not_active", 409)
+            pending.append(
+                (
+                    PaperResultPublicationWithdrawal(
+                        id=uuid4(),
+                        publication_id=publication.id,
+                        withdrawn_by_user_id=actor,
+                        reason=reason,
+                    ),
+                    state,
+                )
+            )
+        for row, state in pending:
+            if state is not None:
+                self.db.add(row)
+                await self.db.flush()
+                state.active_publication_id = None
+                state.updated_at = await self.db.scalar(select(func.clock_timestamp()))
+                await self.db.flush()
+        return [self.project_withdrawal(row) for row, _ in pending]
+
+    async def withdraw(self, paper_id, publication_id, reason, actor):
+        return (
+            await self.withdraw_selected(
+                [
+                    WithdrawalEntry(
+                        paper_submission_id=paper_id, publication_id=publication_id
+                    )
+                ],
+                reason,
+                actor,
+            )
+        )[0]
 
     async def _owned_publication(self, paper_id, student_id):
         row = (
@@ -355,7 +537,10 @@ class PaperResultPublicationRepository:
             await self.db.scalars(
                 select(PaperSubmission.id)
                 .join(PaperResultPublicationState)
-                .where(PaperSubmission.student_id == student_id)
+                .where(
+                    PaperSubmission.student_id == student_id,
+                    PaperResultPublicationState.active_publication_id.is_not(None),
+                )
                 .order_by(PaperSubmission.created_at.desc(), PaperSubmission.id)
                 .offset(offset)
                 .limit(limit)

@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.application.paper_checking_review import (
     PaperReviewRevision,
@@ -33,6 +33,36 @@ class PublicationEntry(PublishPaper):
 class SelectedPublications(BaseModel):
     model_config = ConfigDict(extra="forbid")
     entries: list[PublicationEntry] = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def unique_papers(self):
+        if len({x.paper_submission_id for x in self.entries}) != len(self.entries):
+            raise ValueError("duplicate_paper_selection")
+        return self
+
+
+class WithdrawPublication(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    reason: str = Field(max_length=500)
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def normalized_reason(cls, value):
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                raise ValueError("paper_publication_withdrawal_reason_required")
+        return value
+
+
+class WithdrawalEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    paper_submission_id: UUID
+    publication_id: UUID
+
+
+class SelectedWithdrawals(WithdrawPublication):
+    entries: list[WithdrawalEntry] = Field(min_length=1, max_length=500)
 
     @model_validator(mode="after")
     def unique_papers(self):

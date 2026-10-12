@@ -184,7 +184,11 @@ async def execution_database(tmp_path, *, confirmed=True):
                 if statement.startswith("INSERT INTO scan_grouping_revisions"):
                     statement = statement.replace("'confirmed',clock_timestamp(),:teacher", "'draft',NULL,NULL")
             await connection.execute(text(statement), ids)
-        yield connection, factory, ids, storage
+        from app.config import get_settings
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(get_settings(), "artifact_storage_path", str(storage.root))
+            yield connection, factory, ids, storage
 
 
 class FakePaperProvider:

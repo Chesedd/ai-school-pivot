@@ -166,6 +166,10 @@ class CheckingRepository:
         from_status = row.status
         validate_transition(from_status, target); safe = safe_event_details(details or {})
         now = await self.session.scalar(select(func.clock_timestamp())); values = {"status": target, "row_version": expected_version + 1}
+        # Paper execution must tolerate database wall-clock corrections without
+        # violating the recorded request/start/finish order. Digital flow is unchanged.
+        if row.paper_submission_id:
+            now = max(now, row.requested_at, row.started_at or row.requested_at)
         if target == "running": values.update(started_at=now, heartbeat_at=now)
         if from_status == "failed_retryable" and target == "pending":
             values.update(started_at=None, finished_at=None, heartbeat_at=None,

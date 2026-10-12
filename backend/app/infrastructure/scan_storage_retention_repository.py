@@ -38,6 +38,12 @@ WITH completed AS (
         JOIN paper_result_publications pub ON pub.id=s.active_publication_id
           AND pub.paper_submission_id=paper.id
         WHERE m.scan_page_id=p.id)
+      AND NOT EXISTS (
+        SELECT 1 FROM paper_submission_pages m
+        JOIN paper_result_publications pub ON pub.paper_submission_id=m.paper_submission_id
+        JOIN paper_result_publication_withdrawals w ON w.publication_id=pub.id
+        WHERE m.scan_page_id=p.id
+          AND w.created_at + make_interval(days => :grace_days) > clock_timestamp())
       AND NOT EXISTS (SELECT 1 FROM scan_pages other
                       WHERE other.derived_render_artifact_id=i.id AND other.id<>p.id)
       AND NOT EXISTS (SELECT 1 FROM scan_batch_artifacts other WHERE other.input_artifact_id=i.id)
@@ -58,6 +64,7 @@ def parameters(settings):
     return {
         "source_days": settings.source_retention_days,
         "page_days": settings.unpublished_page_retention_days,
+        "grace_days": settings.withdrawal_page_grace_days,
         "maximum": settings.retention_max_targets_per_run,
     }
 

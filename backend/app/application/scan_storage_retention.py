@@ -7,7 +7,7 @@ from uuid import UUID
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-POLICY_VERSION = "paper_storage_retention.v1"
+POLICY_VERSION = "paper_storage_retention.v2"
 
 
 class PaperRetentionSettings(BaseSettings):
@@ -15,6 +15,7 @@ class PaperRetentionSettings(BaseSettings):
 
     source_retention_days: int = Field(default=30, gt=0, le=3650)
     unpublished_page_retention_days: int = Field(default=30, gt=0, le=3650)
+    withdrawal_page_grace_days: int = Field(default=30, gt=0, le=3650)
     retention_max_targets_per_run: int = Field(default=100, gt=0, le=1000)
     retention_claim_ttl_seconds: int = Field(default=300, ge=30, le=3600)
 

@@ -171,7 +171,8 @@ class SQLAlchemyPaperCheckingExecutionRepository:
               raise PaperCheckingExecutionError("paper_check_execution_claim_expired")
           if attempt and attempt.status=="running":
               attempt.status="invalid" if code=="semantic_invalid" else "failed"; attempt.error_code=code
-              attempt.finished_at=await session.scalar(select(func.clock_timestamp()))
+              # Wall clocks can step backwards; preserve the database time invariant.
+              attempt.finished_at=max(await session.scalar(select(func.clock_timestamp())), attempt.started_at)
           run=await session.scalar(select(CheckRun).where(CheckRun.id==attempt.check_run_id).with_for_update())
           used = await session.scalar(select(func.count(ModelRun.id)).where(
               ModelRun.check_run_id == run.id, ModelRun.error_code.is_distinct_from("paper_execution_lease_expired")))
@@ -192,7 +193,8 @@ class SQLAlchemyPaperCheckingExecutionRepository:
           if attempt.status != "running" or attempt.started_at + timedelta(milliseconds=attempt.timeout_ms) <= now:
               raise PaperCheckingExecutionError("paper_check_execution_claim_expired")
           payload=response.model_dump(mode="json")
-          attempt.status="succeeded"; attempt.finished_at=await session.scalar(select(func.clock_timestamp()))
+          attempt.status="succeeded"
+          attempt.finished_at=max(await session.scalar(select(func.clock_timestamp())), attempt.started_at)
           attempt.provider_request_id=telemetry.provider_request_id; attempt.latency_ms=telemetry.latency_ms
           attempt.input_tokens=telemetry.input_tokens; attempt.output_tokens=telemetry.output_tokens; attempt.cached_tokens=telemetry.cached_tokens
           attempt.raw_output=json.dumps(payload,separators=(",",":")); attempt.validated_output=payload
@@ -228,7 +230,7 @@ class SQLAlchemyPaperCheckingExecutionRepository:
               session.add(CheckerEvent(check_run_id=run.id,check_result_id=result.id,assessment_item_id=assessment_item_id,
                   event_type="result_recorded",details={"checker_type":"paper_vision","result_status":item.status}))
           await session.flush(); now=await session.scalar(select(func.clock_timestamp()))
-          run.status="completed_with_review_required"; run.finished_at=now; run.row_version+=1
+          run.status="completed_with_review_required"; run.finished_at=max(now, run.started_at, attempt.finished_at); run.row_version+=1
           session.add(CheckerEvent(check_run_id=run.id,event_type="run_transition",from_status="running",
               to_status="completed_with_review_required",details={"item_count":len(response.items),"review_required":True}))
           await session.flush(); return await self._result(session,run.id)

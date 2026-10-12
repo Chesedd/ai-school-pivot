@@ -57,7 +57,7 @@ class PaperRemediationRepository:
             not state or state.active_publication_id != publication_id
         ):
             raise RemediationError("remediation_source_publication_stale")
-        if not state:
+        if not state or state.active_publication_id is None:
             return paper, None, None, set(), None, None
         publication = await self.s.get(
             PaperResultPublication, state.active_publication_id
