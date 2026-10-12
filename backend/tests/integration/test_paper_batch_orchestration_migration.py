@@ -23,7 +23,9 @@ async def test_paper_batch_migration_roundtrip_and_fresh_head(tmp_path):
         async with engine.connect() as db:
             assert await db.scalar(text("SELECT version_num FROM alembic_version")) == revision
             definition = await db.scalar(text("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname='ck_scan_checking_events_type'"))
-            assert ("batch.checking_started" in definition) == (revision in {"20261011_01", "20261011_02", "20261011_03"})
+            # Every exercised revision after the pre-PR10 target retains batch
+            # events, including a fresh upgrade to the current repository head.
+            assert ("batch.checking_started" in definition) == (revision != "20261010_02")
 
     try:
         # Prove rollback does not require deleting new audit history on a

@@ -233,6 +233,10 @@ class ScanPage(IdMixin, Base):
 class ScanCheckingEvent(IdMixin, Base):
     __tablename__ = "scan_checking_events"
     __table_args__ = (
+        Index(
+            "ix_scan_retention_completion", "batch_id", "occurred_at",
+            postgresql_where=text("event_type='batch.completed'"),
+        ),
         CheckConstraint(
             "aggregate_type IN ('batch','artifact','page','grouping','paper_submission')",
             name="ck_scan_checking_events_aggregate",

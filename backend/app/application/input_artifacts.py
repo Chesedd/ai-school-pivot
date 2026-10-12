@@ -1,13 +1,12 @@
 """Authoring-owned boundary for immutable, externally stored input artifacts."""
 from __future__ import annotations
 
+import hashlib
 import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
-import hashlib
 from uuid import UUID
-
 
 SUPPORTED_ARTIFACT_MIME_TYPES = frozenset({
     "image/png", "image/jpeg", "image/webp", "application/pdf",
@@ -53,7 +52,9 @@ class ArtifactStoragePort(Protocol):
 
     async def store(self, content: bytes, mime_type: str) -> str: ...
     async def read(self, storage_reference: str) -> bytes: ...
-    async def delete(self, storage_reference: str) -> None: ...
+    async def delete(self, storage_reference: str) -> bool:
+        """True when deleted; False when confirmed already absent."""
+        ...
 
 
 def detected_mime_type(content: bytes) -> str | None:

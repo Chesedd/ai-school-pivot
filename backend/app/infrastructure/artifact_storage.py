@@ -1,5 +1,6 @@
 """Filesystem implementation of the private artifact binary boundary."""
 import hashlib
+import re
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -9,9 +10,12 @@ class FilesystemArtifactStorage:
         self.root = Path(root)
 
     def _path(self, reference: str) -> Path:
-        if not reference or Path(reference).name != reference:
+        if not isinstance(reference, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", reference):
             raise ValueError("invalid storage reference")
-        return self.root / reference
+        path = self.root / reference
+        if path.is_symlink():
+            raise ValueError("invalid storage reference")
+        return path
 
     async def store(self, content: bytes, mime_type: str) -> str:
         del mime_type
@@ -28,8 +32,13 @@ class FilesystemArtifactStorage:
         with self._path(storage_reference).open("rb") as source:
             return source.read(max_bytes + 1)
 
-    async def delete(self, storage_reference: str) -> None:
-        self._path(storage_reference).unlink(missing_ok=True)
+    async def delete(self, storage_reference: str) -> bool:
+        """Delete exactly one opaque object; False distinguishes confirmed absence."""
+        try:
+            self._path(storage_reference).unlink()
+        except FileNotFoundError:
+            return False
+        return True
 
 
 class DatabaseArtifactStorageReader:

@@ -7,6 +7,7 @@ from pydantic import Field, PostgresDsn, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.application.paper_operational_limits import PaperOperationalLimits
+from app.application.scan_storage_retention import PaperRetentionSettings
 
 
 class Settings(BaseSettings):
@@ -16,6 +17,7 @@ class Settings(BaseSettings):
 
     database_url: PostgresDsn
     paper_operational_limits: PaperOperationalLimits = Field(default_factory=PaperOperationalLimits)
+    paper_retention: PaperRetentionSettings = Field(default_factory=PaperRetentionSettings)
     database_echo: bool = False
     cors_origins: str = "http://localhost:5173"
     attachment_storage_path: str = "/tmp/ai-school-pivot-attachments"

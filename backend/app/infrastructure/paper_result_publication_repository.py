@@ -32,6 +32,7 @@ from app.infrastructure.scan_checking_models import (
     ScanBatchArtifact,
     ScanPage,
 )
+from app.infrastructure.scan_storage_retention_models import ScanStorageRetentionEntry
 
 
 class PaperResultPublicationRepository:
@@ -52,6 +53,21 @@ class PaperResultPublicationRepository:
             batch_id is not None and p.batch_id != batch_id for p in papers
         ):
             raise PaperPublicationError("paper_publication_selection_mismatch", 404)
+        # Same page locks as retention, after paper locks in deterministic order.
+        # Once a committed claim exists, publishing cannot promise those bytes.
+        pages = (await self.db.scalars(
+            select(ScanPage.id)
+            .join(PaperSubmissionPage, PaperSubmissionPage.scan_page_id == ScanPage.id)
+            .where(PaperSubmissionPage.paper_submission_id.in_(paper_ids))
+            .order_by(ScanPage.id)
+            .with_for_update(of=ScanPage)
+        )).all()
+        if await self.db.scalar(
+            select(ScanStorageRetentionEntry.id)
+            .where(ScanStorageRetentionEntry.scan_page_id.in_(pages))
+            .limit(1)
+        ):
+            raise PaperPublicationError("scan_page_content_purged", 410)
         return {p.id: p for p in papers}
 
     async def _snapshot(self, paper, revision_id):

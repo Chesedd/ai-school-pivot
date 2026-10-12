@@ -18,4 +18,5 @@ def register_all_models() -> None:
         paper_result_publication_models,  # noqa: F401
         remediation_models,  # noqa: F401
         scan_checking_models,  # noqa: F401
+        scan_storage_retention_models,  # noqa: F401
     )

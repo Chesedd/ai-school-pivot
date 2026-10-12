@@ -61,6 +61,7 @@ from app.infrastructure.scan_grouping_repository import SqlAlchemyScanGroupingRe
 from app.infrastructure.scan_intake_repository import SqlAlchemyScanIntakeRepository
 from app.infrastructure.scan_matching_providers import AnthropicScanPageMatchingProvider
 from app.infrastructure.scan_page_pipeline import ScanPagePipeline
+from app.infrastructure.scan_storage_content import read_scan_content
 from app.presentation.auth_dependencies import (
     require_capability,
     require_trusted_origin,
@@ -325,6 +326,24 @@ async def pages(
     }
 
 
+@router.get("/scan-batches/{batch_id}/artifacts/{artifact_id}/content")
+async def artifact_content(
+    batch_id: UUID, artifact_id: UUID, db=Depends(get_session),
+    settings: Settings = Depends(get_settings), principal: Principal = PrincipalDep,
+):
+    await _authorized_batch(db, batch_id, principal)
+    row = (await db.execute(select(ScanBatchArtifact, InputArtifact)
+        .join(InputArtifact, InputArtifact.id == ScanBatchArtifact.input_artifact_id)
+        .where(ScanBatchArtifact.id == artifact_id, ScanBatchArtifact.batch_id == batch_id))).first()
+    if row is None:
+        raise HTTPException(404, "scan_artifact_not_found")
+    content = await read_scan_content(db, FilesystemArtifactStorage(settings.artifact_storage_path),
+        row[1].storage_reference, batch_artifact_id=artifact_id)
+    return Response(content, media_type=row[1].mime_type,
+        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store",
+                 "Content-Disposition": f'attachment; filename="scan-artifact-{artifact_id}"'})
+
+
 @router.post("/scan-batches/{batch_id}/extract")
 async def extract(
     batch_id: UUID,
@@ -369,9 +388,8 @@ async def page_content(
     derived = await db.get(InputArtifact, page.derived_render_artifact_id)
     if derived is None or derived.mime_type != "image/png":
         raise HTTPException(404, "scan_page_not_ready")
-    content = await FilesystemArtifactStorage(settings.artifact_storage_path).read(
-        derived.storage_reference
-    )
+    content = await read_scan_content(db, FilesystemArtifactStorage(settings.artifact_storage_path),
+        derived.storage_reference, scan_page_id=page_id)
     return Response(
         content,
         media_type="image/png",
