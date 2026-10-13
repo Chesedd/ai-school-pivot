@@ -5,10 +5,10 @@ export class ApiError extends Error{constructor(public status:number,public code
 type UnauthorizedHandler=()=>void;
 let unauthorizedHandler:UnauthorizedHandler|undefined;
 export const setUnauthorizedHandler=(handler?:UnauthorizedHandler)=>{unauthorizedHandler=handler};
-export async function request<T=any>(path:string,init?:RequestInit):Promise<T>{
+export async function request<T=any>(path:string,init?:RequestInit,responseKind?:"blob"):Promise<T>{
  const response=await fetch(`${apiBase}${path}`,{...init,credentials:"include"});let data:any={};
- if(response.status!==204)try{data=await response.clone().json()}catch{}
- if(!response.ok){const native=Array.isArray(data?.detail)?data.detail.map((x:any)=>({field:Array.isArray(x.loc)?x.loc.filter((v:any)=>v!=="body").join("."):"",code:x.type,message:x.msg})):[];const detail=typeof data?.detail==="string"?data.detail:undefined;const error=new ApiError(response.status,data.error?.code??detail??(native.length?"validation_error":"unexpected_error"),data.error?.message??(native.length?"Не удалось выполнить запрос: проверьте заполненные параметры.":"Ошибка API"),data.error?.details??native);if(response.status===401&&error.code==="authentication_required")unauthorizedHandler?.();throw error}return data as T
+ if(response.status!==204&&(!response.ok||responseKind!=="blob"))try{data=await response.clone().json()}catch{}
+ if(!response.ok){const native=Array.isArray(data?.detail)?data.detail.map((x:any)=>({field:Array.isArray(x.loc)?x.loc.filter((v:any)=>v!=="body").join("."):"",code:x.type,message:x.msg})):[];const detail=typeof data?.detail==="string"?data.detail:undefined;const error=new ApiError(response.status,data.error?.code??detail??(native.length?"validation_error":"unexpected_error"),data.error?.message??(native.length?"Не удалось выполнить запрос: проверьте заполненные параметры.":"Ошибка API"),data.error?.details??native);if(response.status===401&&error.code==="authentication_required")unauthorizedHandler?.();throw error}return responseKind==="blob"?await response.blob() as T:data as T
 }
 export type Folder={id:string;subject_id:string;parent_id:string|null;name:string;depth:number;created_at:string;updated_at:string};
 export type FolderNode=Folder&{children:FolderNode[]};
