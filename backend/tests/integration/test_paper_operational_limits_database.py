@@ -70,6 +70,11 @@ async def upload(pipeline, ids, batch_id, position=0, content=PNG, mime="image/p
         claimed_mime_type=mime, upload_position=position, filename="paper")
 
 
+def storage_objects(storage):
+    """Object inventory excludes the scan ownership journal, which holds no bytes."""
+    return {path for path in storage.root.iterdir() if path.is_file() or (path.name.startswith("scan-") and (path / "content").is_file())}
+
+
 @pytest.mark.parametrize("field,code", [
     ("max_artifacts_per_batch", "scan_batch_artifact_limit_exceeded"),
     ("max_total_upload_bytes_per_batch", "scan_batch_byte_limit_exceeded"),
@@ -87,7 +92,7 @@ async def test_exact_intake_limits_reject_next_without_orphans(scan_intake, tmp_
         await upload(pipeline, ids, b.id, 1)
     assert await connection.scalar(text("SELECT count(*) FROM input_artifacts")) == before + 1
     assert await connection.scalar(text("SELECT count(*) FROM scan_batch_artifacts WHERE batch_id=:id"), {"id": b.id}) == 1
-    assert len(list(tmp_path.iterdir())) == 1
+    assert len(storage_objects(storage)) == 1
 
 
 async def test_single_byte_exact_and_plus_one_rejection_then_valid_batch(scan_intake, tmp_path):
@@ -132,7 +137,7 @@ async def test_extraction_rejects_whole_artifact_before_render_persistence(scan_
     assert await connection.scalar(text("SELECT count(*) FROM scan_pages")) == count_before
     code = {"pdf": "scan_artifact_page_limit_exceeded", "batch": "scan_batch_page_limit_exceeded", "pixels": "image_too_large"}[kind]
     assert await connection.scalar(text("SELECT failure_code FROM scan_batch_artifacts WHERE batch_id=:id ORDER BY upload_position DESC LIMIT 1"), {"id": b.id}) == code
-    assert len(list(tmp_path.iterdir())) == (3 if kind == "batch" else 1)
+    assert len(storage_objects(storage)) == (3 if kind == "batch" else 1)
 
 
 @pytest.mark.parametrize("field,maximum,code", [
@@ -400,7 +405,7 @@ async def test_ten_concurrent_uploads_cannot_bypass_aggregate_limit(concurrent_d
     engine = create_async_engine(url, pool_size=12)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     config = limits(max_single_artifact_bytes=len(PNG), **{field: 3 if field == "max_artifacts_per_batch" else 3 * len(PNG)})
-    before_files = set(c[3].root.iterdir())
+    before_files = storage_objects(c[3])
     async def attempt(position):
         async with factory() as db:
             return await upload(ScanPagePipeline(db, c[3], limits=config), c[2], batch_id, position)
@@ -411,7 +416,7 @@ async def test_ten_concurrent_uploads_cannot_bypass_aggregate_limit(concurrent_d
         async with factory() as db:
             assert (await db.execute(text("""SELECT count(*),sum(i.size_bytes) FROM scan_batch_artifacts a
                 JOIN input_artifacts i ON i.id=a.input_artifact_id WHERE a.batch_id=:id"""), {"id": batch_id})).one() == (3, 3 * len(PNG))
-        assert len(set(c[3].root.iterdir()) - before_files) == 3
+        assert len(storage_objects(c[3]) - before_files) == 3
     finally:
         await engine.dispose()
 
@@ -427,7 +432,7 @@ async def test_concurrent_pdf_extraction_whole_artifacts_remain_bounded(concurre
         pipeline = ScanPagePipeline(db, c[3], limits=config)
         for n in range(2):
             await upload(pipeline, c[2], batch_id, n, source_pdf(), "application/pdf")
-    before_files = set(c[3].root.iterdir())
+    before_files = storage_objects(c[3])
     async def extract():
         async with factory() as db:
             return await ScanPagePipeline(db, c[3], limits=config).extract(batch_id=batch_id, actor_id=c[2]["teacher"])
@@ -438,7 +443,7 @@ async def test_concurrent_pdf_extraction_whole_artifacts_remain_bounded(concurre
             rows = (await db.execute(text("SELECT extraction_status,failure_code FROM scan_batch_artifacts WHERE batch_id=:id ORDER BY upload_position"), {"id": batch_id})).all()
             assert sorted(status for status, _ in rows) == ["completed", "failed_terminal"]
             assert [code for _, code in rows if code] == ["scan_batch_page_limit_exceeded"]
-        assert len(set(c[3].root.iterdir()) - before_files) == 2
+        assert len(storage_objects(c[3]) - before_files) == 2
     finally:
         await engine.dispose()
 

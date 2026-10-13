@@ -5,6 +5,7 @@ import os
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
+
 from tests.integration.c9ab_fixtures import seed_execution_world
 from tests.integration.c10a_postgres import require_disposable_postgres
 from tests.integration.test_migrations import repository_head
@@ -82,7 +83,7 @@ async def test_downgrade_refuses_paper_provenance(tmp_path):
         plan = await create(context, pub)
         await context[0].commit()
         with pytest.raises(
-            AssertionError, match="Cannot downgrade while paper remediation plans exist"
+            AssertionError, match="Paper downgrade blocked"
         ):
             migrate(url, "downgrade", "20261011_01")
         assert (

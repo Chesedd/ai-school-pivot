@@ -6,7 +6,7 @@ import json
 from datetime import UTC, datetime
 from hashlib import sha256
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.application.paper_operational_limits import PaperOperationalLimits
 from app.application.scan_checking_contracts import (
@@ -36,6 +36,7 @@ from app.infrastructure.authoring_models import InputArtifact
 from app.infrastructure.paper_operational_guards import page_count
 from app.infrastructure.scan_checking_models import (
     ScanBatchArtifact,
+    ScanMatchingAttempt,
     ScanMatchingChunk,
     ScanMatchingPageEntry,
     ScanMatchingRosterEntry,
@@ -60,9 +61,13 @@ class ScanMatchingService:
         self.storage = storage
         self.provider = provider
         self.repo = SqlAlchemyScanMatchingRepository(session)
+        self.provider_succeeded = False
 
     async def run(self, batch_id, actor_id):
         run = await self._begin_or_resume(batch_id, actor_id)
+        if run.status == "succeeded":
+            return await self.read(batch_id)
+        run_id = run.id
         chunks = (
             await self.s.scalars(
                 select(ScanMatchingChunk)
@@ -71,17 +76,25 @@ class ScanMatchingService:
             )
         ).all()
         for initial in chunks:
-            claimed = await self.repo.claim_chunk(run.id, initial.chunk_index)
+            claimed = await self.repo.claim_chunk(run_id, initial.chunk_index, self.claim_token)
             if claimed is None:
                 continue
             run_id, chunk_id = run.id, claimed.id
+            self.provider_succeeded = False
             try:
                 await self._execute(run, claimed)
             except Exception as exc:  # noqa: BLE001 - provider boundary has diverse SDK exceptions.
                 await self.s.rollback()
                 # Rollback expires ORM attributes, including primary keys. Keep
                 # scalar identities before rollback so failure recovery stays async.
+                if await self.repo.fenced_run(run_id, self.claim_token) is None:
+                    await self.s.rollback()
+                    raise ScanMatchingError("matching_claim_lost") from None
                 chunk = await self.s.get(ScanMatchingChunk, chunk_id)
+                if chunk.status == "succeeded":
+                    # The success commit may have succeeded despite a lost acknowledgement.
+                    await self.s.rollback()
+                    raise ScanMatchingError("matching_commit_outcome_unknown") from None
                 retryable = getattr(
                     getattr(exc, "code", None), "value", getattr(exc, "code", None)
                 ) in {
@@ -90,18 +103,28 @@ class ScanMatchingService:
                     "connection_error",
                     "provider_unavailable",
                 }
+                retryable = retryable or self.provider_succeeded
                 chunk.status = "failed_retryable" if retryable else "failed_terminal"
                 chunk.failure_code = (
                     getattr(getattr(exc, "code", None), "value", None)
-                    or "unexpected_internal_error"
+                    or ("matching_persistence_failed" if self.provider_succeeded else "unexpected_internal_error")
                 )
                 chunk.completed_at = datetime.now(UTC)
                 runrow = await self.s.get(ScanMatchingRun, run_id)
                 runrow.status = chunk.status
                 runrow.failure_code = chunk.failure_code
                 runrow.completed_at = chunk.completed_at
+                code = chunk.failure_code
+                attempts = (await self.s.scalars(select(ScanMatchingAttempt).where(
+                    ScanMatchingAttempt.chunk_id == chunk_id,
+                    ScanMatchingAttempt.claim_token == self.claim_token,
+                    ScanMatchingAttempt.status == "running"))).all()
+                for attempt in attempts:
+                    attempt.status = "failed"
+                    attempt.completed_at = chunk.completed_at
+                    attempt.failure_code = code
                 await self.s.commit()
-                raise ScanMatchingError(chunk.failure_code) from None
+                raise ScanMatchingError(code) from None
         await self._finalize(run.id, batch_id)
         return await self.read(batch_id)
 
@@ -110,16 +133,17 @@ class ScanMatchingService:
         if batch is None:
             raise ScanMatchingError("scan_batch_not_found")
         current = await self.repo.current_run(batch_id)
+        if batch.status == "matching_review_required" and current and current.status == "succeeded":
+            await self.s.commit()
+            return current
         if batch.status == "matching":
-            if current and current.status == "failed_retryable":
-                current.status = "running"
-                current.failure_code = None
-                current.completed_at = None
-                await self.s.commit()
-                return current
+            if current and current.status in {"running", "failed_retryable"}:
+                self.claim_token = await self.repo.claim_run(current)
+                if self.claim_token is not None:
+                    await self.s.commit()
+                    return current
+            await self.s.rollback()
             raise ScanMatchingError("matching_already_running")
-        if batch.status == "matching_review_required":
-            raise ScanMatchingError("matching_already_completed")
         if batch.status != "extracting":
             raise ScanMatchingError("scan_batch_not_ready_for_matching")
         self.limits.guard("max_pages_per_batch", await page_count(self.s, batch_id),
@@ -240,6 +264,7 @@ class ScanMatchingService:
                     model_id=self.provider.model_id,
                 )
             )
+        self.claim_token = await self.repo.claim_run(run)
         await self.s.commit()
         return run
 
@@ -299,9 +324,19 @@ class ScanMatchingService:
         )
         # Metadata/image reads autobegin a transaction after the durable claim.
         # Close it before waiting on the external provider.
+        if await self.repo.fenced_run(run.id, self.claim_token) is None:
+            raise ScanMatchingError("matching_claim_lost")
+        attempt = ScanMatchingAttempt(chunk_id=chunk.id, claim_token=self.claim_token, status="running")
+        self.s.add(attempt)
         await self.s.commit()
         response, telemetry = await self.provider.match(request, content)
         validate_matching_response(request, response)
+        self.provider_succeeded = True
+        if await self.repo.fenced_run(run.id, self.claim_token) is None:
+            raise ScanMatchingError("matching_claim_lost")
+        await self.s.refresh(chunk)
+        if chunk.status != "running":
+            raise ScanMatchingError("matching_claim_lost")
         token_participant = {
             r.roster_token: r.assignment_participant_id for r in roster
         }
@@ -340,14 +375,30 @@ class ScanMatchingService:
         chunk.cached_tokens = telemetry.cached_tokens
         chunk.cache_write_tokens = telemetry.cache_write_tokens
         chunk.latency_ms = telemetry.latency_ms
-        chunk.completed_at = datetime.now(UTC)
+        chunk.completed_at = await self.s.scalar(select(func.clock_timestamp()))
+        attempt.status = "succeeded"
+        attempt.completed_at = chunk.completed_at
+        attempt.evidence = {"response": chunk.validated_output, "provider_request_id": telemetry.provider_request_id,
+            "provider_id": chunk.provider_id, "model_id": chunk.model_id,
+            "prompt_name": run.prompt_name, "prompt_version": run.prompt_version,
+            "prompt_template_hash": run.prompt_template_hash,
+            "input_tokens": telemetry.input_tokens, "output_tokens": telemetry.output_tokens,
+            "cached_tokens": telemetry.cached_tokens, "cache_write_tokens": telemetry.cache_write_tokens,
+            "latency_ms": telemetry.latency_ms}
         await self.s.commit()
 
     async def _finalize(self, run_id, batch_id):
         batch = await self.repo.lock_batch(batch_id)
+        if batch is not None and batch.status == "matching_review_required":
+            current = await self.repo.current_run(batch_id)
+            if current and current.id == run_id and current.status == "succeeded":
+                await self.s.commit()
+                return
         if batch is None or batch.status != "matching":
             raise ScanMatchingError("scan_batch_not_ready_for_matching")
-        run = await self.s.get(ScanMatchingRun, run_id)
+        run = await self.repo.fenced_run(run_id, self.claim_token)
+        if run is None:
+            raise ScanMatchingError("matching_claim_lost")
         total = len(
             (
                 await self.s.scalars(

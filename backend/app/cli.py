@@ -14,6 +14,7 @@ from app.config import get_settings
 from app.db.session import async_session_factory
 from app.infrastructure.artifact_storage import FilesystemArtifactStorage
 from app.infrastructure.auth_repository import SQLAlchemyAuthRepository
+from app.infrastructure.scan_orphan_cleanup import sweep_scan_orphans
 from app.infrastructure.scan_storage_retention_repository import (
     ScanStorageRetentionRepository,
 )
@@ -49,7 +50,15 @@ def main() -> None:
     mode = retention.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dry-run", action="store_true")
     mode.add_argument("--execute", action="store_true")
+    orphan = commands.add_parser("scan-orphans")
+    orphan_mode = orphan.add_mutually_exclusive_group(required=True)
+    orphan_mode.add_argument("--dry-run", action="store_true")
+    orphan_mode.add_argument("--execute", action="store_true")
     args = parser.parse_args()
+    if args.command == "scan-orphans":
+        print(json.dumps(asyncio.run(sweep_scan_orphans(async_session_factory,
+            FilesystemArtifactStorage(get_settings().artifact_storage_path), dry_run=args.dry_run)), sort_keys=True))
+        return
     if args.command == "scan-retention":
         asyncio.run(scan_retention(dry_run=args.dry_run))
         return

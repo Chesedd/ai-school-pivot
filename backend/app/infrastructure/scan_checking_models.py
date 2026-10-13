@@ -273,6 +273,7 @@ class ScanMatchingRun(IdMixin, Base):
     __tablename__ = "scan_matching_runs"
     __table_args__ = (
         UniqueConstraint("batch_id", "revision", name="uq_scan_matching_runs_revision"),
+        CheckConstraint("(claim_token IS NULL) = (lease_expires_at IS NULL)", name="ck_matching_claim_shape"),
         CheckConstraint("revision > 0", name="ck_scan_matching_runs_revision"),
         CheckConstraint(
             "status IN ('running','succeeded','failed_retryable','failed_terminal')",
@@ -302,6 +303,8 @@ class ScanMatchingRun(IdMixin, Base):
     provider_route: Mapped[str] = mapped_column(String(256))
     request_context_fingerprint: Mapped[str] = mapped_column(String(64))
     assessment_title_snapshot: Mapped[str] = mapped_column(String(500))
+    claim_token: Mapped[UUID | None] = mapped_column(uuid_type)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=clock
     )
@@ -654,3 +657,23 @@ class ScanGradingPolicyRevision(IdMixin, Base):
     created_by_user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
     supersedes_policy_id: Mapped[UUID | None] = mapped_column(ForeignKey("scan_grading_policy_revisions.id", ondelete="RESTRICT"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=clock)
+
+
+class ScanMatchingAttempt(IdMixin, Base):
+    """Append-only attempt identities; settled provider evidence is immutable."""
+    __tablename__ = "scan_matching_attempts"
+    __table_args__ = (
+        CheckConstraint("status IN ('running','succeeded','failed','interrupted')", name="ck_matching_attempt_status"),
+        CheckConstraint("(status='running' AND completed_at IS NULL AND evidence IS NULL AND failure_code IS NULL) OR "
+            "(status='succeeded' AND completed_at IS NOT NULL AND evidence IS NOT NULL AND failure_code IS NULL) OR "
+            "(status IN ('failed','interrupted') AND completed_at IS NOT NULL AND evidence IS NULL AND failure_code IS NOT NULL)",
+            name="ck_matching_attempt_shape"),
+        Index("ix_matching_attempt_chunk", "chunk_id"),
+    )
+    chunk_id: Mapped[UUID] = mapped_column(ForeignKey("scan_matching_chunks.id", ondelete="RESTRICT"))
+    claim_token: Mapped[UUID] = mapped_column(uuid_type)
+    status: Mapped[str] = mapped_column(String(32), server_default="running")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=clock)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    evidence: Mapped[object | None] = mapped_column(JSONB)
+    failure_code: Mapped[str | None] = mapped_column(String(64))

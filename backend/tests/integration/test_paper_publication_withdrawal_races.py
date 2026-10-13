@@ -7,6 +7,9 @@ from uuid import uuid4
 
 import httpx
 import pytest
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
 from app.application.paper_batch_orchestration import (
     PaperBatchError,
     PaperBatchOrchestrationService,
@@ -26,8 +29,6 @@ from app.infrastructure.scan_storage_retention_repository import (
     ScanStorageRetentionRepository,
 )
 from app.presentation.remediation_schemas import ItemInput
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from tests.integration.test_paper_batch_orchestration_database import (
     unconfirmed_database as unconfirmed_database,  # noqa: PLC0414
 )
@@ -458,23 +459,28 @@ async def test_real_storage_retention_races(concurrent_database, winner):
 async def test_downgrade_refuses_null_pointer_and_preserves_republish_history(
     concurrent_database,
 ):
-    from tests.pr14_migration_acceptance import command
+    import sys
+    from pathlib import Path
+
+    def refused_downgrade():
+        outcome = subprocess.run(
+            [sys.executable, "-m", "alembic", "downgrade", "20261012_01"],
+            cwd=Path(__file__).parents[2],
+            env={**os.environ, "DATABASE_URL": url.render_as_string(hide_password=False)},
+            capture_output=True, text=True, check=False,
+        )
+        assert outcome.returncode != 0
+        assert "Paper downgrade blocked:" in outcome.stdout + outcome.stderr
 
     c, url = concurrent_database
     _, review = await approval(c)
     a = await publish(c, review.latest_approved_revision_id)
     await withdraw(c, a)
     await c[0].commit()
-    with pytest.raises(subprocess.CalledProcessError):
-        await asyncio.to_thread(
-            command,
-            url.render_as_string(hide_password=False),
-            "downgrade",
-            "20261012_01",
-        )
+    await asyncio.to_thread(refused_downgrade)
     assert (
         await c[0].scalar(text("SELECT version_num FROM alembic_version"))
-        == "20261012_02"
+        == "20261013_01"
     )
     await c[0].rollback()
     engine = create_async_engine(url)
@@ -487,14 +493,9 @@ async def test_downgrade_refuses_null_pointer_and_preserves_republish_history(
                 request_key=str(uuid4()),
             )
             await db.commit()
-        # PR9 already represents duplicate revision publications. With an active
-        # pointer downgrade is supported, dropping only withdrawal audit data.
-        await asyncio.to_thread(
-            command,
-            url.render_as_string(hide_password=False),
-            "downgrade",
-            "20261012_01",
-        )
+        # An active replacement still has immutable withdrawal and command history.
+        # Preflight refuses before dropping even the new matching lease columns.
+        await asyncio.to_thread(refused_downgrade)
         async with engine.connect() as db:
             assert (
                 await db.scalar(
@@ -514,8 +515,10 @@ async def test_downgrade_refuses_null_pointer_and_preserves_republish_history(
                 )
                 == b["id"]
             )
-        await asyncio.to_thread(
-            command, url.render_as_string(hide_password=False), "upgrade", "20261012_02"
-        )
+            assert await db.scalar(text("SELECT count(*) FROM paper_result_publication_withdrawals")) == 1
+            assert await db.scalar(text("SELECT count(*) FROM paper_result_publication_commands")) >= 3
+            assert await db.scalar(text("SELECT version_num FROM alembic_version")) == "20261013_01"
+            assert await db.scalar(text("SELECT count(*) FROM information_schema.columns WHERE table_name='scan_matching_runs' AND column_name='claim_token'")) == 1
+
     finally:
         await engine.dispose()

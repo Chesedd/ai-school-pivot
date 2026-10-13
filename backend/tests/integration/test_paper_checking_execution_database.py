@@ -14,6 +14,10 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
 from app.application.paper_checking_execution import (
     PaperCheckingExecutionError,
     PaperCheckingExecutionService,
@@ -24,9 +28,6 @@ from app.infrastructure.artifact_storage import FilesystemArtifactStorage
 from app.infrastructure.paper_checking_execution_repository import (
     SQLAlchemyPaperCheckingExecutionRepository,
 )
-from sqlalchemy import text
-from sqlalchemy.exc import DBAPIError, IntegrityError
-from sqlalchemy.ext.asyncio import async_sessionmaker
 from tests.integration.c10a_postgres import rolled_back_connection
 from tests.integration.test_paper_checking_intake_database import (
     constraint,

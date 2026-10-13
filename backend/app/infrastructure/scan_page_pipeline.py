@@ -26,6 +26,7 @@ from app.infrastructure.scan_checking_models import (
     ScanCheckingEvent,
     ScanPage,
 )
+from app.infrastructure.scan_orphan_cleanup import compensate_scan_objects
 from app.infrastructure.scan_page_rasterizer import (
     PillowPdfiumPageRasterizer,
     RasterizationError,
@@ -60,7 +61,6 @@ class ScanPagePipeline:
         if actual is None or actual != claimed_mime_type:
             raise ArtifactError("invalid_artifact_signature")
         reference = None
-        commit_attempted = False
         try:
             batch = await self.session.scalar(
                 select(AssessmentScanBatch)
@@ -73,7 +73,7 @@ class ScanPagePipeline:
             if batch.status not in {"draft", "uploading"}:
                 raise ScanIntakeError("artifact_attachment_not_allowed")
             await guard_attachment(self.session, batch.id, len(content), self.limits)
-            reference = await self.storage.store(content, actual)
+            reference = await self.storage.store_scan(content, actual, batch_id)
             artifact = InputArtifact(
                 owner_id=actor_id,
                 mime_type=actual,
@@ -104,18 +104,18 @@ class ScanPagePipeline:
                     details={"upload_position": upload_position},
                 )
             )
-            commit_attempted = True
             await self.session.commit()
         except IntegrityError as exc:
             await self.session.rollback()
             if reference is not None:
-                await self.storage.delete(reference)
+                await compensate_scan_objects(self.session, self.storage, batch_id, [reference])
             raise ScanIntakeError("duplicate_upload_position") from exc
         except BaseException:
             await self.session.rollback()
-            if reference is not None and not commit_attempted:
-                await self.storage.delete(reference)
+            if reference is not None:
+                await compensate_scan_objects(self.session, self.storage, batch_id, [reference])
             raise
+        self.storage.acknowledge_scan(batch_id, reference)
         # The object belongs to committed academic rows now. A response-read
         # failure must never run the pre-commit compensation and delete it.
         await self.session.refresh(attached)
@@ -215,24 +215,30 @@ class ScanPagePipeline:
                     await page_count(self.session, attached.batch_id) - own + count,
                     "scan_batch_page_limit_exceeded", RasterizationError)
             seen = 0
-            for rendered in self.rasterizer.rasterize(content, original.mime_type):
-                self.limits.guard("max_pages_per_artifact", rendered.source_page_index + 1,
-                    "scan_artifact_page_limit_exceeded", RasterizationError)
-                seen = max(seen, rendered.source_page_index + 1)
-                existing = await self.session.scalar(
-                    select(ScanPage).where(
-                        ScanPage.batch_artifact_id == attached.id,
-                        ScanPage.source_page_index == rendered.source_page_index,
+            rendered_pages = self.rasterizer.rasterize(content, original.mime_type)
+            try:
+                for rendered in rendered_pages:
+                    self.limits.guard("max_pages_per_artifact", rendered.source_page_index + 1,
+                        "scan_artifact_page_limit_exceeded", RasterizationError)
+                    seen = max(seen, rendered.source_page_index + 1)
+                    existing = await self.session.scalar(
+                        select(ScanPage).where(
+                            ScanPage.batch_artifact_id == attached.id,
+                            ScanPage.source_page_index == rendered.source_page_index,
+                        )
                     )
-                )
-                if existing is not None and existing.status in {
-                    "ready",
-                    "failed_terminal",
-                }:
-                    continue
-                await self._persist_page(
-                    attached, existing, rendered, original.owner_id, actor_id, references
-                )
+                    if existing is not None and existing.status in {
+                        "ready",
+                        "failed_terminal",
+                    }:
+                        continue
+                    await self._persist_page(
+                        attached, existing, rendered, original.owner_id, actor_id, references
+                    )
+            finally:
+                close = getattr(rendered_pages, "close", None)
+                if close:
+                    close()
             attached = await self.session.get(ScanBatchArtifact, artifact_id)
             attached.extraction_status = "completed"
             attached.page_count = seen
@@ -246,10 +252,11 @@ class ScanPagePipeline:
             )
             commit_attempted = True
             await self.session.commit()
+            for reference in references:
+                self.storage.acknowledge_scan(batch_id, reference)
         except RasterizationError as exc:
             await self.session.rollback()
-            for reference in references:
-                await self.storage.delete(reference)
+            await compensate_scan_objects(self.session, self.storage, batch_id, references)
             await self.session.scalar(select(AssessmentScanBatch).where(
                 AssessmentScanBatch.id == batch_id).with_for_update())
             attached = await self.session.get(ScanBatchArtifact, artifact_id)
@@ -268,14 +275,10 @@ class ScanPagePipeline:
             await self.session.commit()
         except BaseException as exc:
             await self.session.rollback()
-            if commit_attempted:
-                # A lost commit acknowledgement cannot distinguish committed
-                # pages from a rollback. Preserve bytes and let a retry observe
-                # database state instead of compensating a possibly committed write.
-                raise
-            for reference in references:
-                await self.storage.delete(reference)
-            if not isinstance(exc, Exception):
+            # Reconciliation waits for the batch lock and observes the actual
+            # commit outcome, preserving registered bytes on a lost acknowledgement.
+            await compensate_scan_objects(self.session, self.storage, batch_id, references)
+            if commit_attempted or not isinstance(exc, Exception):
                 raise
             await self.session.scalar(select(AssessmentScanBatch).where(
                 AssessmentScanBatch.id == batch_id).with_for_update())
@@ -299,7 +302,7 @@ class ScanPagePipeline:
         if existing is None:
             self.limits.guard("max_pages_per_batch", await page_count(self.session, attached.batch_id) + 1,
                 "scan_batch_page_limit_exceeded", RasterizationError)
-        reference = await self.storage.store(rendered.png_bytes, "image/png")
+        reference = await self.storage.store_scan(rendered.png_bytes, "image/png", attached.batch_id)
         references.append(reference)
         try:
             derived = InputArtifact(
@@ -348,7 +351,7 @@ class ScanPagePipeline:
             await self.session.flush()
         except BaseException:
             await self.session.rollback()
-            await self.storage.delete(reference)
+            # The outer operation owns all page compensation, exactly once.
             raise
 
     def _event(self, attached, actor, aggregate, event, details, aggregate_id=None):

@@ -13,8 +13,8 @@ from typing import Any, Protocol
 from uuid import UUID
 
 from app.application.scan_checking_contracts import (
-    AssessmentScanBatchState,
     NORMALIZED_UPRIGHT_V1,
+    AssessmentScanBatchState,
     validate_batch_transition,
 )
 
