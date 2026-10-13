@@ -7,6 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 from tests.integration.c10a_postgres import require_disposable_postgres
 from tests.integration.test_manual_paper_review_database import manual, policies
+from tests.integration.test_migrations import repository_head
 from tests.integration.test_paper_checking_execution_database import execution_database
 from tests.integration.test_paper_checking_review_database import completed
 from tests.integration.test_paper_result_publication_migration import migrate
@@ -80,7 +81,7 @@ async def test_roundtrip_backfills_ai_and_preserves_history(tmp_path):
         async with engine.connect() as db:
             assert (
                 await db.scalar(text("SELECT version_num FROM alembic_version"))
-                == "20261011_03"
+                == repository_head()
             )
     finally:
         if seed:
@@ -102,7 +103,7 @@ async def test_downgrade_refuses_manual_data_without_changes(tmp_path):
             migrate(url, "downgrade", "20261011_02")
         assert (
             await c[0].scalar(text("SELECT version_num FROM alembic_version"))
-            == "20261011_03"
+            == repository_head()
         )
         assert (
             await c[0].scalar(

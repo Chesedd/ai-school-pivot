@@ -258,6 +258,10 @@ class ScanIntakeService:
             actor_user_id, request_key
         )
         if existing:
+            if not await self.access_policy.can_access_class(
+                existing.class_group_id, actor_user_id
+            ):
+                raise ScanIntakeError("scan_batch_not_found")
             if existing.request_hash != request_hash:
                 raise ScanIntakeError("idempotency_conflict")
             return existing

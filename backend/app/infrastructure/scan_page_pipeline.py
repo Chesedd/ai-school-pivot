@@ -60,6 +60,7 @@ class ScanPagePipeline:
         if actual is None or actual != claimed_mime_type:
             raise ArtifactError("invalid_artifact_signature")
         reference = None
+        commit_attempted = False
         try:
             batch = await self.session.scalar(
                 select(AssessmentScanBatch)
@@ -103,9 +104,8 @@ class ScanPagePipeline:
                     details={"upload_position": upload_position},
                 )
             )
+            commit_attempted = True
             await self.session.commit()
-            await self.session.refresh(attached)
-            return attached, artifact
         except IntegrityError as exc:
             await self.session.rollback()
             if reference is not None:
@@ -113,9 +113,13 @@ class ScanPagePipeline:
             raise ScanIntakeError("duplicate_upload_position") from exc
         except BaseException:
             await self.session.rollback()
-            if reference is not None:
+            if reference is not None and not commit_attempted:
                 await self.storage.delete(reference)
             raise
+        # The object belongs to committed academic rows now. A response-read
+        # failure must never run the pre-commit compensation and delete it.
+        await self.session.refresh(attached)
+        return attached, artifact
 
     async def extract(self, *, batch_id: UUID, actor_id: UUID) -> ExtractionSummary:
         batch = await self.session.scalar(
@@ -177,6 +181,7 @@ class ScanPagePipeline:
             return
         original = await self.session.get(InputArtifact, attached.input_artifact_id)
         references = []
+        commit_attempted = False
         previous = attached.extraction_status
         attached.extraction_status = "running"
         attached.failure_code = None
@@ -239,6 +244,7 @@ class ScanPagePipeline:
                 "artifact.extraction_status_changed",
                 {"from": "running", "to": "completed"},
             )
+            commit_attempted = True
             await self.session.commit()
         except RasterizationError as exc:
             await self.session.rollback()
@@ -262,6 +268,11 @@ class ScanPagePipeline:
             await self.session.commit()
         except BaseException as exc:
             await self.session.rollback()
+            if commit_attempted:
+                # A lost commit acknowledgement cannot distinguish committed
+                # pages from a rollback. Preserve bytes and let a retry observe
+                # database state instead of compensating a possibly committed write.
+                raise
             for reference in references:
                 await self.storage.delete(reference)
             if not isinstance(exc, Exception):

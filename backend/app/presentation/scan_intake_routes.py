@@ -11,7 +11,8 @@ from sqlalchemy import select
 from starlette.datastructures import UploadFile
 
 from app.application.capabilities import ASSESSMENT_SCAN_CHECK_MANAGE
-from app.application.checking_intake import InvalidCheckingInput
+from app.application.checking import CheckingPersistenceError
+from app.application.checking_intake import CheckingIntakeError, InvalidCheckingInput
 from app.application.input_artifacts import ArtifactError
 from app.application.paper_batch_orchestration import (
     PaperBatchError,
@@ -645,8 +646,8 @@ async def create_paper_check_run(paper_submission_id:UUID,payload:PaperCheckRunC
         return {"check_run_id":run.id,"paper_submission_id":run.paper_submission_id,"status":run.status,
             "attempt_no":run.attempt_no,"snapshot_schema_version":run.snapshot_schema_version,
             "input_fingerprint":run.input_fingerprint,"requested_at":run.requested_at}
-    except Exception as exc:
-        if isinstance(exc,HTTPException): raise
+    except (CheckingIntakeError, CheckingPersistenceError, PaperCheckingIntakeError, PaperBatchError) as exc:
+        await db.rollback()
         raise HTTPException(409,str(exc)) from None
 
 
@@ -668,6 +669,9 @@ async def execute_paper_check(paper_submission_id:UUID,check_run_id:UUID,request
     paper=await db.get(PaperSubmission,paper_submission_id)
     if paper is None: raise HTTPException(404,"paper_submission_not_found")
     await _authorized_batch(db,paper.batch_id,principal)
+    # Execution owns short claim/finalize sessions; release the authorization
+    # read transaction and connection before loading images or calling AI.
+    await db.rollback()
     try:
         return await PaperCheckingExecutionService(SQLAlchemyPaperCheckingExecutionRepository(async_session_factory, settings.paper_operational_limits),
             FilesystemArtifactStorage(settings.artifact_storage_path),_paper_provider(request,settings), settings.paper_operational_limits).execute(paper_submission_id,check_run_id)

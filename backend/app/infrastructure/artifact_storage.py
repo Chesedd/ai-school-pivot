@@ -21,7 +21,14 @@ class FilesystemArtifactStorage:
         del mime_type
         self.root.mkdir(parents=True, exist_ok=True)
         reference = str(uuid4())
-        self._path(reference).write_bytes(content)
+        path = self._path(reference)
+        try:
+            path.write_bytes(content)
+        except BaseException:
+            # A failed write can leave a partial object before the caller ever
+            # receives its reference, so compensation belongs to the adapter.
+            path.unlink(missing_ok=True)
+            raise
         return reference
 
     async def read(self, storage_reference: str) -> bytes:

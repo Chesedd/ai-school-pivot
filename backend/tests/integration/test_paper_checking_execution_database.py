@@ -79,7 +79,8 @@ def source_pdf(*, three_pages=False):
 
 
 @pytest_asyncio.fixture
-async def execution_database(tmp_path, *, confirmed=True, three_papers=False):
+async def execution_database(tmp_path, *, confirmed=True, three_papers=False, source_content=None):
+    source_content = source_content or source_pdf(three_pages=three_papers)
     names = (
         "teacher",
         "group",
@@ -118,7 +119,7 @@ async def execution_database(tmp_path, *, confirmed=True, three_papers=False):
     ids.update(
         hash_a=hashlib.sha256(PNG).hexdigest(),
         hash_b=hashlib.sha256(PNG).hexdigest(),
-        source_hash=hashlib.sha256(source_pdf(three_pages=three_papers)).hexdigest(),
+        source_hash=hashlib.sha256(source_content).hexdigest(),
         suffix=suffix,
         subject_code=suffix,
         subject_name=suffix,
@@ -137,8 +138,8 @@ async def execution_database(tmp_path, *, confirmed=True, three_papers=False):
     ids["storage_b"] = await storage.store(PNG, "image/png")
     if three_papers:
         ids["storage_c"] = await storage.store(PNG, "image/png")
-    ids["storage_source"] = await storage.store(source_pdf(three_pages=three_papers), "application/pdf")
-    ids["source_size"] = len(source_pdf(three_pages=three_papers))
+    ids["storage_source"] = await storage.store(source_content, "application/pdf")
+    ids["source_size"] = len(source_content)
     ids["png_size"] = len(PNG)
     statements = (
         "INSERT INTO users(id,login,normalized_login,display_name,password_hash) VALUES (:teacher,:suffix,:suffix,'Paper teacher','hash')",

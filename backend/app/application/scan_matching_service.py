@@ -74,11 +74,14 @@ class ScanMatchingService:
             claimed = await self.repo.claim_chunk(run.id, initial.chunk_index)
             if claimed is None:
                 continue
+            run_id, chunk_id = run.id, claimed.id
             try:
                 await self._execute(run, claimed)
             except Exception as exc:  # noqa: BLE001 - provider boundary has diverse SDK exceptions.
                 await self.s.rollback()
-                chunk = await self.s.get(ScanMatchingChunk, claimed.id)
+                # Rollback expires ORM attributes, including primary keys. Keep
+                # scalar identities before rollback so failure recovery stays async.
+                chunk = await self.s.get(ScanMatchingChunk, chunk_id)
                 retryable = getattr(
                     getattr(exc, "code", None), "value", getattr(exc, "code", None)
                 ) in {
@@ -93,7 +96,7 @@ class ScanMatchingService:
                     or "unexpected_internal_error"
                 )
                 chunk.completed_at = datetime.now(UTC)
-                runrow = await self.s.get(ScanMatchingRun, run.id)
+                runrow = await self.s.get(ScanMatchingRun, run_id)
                 runrow.status = chunk.status
                 runrow.failure_code = chunk.failure_code
                 runrow.completed_at = chunk.completed_at
@@ -294,6 +297,9 @@ class ScanMatchingService:
             ),
             pages=tuple(descriptors),
         )
+        # Metadata/image reads autobegin a transaction after the durable claim.
+        # Close it before waiting on the external provider.
+        await self.s.commit()
         response, telemetry = await self.provider.match(request, content)
         validate_matching_response(request, response)
         token_participant = {
@@ -338,6 +344,9 @@ class ScanMatchingService:
         await self.s.commit()
 
     async def _finalize(self, run_id, batch_id):
+        batch = await self.repo.lock_batch(batch_id)
+        if batch is None or batch.status != "matching":
+            raise ScanMatchingError("scan_batch_not_ready_for_matching")
         run = await self.s.get(ScanMatchingRun, run_id)
         total = len(
             (
@@ -350,7 +359,6 @@ class ScanMatchingService:
         )
         if await self.repo.proposal_count(run_id) != total:
             raise ScanMatchingError("matching_page_coverage_mismatch")
-        batch = await self.repo.lock_batch(batch_id)
         run.status = "succeeded"
         run.completed_at = datetime.now(UTC)
         run.failure_code = None

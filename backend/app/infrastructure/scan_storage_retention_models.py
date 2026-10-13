@@ -20,6 +20,9 @@ from app.infrastructure.models import Base, IdMixin, uuid_type
 
 class ScanStorageRetentionEntry(IdMixin, Base):
     __tablename__ = "scan_storage_retention_entries"
+    # PR14 requires its claim writer to supply the ledger UUID explicitly.
+    # Unlike other IdMixin tables, the accepted schema has no ID server default.
+    id: Mapped[UUID] = mapped_column(uuid_type, primary_key=True)
     __table_args__ = (
         CheckConstraint(
             "(target_kind='source_artifact' AND batch_artifact_id IS NOT NULL AND scan_page_id IS NULL) OR (target_kind='page_render' AND batch_artifact_id IS NULL AND scan_page_id IS NOT NULL)",

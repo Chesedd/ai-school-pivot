@@ -7,6 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 from tests.integration.c9ab_fixtures import seed_execution_world
 from tests.integration.c10a_postgres import require_disposable_postgres
+from tests.integration.test_migrations import repository_head
 from tests.integration.test_paper_result_publication_migration import migrate
 
 pytestmark = [
@@ -61,7 +62,7 @@ async def test_paper_remediation_roundtrip_digital_rows_and_fresh_head():
         async with engine.connect() as db:
             assert (
                 await db.scalar(text("SELECT version_num FROM alembic_version"))
-                == "20261011_02"
+                == repository_head()
             )
     finally:
         await engine.dispose()
@@ -86,7 +87,7 @@ async def test_downgrade_refuses_paper_provenance(tmp_path):
             migrate(url, "downgrade", "20261011_01")
         assert (
             await context[0].scalar(text("SELECT version_num FROM alembic_version"))
-            == "20261011_02"
+            == repository_head()
         )
         assert (
             await context[0].scalar(

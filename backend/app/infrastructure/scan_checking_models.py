@@ -619,6 +619,7 @@ class PaperSubmissionPage(Base):
         UniqueConstraint(
             "paper_submission_id", "page_order", name="uq_paper_submission_pages_order"
         ),
+        CheckConstraint("page_order >= 0", name="ck_paper_submission_pages_order"),
     )
     paper_submission_id: Mapped[UUID] = mapped_column(
         ForeignKey("paper_submissions.id", ondelete="RESTRICT"), primary_key=True

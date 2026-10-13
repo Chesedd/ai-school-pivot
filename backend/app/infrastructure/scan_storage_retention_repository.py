@@ -33,7 +33,6 @@ WITH completed AS (
     WHERE NOT EXISTS (
         SELECT 1 FROM paper_submission_pages m
         JOIN paper_submissions paper ON paper.id=m.paper_submission_id
-        JOIN scan_grouping_revisions g ON g.id=paper.grouping_revision_id AND g.status='confirmed'
         JOIN paper_result_publication_states s ON s.paper_submission_id=paper.id
         JOIN paper_result_publications pub ON pub.id=s.active_publication_id
           AND pub.paper_submission_id=paper.id
@@ -100,6 +99,15 @@ class ScanStorageRetentionRepository:
             else "scan_page_id"
         )
         async with self.session_factory() as db, db.begin():
+            # The ledger insert acquires a batch key-share lock through its FK.
+            # Take the batch before the target, matching publication's order;
+            # otherwise page -> FK batch can deadlock with batch -> page.
+            batch = await db.scalar(
+                text("SELECT id FROM assessment_scan_batches WHERE id=:id FOR UPDATE SKIP LOCKED"),
+                {"id": target.batch_id},
+            )
+            if batch is None:
+                return None
             locked = await db.scalar(
                 text(f"SELECT id FROM {table} WHERE id=:id FOR UPDATE SKIP LOCKED"),
                 {"id": target.target_id},
