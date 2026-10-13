@@ -9,7 +9,7 @@ import {artifactFixture, batchFixture, pageFixture} from "./paperScanTestFixture
 vi.mock("./api", async original => ({...await original<typeof import("./api")>(), getTeacherAssignment: vi.fn(), getAssessment: vi.fn()}));
 vi.mock("./paperScanApi", () => ({createScanBatch: vi.fn(), listScanBatches: vi.fn(), getScanBatch: vi.fn(), listScanArtifacts: vi.fn(), listScanPages: vi.fn(), uploadScanArtifact: vi.fn(), extractScanBatch: vi.fn(), downloadScanArtifact: vi.fn()}));
 const navigate = vi.fn();
-const intake = (matching = false) => render(<PaperScanIntake batchId="b" assignmentId="a" participantCount={2} base="/classrooms/c/assignments/a/paper" navigate={navigate} matching={matching}/>);
+const intake = () => render(<PaperScanIntake batchId="b" assignmentId="a" participantCount={2} base="/classrooms/c/assignments/a/paper" navigate={navigate}/>);
 const landing = () => render(<PaperScanPage classId="c" assignmentId="a" navigate={navigate}/>);
 const ready = () => {vi.mocked(api.getScanBatch).mockResolvedValue(batchFixture({status: "extracting"})); vi.mocked(api.listScanArtifacts).mockResolvedValue({items: [artifactFixture({extraction_status: "completed", page_count: 1})]}); vi.mocked(api.listScanPages).mockResolvedValue({items: [pageFixture()]});};
 beforeEach(() => {
@@ -72,7 +72,7 @@ it("has no fake retry for terminal failure or already progressed batches", async
 it("reconstructs completion on remount and navigates to the bounded handoff shell", async () => {
   ready(); intake(); await screen.findByRole("heading", {name: "Готово к сопоставлению"}); expect(screen.getByText("Сохранено файлов: 1 · Извлечено страниц: 1")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", {name: "Перейти к сопоставлению"})); expect(navigate).toHaveBeenCalledWith("/classrooms/c/assignments/a/paper/b/matching");
-  cleanup(); intake(true); await screen.findByText("Этот этап будет доступен в следующем обновлении. Обработка файлов сохранена."); expect(api.getScanBatch).toHaveBeenCalledTimes(2); expect(api.extractScanBatch).not.toHaveBeenCalled();
+  cleanup(); intake(); await screen.findByRole("heading", {name: "Готово к сопоставлению"}); expect(api.getScanBatch).toHaveBeenCalledTimes(2); expect(api.extractScanBatch).not.toHaveBeenCalled();
 });
 it("shows intentional purged-content feedback and retains metadata", async () => {
   ready(); vi.mocked(api.downloadScanArtifact).mockRejectedValue(new ApiError(410, "scan_artifact_content_purged", "internal")); intake();

@@ -17,6 +17,43 @@ export const artifactLabels: Record<string, string> = {
   failed_retryable: "Не удалось обработать — можно повторить", failed_terminal: "Не удалось обработать",
 };
 const messages: Record<string, string> = {
+  matching_already_running: "Сопоставление уже выполняется. Данные обновлены.",
+  matching_claim_lost: "Сопоставление продолжает выполняться. Данные обновлены.",
+  matching_commit_outcome_unknown: "Уточняем результат сопоставления. Обновите данные.",
+  timeout: "Не удалось завершить сопоставление. Данные обновлены.",
+  rate_limit: "Сопоставление временно недоступно. Данные обновлены.",
+  connection_error: "Не удалось завершить сопоставление. Данные обновлены.",
+  provider_unavailable: "Сопоставление временно недоступно. Данные обновлены.",
+  unexpected_internal_error: "Не удалось завершить сопоставление. Данные обновлены.",
+  matching_persistence_failed: "Не удалось сохранить сопоставление. Данные обновлены.",
+  page_content_integrity_failure: "Изображение страницы повреждено. Вернитесь к файлам.",
+  scan_batch_not_ready_for_matching: "Сопоставление недоступно в текущем состоянии партии.",
+  scan_pages_incomplete: "Сначала завершите обработку всех страниц.",
+  scan_pages_failed: "Есть необработанные страницы. Вернитесь к файлам.",
+  missing_derived_render: "Изображения страниц не готовы. Вернитесь к файлам.",
+  scan_matching_provider_not_configured: "Сопоставление сейчас недоступно. Обратитесь к администратору.",
+  grouping_revision_conflict: "Распределение изменилось. Мы загрузили актуальные данные.",
+  grouping_based_on_stale_matching: "Результат сопоставления изменился. Мы загрузили актуальные данные.",
+  grouping_immutable: "Распределение уже подтверждено или этап изменился. Данные обновлены.",
+  grouping_initialization_not_allowed: "Создание распределения недоступно на этом этапе.",
+  grouping_confirmation_not_allowed: "Этап партии изменился. Данные обновлены.",
+  grouping_page_not_in_batch: "Страница не принадлежит этой партии. Данные обновлены.",
+  grouping_participant_not_in_assignment: "Ученик не участвует в этом назначении.",
+  participant_not_in_assignment: "Ученик не участвует в этом назначении.",
+  grouping_variant_required: "Для ученика не назначен вариант. Обратитесь к администратору.",
+  unmatched_pages_block_confirmation: "Распределите все страницы перед подтверждением.",
+  grouping_requires_group: "Распределите страницы хотя бы в одну работу.",
+  grouping_pages_not_ready: "Некоторые страницы ещё не готовы.",
+  grouping_duplicate_page: "Страница повторяется в работе. Данные обновлены.",
+  duplicate_page_assignment: "Страница повторяется в распределении. Данные обновлены.",
+  duplicate_participant: "У ученика должна быть одна работа в партии.",
+  page_coverage_mismatch: "Состав страниц изменился. Мы загрузили актуальные данные.",
+  grouping_page_order_mismatch: "Состав работы изменился. Мы загрузили актуальные данные.",
+  grouping_page_order_invalid: "Проверьте порядок страниц в работе.",
+  paper_submission_conflict: "Работа ученика уже создана. Данные обновлены.",
+  scan_batch_paper_limit_exceeded: "В партии слишком много работ.",
+  paper_submission_page_limit_exceeded: "В работе слишком много страниц.",
+  scan_page_content_purged: "Страница больше не доступна.",
   unsupported_artifact_type: "Выберите PDF, JPEG, PNG или WebP.",
   invalid_artifact_signature: "Содержимое файла не соответствует его формату. Выберите PDF, JPEG, PNG или WebP.",
   artifact_too_small: "Файл пустой.", artifact_too_large: "Файл слишком большой.",
@@ -56,6 +93,12 @@ export function scanErrorMessage(error: unknown): string {
     if (error.status === 409) return "Состояние изменилось. Обновите данные и повторите действие.";
   }
   return errorMessage(error, "Не удалось выполнить действие. Проверьте соединение и обновите данные.");
+}
+// Never render arbitrary server messages, provider errors, or raw response details.
+export function matchingErrorMessage(error: unknown): string {
+  if (error instanceof ApiError && error.status === 422 && !messages[error.code]) return "Не удалось выполнить действие. Обновите данные и проверьте распределение.";
+  if (error instanceof ApiError) return scanErrorMessage(error);
+  return "Не удалось выполнить действие. Проверьте соединение и обновите данные.";
 }
 export type ScanSnapshot = {batch: ScanBatch; artifacts: ScanArtifact[]; pages: ScanPage[]};
 export const acceptsUpload = (batch: ScanBatch) => ["draft", "uploading"].includes(batch.status);

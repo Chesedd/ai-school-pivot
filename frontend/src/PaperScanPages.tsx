@@ -3,10 +3,11 @@ import {ApiError, getAssessment, getTeacherAssignment} from "./api";
 import {createScanBatch, listScanBatches, type ScanBatch} from "./paperScanApi";
 import {batchLabels, scanErrorMessage} from "./paperScanState";
 import {PaperScanIntake} from "./PaperScanIntake";
+import {PaperMatchingPage} from "./PaperMatchingPage";
 
 const paperPath = (classId: string, assignmentId: string) => `/classrooms/${encodeURIComponent(classId)}/assignments/${encodeURIComponent(assignmentId)}/paper`;
-export function PaperScanPage(p: {classId: string; assignmentId: string; batchId?: string; matching?: boolean; navigate: (to: string) => void}) {
-  const [context, setContext] = useState<{title: string; participantCount: number}>();
+export function PaperScanPage(p: {classId: string; assignmentId: string; batchId?: string; matching?: boolean; checking?: boolean; navigate: (to: string) => void}) {
+  const [context, setContext] = useState<{title: string; participantCount: number; variants: Record<string, string>}>();
   const [error, setError] = useState("");
   useEffect(() => {
     const controller = new AbortController();
@@ -16,17 +17,17 @@ export function PaperScanPage(p: {classId: string; assignmentId: string; batchId
         const assignment = await getTeacherAssignment(p.assignmentId, controller.signal);
         if (assignment.class_group_id !== p.classId) throw new ApiError(404, "assignment_not_found", "");
         const assessment = await getAssessment(assignment.assessment_id, controller.signal);
-        if (!controller.signal.aborted) setContext({title: assessment.title, participantCount: assignment.participant_count});
+        if (!controller.signal.aborted) setContext({title: assessment.title, participantCount: assignment.participant_count, variants: Object.fromEntries((assessment.variants || []).map(v => [v.id, v.name]))});
       } catch (e) {if (!controller.signal.aborted) setError(scanErrorMessage(e));}
     })();
     return () => controller.abort();
   }, [p.assignmentId, p.classId]);
   const base = paperPath(p.classId, p.assignmentId);
-  return <div className="paper-scan">
+  return <div className={`paper-scan ${p.matching || p.checking ? "paper-matching" : ""}`}>
     <a className="back" href={`/classrooms/${encodeURIComponent(p.classId)}`} onClick={e => {e.preventDefault(); p.navigate(e.currentTarget.pathname);}}>← К назначениям класса</a>
     {error ? <p role="alert" className="alert error">{error}</p> : !context ? <p role="status">Загрузка работы…</p> : <>
       <h1>{context.title}</h1><p className="scan-context">Бумажные работы</p>
-      {p.batchId ? <PaperScanIntake key={p.batchId} batchId={p.batchId} assignmentId={p.assignmentId} participantCount={context.participantCount} base={base} matching={p.matching} navigate={p.navigate}/> :
+      {p.batchId ? p.matching || p.checking ? <PaperMatchingPage key={`${p.batchId}-${!!p.checking}`} batchId={p.batchId} assignmentId={p.assignmentId} base={base} variants={context.variants} checking={p.checking} navigate={p.navigate}/> : <PaperScanIntake key={p.batchId} batchId={p.batchId} assignmentId={p.assignmentId} participantCount={context.participantCount} base={base} navigate={p.navigate}/> :
         <ScanBatchList key={p.assignmentId} assignmentId={p.assignmentId} base={base} navigate={p.navigate}/>}
     </>}
   </div>;

@@ -5,7 +5,7 @@ import {usePaperScanBatch} from "./usePaperScanBatch";
 
 type Selected = {file: File; state: "selected" | "uploading" | "uploaded" | "failed" | "not_sent"; error?: string};
 const selectedLabels = {selected: "Выбран", uploading: "Загрузка…", uploaded: "Загружен", failed: "Загрузка не подтверждена", not_sent: "Не отправлен"};
-export function PaperScanIntake(p: {batchId: string; assignmentId: string; participantCount: number; base: string; matching?: boolean; navigate: (to: string) => void}) {
+export function PaperScanIntake(p: {batchId: string; assignmentId: string; participantCount: number; base: string; navigate: (to: string) => void}) {
   const [selected, setSelected] = useState<Selected[]>([]);
   const [busy, setBusy] = useState<"upload" | "extract" | "">("");
   const {data, error: readError, refreshing, refresh} = usePaperScanBatch(p.batchId, p.assignmentId, busy === "extract");
@@ -51,7 +51,6 @@ export function PaperScanIntake(p: {batchId: string; assignmentId: string; parti
   const later = progressed(data.batch);
   const selectionPending = selected.some(x => x.state !== "uploaded");
   const actionable = !busy && !refreshing && !readError;
-  if (p.matching) return <>{back}<section className="solving-status"><h2>Сопоставление бумажных работ</h2><p>{ready || later ? "Этот этап будет доступен в следующем обновлении. Обработка файлов сохранена." : "Сначала завершите обработку файлов."}</p><button onClick={() => p.navigate(`${p.base}/${encodeURIComponent(p.batchId)}`)}>Вернуться к файлам</button></section></>;
   return <>{back}
     <header className="scan-heading"><div><h2>Партия от {new Date(data.batch.created_at).toLocaleString("ru-RU")}</h2><span className="badge">{ready ? "Готово к сопоставлению" : batchLabels[data.batch.status] || "Состояние уточняется"}</span></div><button className="link-button" disabled={!actionable} onClick={() => void refresh()}>Обновить данные</button></header>
     {error && <p className="alert error" role="alert">{error}</p>}

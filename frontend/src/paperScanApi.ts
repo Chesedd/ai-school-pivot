@@ -41,3 +41,44 @@ export function uploadScanArtifact(id: string, file: File, position: number): Pr
 export const extractScanBatch = (id: string): Promise<ExtractionSummary> => request(`${batchPath(id)}/extract`, {method: "POST"});
 export const downloadScanArtifact = (batchId: string, artifactId: string): Promise<Blob> =>
   request(`${batchPath(batchId)}/artifacts/${encodeURIComponent(artifactId)}/content`, undefined, "blob");
+
+// Teacher projections from ScanMatchingService.read / ScanGroupingRepository.read.
+export type MatchingStudent = {assignment_participant_id: string; display_name: string};
+export type MatchingProposal = {
+  page_id: string; source_order: number; content_url: string; disposition: string;
+  proposed_student: MatchingStudent | null; candidate_students: MatchingStudent[];
+  confidence: number | string; evidence_code: string; evidence_summary: string;
+  proposed_page_order: number | null; warning: boolean;
+};
+export type ScanMatching = {
+  batch_id: string; matching_revision: number; status: string;
+  pages_summary: {total: number; matched: number; ambiguous: number; unmatched: number};
+  warnings: number; proposals: MatchingProposal[];
+};
+export type GroupingPage = {
+  page_id: string; source_order: number; page_order: number | null; content_url: string;
+  ai_proposal: {disposition: string; confidence: number | string; evidence_code: string; evidence_summary: string};
+};
+export type PaperGroup = MatchingStudent & {
+  student_id: string; assigned_variant_id: string | null; pages: GroupingPage[];
+};
+export type ScanGrouping = {
+  batch_id: string; batch_status: string; matching_revision: number; grouping_revision: number;
+  grouping_status: string; row_version: number; groups: PaperGroup[];
+  unresolved_pages: (GroupingPage & {candidate_students: (MatchingStudent & {student_id: string; rank: number})[]; reason_code: string})[];
+  paper_submissions: {id: string; assignment_participant_id: string; assigned_variant_id: string; status: string}[];
+};
+export const readScanMatching = (id: string, signal?: AbortSignal): Promise<ScanMatching> => request(`${batchPath(id)}/matching`, {signal});
+export const startScanMatching = (id: string): Promise<ScanMatching> => request(`${batchPath(id)}/match`, {method: "POST"});
+export const readScanGrouping = (id: string, signal?: AbortSignal): Promise<ScanGrouping> => request(`${batchPath(id)}/grouping`, {signal});
+export const initializeScanGrouping = (id: string): Promise<ScanGrouping> => request(`${batchPath(id)}/grouping`, {method: "POST"});
+const groupingCAS = (g: ScanGrouping) => ({expected_revision: g.grouping_revision, expected_row_version: g.row_version});
+const groupingBody = (method: string, body: object): RequestInit => ({method, headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+export const assignScanPage = (id: string, pageId: string, participantId: string | null, g: ScanGrouping): Promise<ScanGrouping> =>
+  request(`${batchPath(id)}/grouping/pages/${encodeURIComponent(pageId)}`, groupingBody("PATCH", {...groupingCAS(g), assignment_participant_id: participantId}));
+export const reorderScanPages = (id: string, participantId: string, pageIds: string[], g: ScanGrouping): Promise<ScanGrouping> =>
+  request(`${batchPath(id)}/grouping/groups/${encodeURIComponent(participantId)}/page-order`, groupingBody("PUT", {...groupingCAS(g), page_ids: pageIds}));
+export const confirmScanGrouping = (id: string, g: ScanGrouping): Promise<ScanGrouping> =>
+  request(`${batchPath(id)}/grouping/confirm`, groupingBody("POST", groupingCAS(g)));
+export const readScanPageContent = (id: string, signal?: AbortSignal): Promise<Blob> =>
+  request(`${root}/scan-pages/${encodeURIComponent(id)}/content`, {signal}, "blob");
