@@ -25,7 +25,7 @@ export function PaperScanPage(p: {classId: string; assignmentId: string; batchId
   return <div className="paper-scan">
     <a className="back" href={`/classrooms/${encodeURIComponent(p.classId)}`} onClick={e => {e.preventDefault(); p.navigate(e.currentTarget.pathname);}}>← К назначениям класса</a>
     {error ? <p role="alert" className="alert error">{error}</p> : !context ? <p role="status">Загрузка работы…</p> : <>
-      <h1>{context.title}</h1><p>Бумажные работы</p>
+      <h1>{context.title}</h1><p className="scan-context">Бумажные работы</p>
       {p.batchId ? <PaperScanIntake key={p.batchId} batchId={p.batchId} assignmentId={p.assignmentId} participantCount={context.participantCount} base={base} matching={p.matching} navigate={p.navigate}/> :
         <ScanBatchList key={p.assignmentId} assignmentId={p.assignmentId} base={base} navigate={p.navigate}/>}
     </>}

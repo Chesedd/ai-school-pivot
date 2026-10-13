@@ -53,7 +53,7 @@ export function PaperScanIntake(p: {batchId: string; assignmentId: string; parti
   const actionable = !busy && !refreshing && !readError;
   if (p.matching) return <>{back}<section className="solving-status"><h2>Сопоставление бумажных работ</h2><p>{ready || later ? "Этот этап будет доступен в следующем обновлении. Обработка файлов сохранена." : "Сначала завершите обработку файлов."}</p><button onClick={() => p.navigate(`${p.base}/${encodeURIComponent(p.batchId)}`)}>Вернуться к файлам</button></section></>;
   return <>{back}
-    <header className="scan-heading"><h2>Партия от {new Date(data.batch.created_at).toLocaleString("ru-RU")}</h2><span className="badge">{ready ? "Готово к сопоставлению" : batchLabels[data.batch.status] || "Состояние уточняется"}</span><button className="secondary" disabled={!actionable} onClick={() => void refresh()}>Обновить данные</button></header>
+    <header className="scan-heading"><div><h2>Партия от {new Date(data.batch.created_at).toLocaleString("ru-RU")}</h2><span className="badge">{ready ? "Готово к сопоставлению" : batchLabels[data.batch.status] || "Состояние уточняется"}</span></div><button className="link-button" disabled={!actionable} onClick={() => void refresh()}>Обновить данные</button></header>
     {error && <p className="alert error" role="alert">{error}</p>}
     {acceptsUpload(data.batch) && <section className="scan-upload" onDragOver={e => e.preventDefault()} onDrop={e => {e.preventDefault(); if (actionable) choose(e.dataTransfer.files);}}>
       <h2>Загрузить работы</h2><p>PDF, JPEG, PNG или WebP. Можно выбрать несколько файлов или перетащить их сюда. После загрузки начните обработку; сопоставление учеников идёт следующим этапом.</p>
@@ -88,5 +88,5 @@ function ArtifactRow({artifact: a, batchId, failedPages}: {artifact: ScanArtifac
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) {setMessage(scanErrorMessage(e));} finally {setBusy(false);}
   };
-  return <li><div><strong>{a.original_filename}</strong><p>{artifactLabels[a.extraction_status] || "Состояние уточняется"}{a.page_count !== null && ` · Страниц: ${a.page_count}`}</p>{a.failure_code && <p>{scanFailureMessage(a.failure_code)}</p>}{failedPages > 0 && <p>Не обработано страниц: {failedPages}</p>}{message && <p role="status">{message}</p>}</div><button className="secondary" disabled={busy} onClick={() => void download()} aria-label={`Скачать ${a.original_filename}`}>{busy ? "Загрузка…" : "Скачать исходный файл"}</button></li>;
+  return <li><div><strong>{a.original_filename}</strong><p className="scan-file-meta">{artifactLabels[a.extraction_status] || "Состояние уточняется"}{a.page_count !== null && ` · Страниц: ${a.page_count}`}</p>{a.failure_code && <p>{scanFailureMessage(a.failure_code)}</p>}{failedPages > 0 && <p>Не обработано страниц: {failedPages}</p>}{message && <p role="status">{message}</p>}</div><button className="link-button" disabled={busy} onClick={() => void download()} aria-label={`Скачать ${a.original_filename}`}>{busy ? "Загрузка…" : "Скачать исходный файл"}</button></li>;
 }
