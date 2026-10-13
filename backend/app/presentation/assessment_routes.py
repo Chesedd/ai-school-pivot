@@ -4,24 +4,63 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Response
 
-from app.application.assessments import (AddAssessmentItemCommand, AssessmentService,
-    ChangeAssessmentItemPointsCommand, CreateAssessmentCommand,
-    CreateAssignmentCommand, PublishAssessmentCommand, ReorderAssessmentItemsCommand, UpdateAssessmentCommand)
+from app.application.assessments import (
+    AddAssessmentItemCommand,
+    AssessmentError,
+    AssessmentService,
+    ChangeAssessmentItemPointsCommand,
+    CreateAssessmentCommand,
+    CreateAssignmentCommand,
+    PublishAssessmentCommand,
+    ReorderAssessmentItemsCommand,
+    UpdateAssessmentCommand,
+)
+from app.application.capabilities import (
+    ASSESSMENT_CREATE,
+    ASSESSMENT_MANAGE,
+    ASSESSMENT_RESULTS_READ,
+    ASSESSMENT_SCAN_CHECK_MANAGE,
+)
+from app.application.classroom_results import (
+    ClassroomAssessmentResultsService,
+    ClassroomResultsError,
+    ResultActor,
+)
 from app.application.content_bank import ActorContext
-from app.application.capabilities import ASSESSMENT_CREATE, ASSESSMENT_MANAGE, ASSESSMENT_RESULTS_READ
-from app.application.classroom_results import ClassroomAssessmentResultsService, ResultActor
-from app.application.principal import Principal
 from app.application.object_access import object_access_scope
+from app.application.principal import Principal
 from app.db.session import async_session_factory
 from app.infrastructure.assessment_repository import SQLAlchemyAssessmentUnitOfWork
-from app.infrastructure.classroom_results_repository import SQLAlchemyClassroomResultsReadRepository
-from app.presentation.assessment_schemas import (AssessmentCreateRequest, AssessmentItemCreateRequest,
-    AssessmentItemOrderRequest, AssessmentItemPatchRequest, AssessmentItemResponse,
-    AssessmentClassGroupPage, AssessmentListPage, AssessmentPatchRequest, AssessmentResponse,
-    ClassAssignmentPage, TeacherAssignmentPage, VariantCreateRequest, VariantResponse)
-from app.presentation.assessment_schemas import (AssignmentResponse, EmptyRequest,
-    PublicationResponse, PublishAssessmentRequest, AssignmentResultsResponse, StudentAssignmentResultResponse, StudentAssignmentHistoryResponse)
-from app.presentation.auth_dependencies import require_capability, require_trusted_origin
+from app.infrastructure.classroom_results_repository import (
+    SQLAlchemyClassroomResultsReadRepository,
+)
+from app.infrastructure.paper_teacher_context import PaperTeacherContextRepository
+from app.presentation.assessment_schemas import (
+    AssessmentClassGroupPage,
+    AssessmentCreateRequest,
+    AssessmentItemCreateRequest,
+    AssessmentItemOrderRequest,
+    AssessmentItemPatchRequest,
+    AssessmentItemResponse,
+    AssessmentListPage,
+    AssessmentPatchRequest,
+    AssessmentResponse,
+    AssignmentResponse,
+    AssignmentResultsResponse,
+    ClassAssignmentPage,
+    EmptyRequest,
+    PublicationResponse,
+    PublishAssessmentRequest,
+    StudentAssignmentHistoryResponse,
+    StudentAssignmentResultResponse,
+    TeacherAssignmentPage,
+    VariantCreateRequest,
+    VariantResponse,
+)
+from app.presentation.auth_dependencies import (
+    require_capability,
+    require_trusted_origin,
+)
 
 router = APIRouter(prefix="/api/assessment-core", dependencies=[Depends(require_trusted_origin)])
 
@@ -31,14 +70,15 @@ def service() -> AssessmentService:
 
 
 def actor_for(capability: str):
-    def actor(principal: Principal = Depends(require_capability(capability))) -> ActorContext:
+    def actor(principal: Annotated[Principal, Depends(require_capability(capability))]) -> ActorContext:
         return ActorContext(principal.user_id, access=object_access_scope(principal))
     return actor
 
 manage_actor = actor_for(ASSESSMENT_MANAGE)
 create_actor = actor_for(ASSESSMENT_CREATE)
+manage_principal = require_capability(ASSESSMENT_MANAGE)
 
-def results_principal(principal: Principal = Depends(require_capability(ASSESSMENT_RESULTS_READ))):
+def results_principal(principal: Annotated[Principal, Depends(require_capability(ASSESSMENT_RESULTS_READ))]):
     return principal
 
 @router.get("/assignments/{assignment_id}/results", response_model=AssignmentResultsResponse)
@@ -46,6 +86,11 @@ async def assignment_results(assignment_id: UUID, principal: Annotated[Principal
         offset: Annotated[int, Query(ge=0)] = 0, limit: Annotated[int, Query(ge=1, le=100)] = 50):
     async with async_session_factory() as session:
         scope=object_access_scope(principal)
+        if ASSESSMENT_SCAN_CHECK_MANAGE in principal.capabilities:
+            result = await PaperTeacherContextRepository(session, scope).assignment_results(assignment_id, offset, limit)
+            if result is None:
+                raise ClassroomResultsError("assignment_not_found")
+            return result
         return await ClassroomAssessmentResultsService(SQLAlchemyClassroomResultsReadRepository(session)).assignment_results(assignment_id,ResultActor(principal.user_id,scope.unrestricted),offset,limit)
 
 @router.get("/assignments/{assignment_id}/students/{student_id}/results", response_model=StudentAssignmentResultResponse)
@@ -109,8 +154,15 @@ async def create_assessment(payload: AssessmentCreateRequest, response: Response
 
 
 @router.get("/assessments/{assessment_id}", response_model=AssessmentResponse)
-async def get_assessment(assessment_id: UUID, context: Annotated[ActorContext, Depends(manage_actor)]):
-    return assessment_view(await service().get(assessment_id, context))
+async def get_assessment(assessment_id: UUID, principal: Annotated[Principal, Depends(manage_principal)]):
+    scope = object_access_scope(principal)
+    if ASSESSMENT_SCAN_CHECK_MANAGE in principal.capabilities:
+        async with async_session_factory() as session:
+            result = await PaperTeacherContextRepository(session, scope).assessment(assessment_id)
+            if result is None:
+                raise AssessmentError("assessment_not_found", "Работа не найдена.", 404)
+            return assessment_view(result)
+    return assessment_view(await service().get(assessment_id, ActorContext(principal.user_id, access=scope)))
 
 
 @router.patch("/assessments/{assessment_id}", response_model=AssessmentResponse)
@@ -184,8 +236,15 @@ async def create_assignment(assessment_id: UUID, payload: PublishAssessmentReque
 
 
 @router.get("/assignments/{assignment_id}", response_model=AssignmentResponse)
-async def get_assignment(assignment_id: UUID, context: Annotated[ActorContext, Depends(manage_actor)]):
-    return await service().get_assignment(assignment_id, context)
+async def get_assignment(assignment_id: UUID, principal: Annotated[Principal, Depends(manage_principal)]):
+    scope = object_access_scope(principal)
+    if ASSESSMENT_SCAN_CHECK_MANAGE in principal.capabilities:
+        async with async_session_factory() as session:
+            result = await PaperTeacherContextRepository(session, scope).assignment(assignment_id)
+            if result is None:
+                raise AssessmentError("assignment_not_found", "Назначение не найдено.", 404)
+            return result
+    return await service().get_assignment(assignment_id, ActorContext(principal.user_id, access=scope))
 
 
 @router.post("/assignments/{assignment_id}/close", response_model=AssignmentResponse)
