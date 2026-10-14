@@ -1,6 +1,7 @@
 import {request} from "./api";
 export type RemediationItem={position:number;task_version_id:string;selection_source:string;title:string|null;statement:string|null;task_type:string|null;answer_format:string|null;difficulty:number|null};
-export type Remediation={id:string;student_id:string;class_group_id:string;source_assignment_id:string;source_assignment_participant_id:string;source_submission_id:string;source_check_run_id:string;status:"draft"|"assigned"|"cancelled";title:string;instructions:string|null;due_at:string|null;review_acknowledged_at:string|null;created_at:string;updated_at:string;assigned_at:string|null;cancelled_at:string|null;finding_ids:string[];items:RemediationItem[]};
+type RemediationFields={id:string;student_id:string;class_group_id:string;source_assignment_id:string;source_assignment_participant_id:string;source_submission_id:string|null;source_check_run_id:string|null;source_type?:"digital"|"paper";source_paper_submission_id?:string|null;source_paper_publication_id?:string|null;source_assessment_item_ids?:string[];publication_finding_ids?:string[];status:"draft"|"assigned"|"cancelled";title:string;instructions:string|null;due_at:string|null;review_acknowledged_at:string|null;created_at:string;updated_at:string;assigned_at:string|null;cancelled_at:string|null;finding_ids:string[];items:RemediationItem[]};
+export type Remediation = RemediationFields & ({source_type?: "digital"; source_submission_id: string; source_check_run_id: string} | {source_type: "paper"; source_submission_id: null; source_check_run_id: string | null; source_paper_submission_id: string; source_paper_publication_id: string; source_assessment_item_ids: string[]; publication_finding_ids: string[]});
 export type Candidate={task_id:string;task_version_id:string;title:string|null;statement_preview:string;task_type:string;answer_format:string;difficulty:number;primary_skill_name:string|null;reasons:{match_type:string;matched_title:string|null}[]};
 export const searchCandidates=(body:unknown):Promise<Candidate[]>=>request("/api/remediations/candidates/search",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
 export const createRemediation=(body:unknown):Promise<Remediation>=>request("/api/remediations",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
@@ -8,7 +9,7 @@ const e=encodeURIComponent;
 export const assignRemediation=(id:string,ack:boolean):Promise<Remediation>=>request(`/api/remediations/${e(id)}/assign`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({acknowledge_review_required:ack})});
 export const getRemediation=(id:string):Promise<Remediation>=>request(`/api/remediations/${e(id)}`);
 export const cancelRemediation=(id:string):Promise<Remediation>=>request(`/api/remediations/${e(id)}/cancel`,{method:"POST"});
-export const listStudentRemediations=():Promise<{items:any[]}>=>(request("/api/student/remediations"));
+export const listStudentRemediations=(offset=0):Promise<{items:any[];total?:number}>=>(request(`/api/student/remediations?offset=${offset}&limit=20`));
 export const getStudentRemediation=(id:string):Promise<any>=>request(`/api/student/remediations/${e(id)}`);
 export const listTeacherRemediations=(c:string,s:string):Promise<{items:Remediation[]}>=>(request(`/api/classrooms/${e(c)}/students/${e(s)}/remediations`));
 export type ExecutionStatus="not_started"|"in_progress"|"submitted"|"checking"|"checked"|"review_required"|"check_failed"|"cancelled"|"expired";

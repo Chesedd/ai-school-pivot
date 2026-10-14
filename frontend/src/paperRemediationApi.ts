@@ -1,0 +1,12 @@
+import {request} from "./api";
+import type {Candidate, Remediation} from "./remediationApi";
+import type {PublishedResult} from "./studentPaperApi";
+export type PaperEligibility = {paper_submission_id: string; active_publication_id: string | null; eligible: boolean; eligible_item_count: number; eligible_assessment_item_ids: string[]; reason: string | null};
+export type PaperSignals = {source_paper_publication_id: string; source_assessment_item_ids: string[]; publication_finding_ids: string[]};
+export type PaperDraftInput = PaperSignals & {creation_key: string; title: string; instructions: string | null; items: {task_version_id: string; selection_source: "suggested" | "manual"}[]};
+const path = (id: string) => `/api/assessment-core/paper-submissions/${encodeURIComponent(id)}`;
+const json = (body: unknown): RequestInit => ({method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+export const getPaperEligibility = (id: string, signal?: AbortSignal): Promise<PaperEligibility> => request(`${path(id)}/remediation-eligibility`, {signal});
+export const getPaperSource = (id: string, signal?: AbortSignal): Promise<{items: {id: string; published_at: string; result: PublishedResult}[]}> => request(`${path(id)}/publications`, {signal});
+export const searchPaperCandidates = (id: string, signals: PaperSignals, mode: "suggested" | "manual", q: string): Promise<Candidate[]> => request(`${path(id)}/remediations/candidates/search`, json({...signals, mode, q: q || null, limit: 20}));
+export const createPaperDraft = (id: string, body: PaperDraftInput): Promise<Remediation> => request(`${path(id)}/remediations`, json(body));

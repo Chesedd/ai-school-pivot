@@ -1,0 +1,11 @@
+.student-paper { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border, #ddd); }
+.paper-score { display: flex; flex-wrap: wrap; gap: 1rem; padding: 1rem; background: #edf5f3; border-radius: .6rem; }
+.student-paper-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); gap: 1.5rem; margin-block: 1rem; }
+.student-paper-grid > div, .paper-remediation { min-width: 0; overflow-wrap: anywhere; }
+.student-paper-grid article, .paper-remediation article { padding: .7rem; margin-bottom: .6rem; border: 1px solid #d7e1e0; border-radius: .5rem; }
+.student-paper .matching-image-frame { height: 620px; }
+.paper-remediation input:not([type=checkbox]), .paper-remediation textarea { width: 100%; box-sizing: border-box; }
+.paper-remediation label { display: block; margin-block: .6rem; }
+.paper-remediation label:has(input[type=checkbox]) { display: flex; align-items: center; gap: .6rem; }
+.paper-remediation input[type=checkbox] { width: auto; flex-shrink: 0; }
+@media (max-width: 800px) { .student-paper-grid { grid-template-columns: minmax(0, 1fr); } .student-paper .matching-image-frame { height: 480px; } }

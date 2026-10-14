@@ -3,6 +3,9 @@ import {cleanup,fireEvent,render,screen,waitFor} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {StudentAssignmentDetailPage,StudentAssignmentListPage,StudentAttemptPage} from "./StudentAssessmentPages";
 
+import {ApiError} from "./api";
+import {getAssignmentPaperResult} from "./studentPaperApi";
+vi.mock("./studentPaperApi", async original => ({...await original<typeof import("./studentPaperApi")>(), getAssignmentPaperResult: vi.fn()}));
 const ok=(body:unknown,status=200)=>new Response(status===204?null:JSON.stringify(body),{status,headers:{"Content-Type":"application/json"}});
 const assignment={assignment_id:"a1",assessment_id:"as1",title:"Контрольная",description:"Описание",status:"open" as const,start_at:"2020-01-01T00:00:00Z",due_at:"2099-01-01T00:00:00Z",max_attempts:2,assigned_variant_id:"v1",attempt_count:0,participant_id:"p1",current_draft_attempt_id:null,submitted_attempt_count:0,submitted_attempts:[] as {id:string;attempt_no:number;submitted_at:string}[]};
 const items=[
@@ -14,7 +17,7 @@ const items=[
  {id:"i6",task_version_id:"t6",position:6,points:"1.00",title:null,statement:"Эссе",task_type:"essay",answer_format:"long_text"},
 ] as any[];
 const attempt=(answers:any[]=[],status:"draft"|"submitted"="draft")=>({id:"s1",attempt_no:1,status,assigned_variant_id:"v1",resumed:false,started_at:"2026-01-01T00:00:00Z",submitted_at:status==="submitted"?"2026-01-02T00:00:00Z":null,answers,items});
-beforeEach(()=>{sessionStorage.clear();vi.stubGlobal("confirm",vi.fn(()=>true));vi.stubGlobal("crypto",{randomUUID:vi.fn(()=>"00000000-0000-4000-8000-000000000001")})});
+beforeEach(()=>{vi.mocked(getAssignmentPaperResult).mockRejectedValue(new ApiError(404,"paper_result_not_found",""));sessionStorage.clear();vi.stubGlobal("confirm",vi.fn(()=>true));vi.stubGlobal("crypto",{randomUUID:vi.fn(()=>"00000000-0000-4000-8000-000000000001")})});
 afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals()});
 
 describe("Student assessment list and detail",()=>{

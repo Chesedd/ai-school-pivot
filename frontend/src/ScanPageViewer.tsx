@@ -4,9 +4,11 @@ import {readScanPageContent, type ScanPage} from "./paperScanApi";
 import type {FindingRegion, ReviewFinding} from "./paperReviewApi";
 import {regionStyle} from "./paperReviewState";
 
-export function ScanPageViewer({page, number, findings = [], selectedFinding, onFinding, pickPoint, onPoint}: {
-  page: ScanPage; number: number; findings?: ReviewFinding[]; selectedFinding?: string;
-  onFinding?: (f: ReviewFinding) => void; pickPoint?: boolean; onPoint?: (r: FindingRegion) => void;
+export type ViewerFinding = Omit<ReviewFinding, "source_check_finding_id"> & {source_check_finding_id?: string | null};
+
+export function ScanPageViewer<F extends ViewerFinding = ReviewFinding>({page, number, findings = [], selectedFinding, onFinding, pickPoint, onPoint, loadContent = readScanPageContent}: {
+  page: ScanPage; number: number; findings?: F[]; selectedFinding?: string;
+  onFinding?: (f: F) => void; pickPoint?: boolean; onPoint?: (r: FindingRegion) => void; loadContent?: (id: string, signal?: AbortSignal) => Promise<Blob>;
 }) {
   const [url, setUrl] = useState("");
   const [error, setError] = useState("");
@@ -38,13 +40,13 @@ export function ScanPageViewer({page, number, findings = [], selectedFinding, on
     let objectUrl = "";
     setUrl(""); setError(""); setZoom(1); setRegionNotice("");
     if (!page.content_url) {setError("Страница больше не доступна."); return () => controller.abort();}
-    readScanPageContent(page.id, controller.signal).then(blob => {
+    loadContent(page.id, controller.signal).then(blob => {
       if (!controller.signal.aborted) {objectUrl = URL.createObjectURL(blob); setUrl(objectUrl);}
     }).catch(e => {
       if (!controller.signal.aborted) setError(e instanceof ApiError && [404, 410].includes(e.status) ? "Страница больше не доступна." : e instanceof ApiError && [401, 403].includes(e.status) ? "Нет доступа к странице." : "Не удалось загрузить страницу. Повторите загрузку.");
     });
     return () => {controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl);};
-  }, [page.id, page.content_url, retry]);
+  }, [page.id, page.content_url, retry, loadContent]);
   return <>
     <div className="matching-viewer-heading"><h2>Страница {number}</h2><div className="button-row">
       <button className="secondary" aria-label="Уменьшить страницу" disabled={!url || zoom <= 1} onClick={() => setZoom(z => Math.max(1, z - .25))}>−</button>

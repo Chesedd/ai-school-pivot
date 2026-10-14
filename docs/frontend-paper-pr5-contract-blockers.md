@@ -1,4 +1,51 @@
-# Frontend PR5: blocked contract inspection
+# Frontend PR5: historical blockers and merged contract resolution
+
+## Resolution — 2026-10-15
+
+Both blockers below were resolved by merged main commit
+`23964ff2f2a151ab3b2ac59be460785ac234707e`. The original report and
+`docs/pr5_contract_probe.py` are retained as historical evidence. That probe
+intentionally asserts the pre-hotfix failures; it is not a current validation
+command. The historical completion table below describes the old blocked start,
+not the resumed implementation.
+
+The original audit commit `c4a6c894b2526642e1dfbccab26dc23a1a2bd918` was rebased
+from actual Git merge base `e343d509146f5abc6462b4b53c322490fff6b025` onto the
+required main without conflicts, producing
+`7c56228bf6e1bb9db69310cac57e2af64fca253f`.
+
+Merged contracts consumed by PR5:
+
+- `GET /api/assessment-core/student/assignments/{assignment_id}/paper-result`
+  resolves the student from the authenticated principal. Its OpenAPI response is
+  `StudentAssignmentPaperResult`: assignment identity/title, active publication
+  identity/time, immutable allowlisted summary/items/findings/grade, and normalized
+  page descriptors. Neither the response nor its nested result includes the
+  approved-review revision. Publication/paper/page identities remain internal.
+- No active authorized publication uses `paper_result_not_found` (404), with no
+  distinction between never published, withdrawn, or superseded.
+- Page bytes remain exclusively
+  `GET /api/assessment-core/student/paper-submissions/{paper_submission_id}/pages/{scan_page_id}`.
+- `RemediationPlanResponse.source_check_run_id` is `UUID | None` in current
+  OpenAPI. Manual paper create/read/assign serializes null normally. Its model
+  validator still rejects null CheckRun for `source_type="digital"`.
+- Eligibility is the existing paper eligibility endpoint; it supplies exact
+  `active_publication_id` and weak assessment item IDs. Teacher publication history
+  supplies immutable source signals; PR5 selects only the exact eligibility/plan
+  publication. Candidate search and explicit create use `PaperSignals` plus catalog
+  task versions. Student UI never calls teacher history or raw review/AI routes.
+- Stale creation/assignment uses `remediation_source_publication_stale` (409).
+  Already assigned plans retain their original provenance and execution validity.
+- Co-teachers can create and assign their own plans under class authorization.
+  Shared plan read/assign retains plan-owner authorization; this frontend does not
+  broaden it or present another teacher's plan as editable.
+
+Current implementation, checks, exact changed files, browser evidence and remaining
+acceptance limitations are recorded in `docs/frontend-paper-pr5-validation.md`.
+
+---
+
+## Historical inspection (pre-hotfix)
 
 Inspected 2026-10-14. Required base and starting HEAD:
 `e343d509146f5abc6462b4b53c322490fff6b025` (`main`).
