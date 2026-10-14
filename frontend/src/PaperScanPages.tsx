@@ -6,9 +6,10 @@ import {PaperScanIntake} from "./PaperScanIntake";
 import {PaperMatchingPage} from "./PaperMatchingPage";
 import {PaperCheckingPage} from "./PaperCheckingPage";
 import "./paperReview.css";
+import {PaperPublicationPage} from "./PaperPublicationPage";
 
 const paperPath = (classId: string, assignmentId: string) => `/classrooms/${encodeURIComponent(classId)}/assignments/${encodeURIComponent(assignmentId)}/paper`;
-export function PaperScanPage(p: {classId: string; assignmentId: string; batchId?: string; matching?: boolean; checking?: boolean; navigate: (to: string) => void; onDirtyChange?: (dirty: boolean) => void}) {
+export function PaperScanPage(p: {classId: string; assignmentId: string; batchId?: string; matching?: boolean; checking?: boolean; publications?: boolean; navigate: (to: string) => void; onDirtyChange?: (dirty: boolean) => void}) {
   const [context, setContext] = useState<{title: string; participantCount: number; variants: Record<string, string>}>();
   const [error, setError] = useState("");
   useEffect(() => {
@@ -25,11 +26,11 @@ export function PaperScanPage(p: {classId: string; assignmentId: string; batchId
     return () => controller.abort();
   }, [p.assignmentId, p.classId]);
   const base = paperPath(p.classId, p.assignmentId);
-  return <div className={`paper-scan ${p.matching || p.checking ? "paper-matching" : ""}`}>
+  return <div className={`paper-scan ${p.matching || p.checking || p.publications ? "paper-matching" : ""}`}>
     <a className="back" href={`/classrooms/${encodeURIComponent(p.classId)}`} onClick={e => {e.preventDefault(); p.navigate(e.currentTarget.pathname);}}>← К назначениям класса</a>
     {error ? <p role="alert" className="alert error">{error}</p> : !context ? <p role="status">Загрузка работы…</p> : <>
       <h1>{context.title}</h1><p className="scan-context">Бумажные работы</p>
-      {p.batchId ? p.checking ? <PaperCheckingPage key={p.batchId} batchId={p.batchId} assignmentId={p.assignmentId} base={base} navigate={p.navigate} onDirtyChange={p.onDirtyChange}/> : p.matching ? <PaperMatchingPage key={p.batchId} batchId={p.batchId} assignmentId={p.assignmentId} base={base} variants={context.variants} navigate={p.navigate}/> : <PaperScanIntake key={p.batchId} batchId={p.batchId} assignmentId={p.assignmentId} participantCount={context.participantCount} base={base} navigate={p.navigate}/> :
+      {p.batchId ? p.publications ? <PaperPublicationPage key={p.batchId} batchId={p.batchId} assignmentId={p.assignmentId} base={base} navigate={p.navigate}/> : p.checking ? <PaperCheckingPage key={p.batchId} batchId={p.batchId} assignmentId={p.assignmentId} base={base} navigate={p.navigate} onDirtyChange={p.onDirtyChange}/> : p.matching ? <PaperMatchingPage key={p.batchId} batchId={p.batchId} assignmentId={p.assignmentId} base={base} variants={context.variants} navigate={p.navigate}/> : <PaperScanIntake key={p.batchId} batchId={p.batchId} assignmentId={p.assignmentId} participantCount={context.participantCount} base={base} navigate={p.navigate}/> :
         <ScanBatchList key={p.assignmentId} assignmentId={p.assignmentId} base={base} navigate={p.navigate}/>}
     </>}
   </div>;
@@ -68,7 +69,7 @@ function ScanBatchList(p: {assignmentId: string; base: string; navigate: (to: st
       <button className="secondary" disabled={busy} onClick={() => void load()}>Обновить список</button>
       {batches ? batches.length ? <ul className="scan-batches">{batches.map((batch, index) => <li key={batch.id}>
         <a href={`${p.base}/${encodeURIComponent(batch.id)}`} onClick={e => {e.preventDefault(); p.navigate(e.currentTarget.pathname);}}>Партия от {new Date(batch.created_at).toLocaleString("ru-RU")} · {index + 1}</a>
-        <span>{batchLabels[batch.status] || "Состояние уточняется"}</span>
+        <span>{batchLabels[batch.status] || "Состояние уточняется"}</span>{["ready_for_checking", "checking", "checking_completed", "completed"].includes(batch.status) && <a href={`${p.base}/${encodeURIComponent(batch.id)}/publications`} onClick={e => {e.preventDefault(); p.navigate(e.currentTarget.pathname);}}>Публикация результатов</a>}
       </li>)}</ul> : <p>Партий пока нет. Создайте партию и загрузите сканы работ.</p> : <p role="status">Загрузка партий…</p>}
     </section>
     <form className="assessment-form" onSubmit={e => {e.preventDefault(); void create();}}>

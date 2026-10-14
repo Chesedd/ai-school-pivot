@@ -1,0 +1,8 @@
+.publication-tools,.publication-bulk{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin:16px 0}
+.publication-tools label{flex:1;min-width:180px}.publication-bulk label,.publication-select{display:flex;gap:10px;align-items:center}
+.publication-workspace input[type=checkbox]{width:18px;height:18px;flex-shrink:0}
+.publication-workspace .checking-summary{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px}.publication-workspace .checking-summary p{margin:0}.publication-workspace .checking-summary p:nth-child(2){flex:1 1 400px}
+.publication-list{list-style:none;padding:0}.publication-row{display:grid;grid-template-columns:minmax(140px,1fr) minmax(220px,2fr) minmax(280px,1.5fr);gap:16px;padding:12px 0;border-bottom:1px solid #dbe3ec}
+.publication-status{display:flex;flex-direction:column;gap:6px}.publication-actions{display:flex;flex-wrap:wrap;align-content:start;gap:6px}.publication-actions button{padding:8px 10px;min-height:36px;font-size:13px}.publication-status small{overflow-wrap:anywhere}.publication-select{align-self:start}
+.publication-workspace .dialog{max-height:90vh;overflow:auto}.publication-dialog{width:100%;overflow-wrap:anywhere}.publication-dialog textarea{width:100%;box-sizing:border-box;min-height:100px}.publication-history{padding-left:24px;overflow-wrap:anywhere}.publication-history li{border-bottom:1px solid #dbe3ec;padding:12px 0}
+@media(max-width:800px){.publication-row{grid-template-columns:1fr}.publication-actions{flex-direction:row;flex-wrap:wrap}.publication-actions button{flex:1 1 180px}.publication-bulk>*{max-width:100%}.publication-workspace .matching-header{flex-wrap:wrap}.publication-workspace{min-width:0}}

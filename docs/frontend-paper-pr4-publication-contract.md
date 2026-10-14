@@ -1,6 +1,6 @@
 # Frontend PR4: contract blocker and API preparation
 
-PR4 is **not complete**. Base: `main` at `e67242e1ae1e0f50a8052e4d936c4515d9db6107`.
+Historical partial-PR4 audit (preserved below). At this point PR4 was **not complete**. Base: `main` at `e67242e1ae1e0f50a8052e4d936c4515d9db6107`.
 Branch: `codex/paper-publication-ui`. No push or merge.
 
 ## Blocking missing read contract
@@ -93,7 +93,7 @@ authorization mapping remains in effect. Stale publication mapping says
 `Публикация изменилась. Загружены актуальные данные.`; the future UI must refetch
 before displaying this message. No claim is made that this API layer refetches.
 
-## Requested completion report
+## Historical partial-PR4 report
 
 | Request items | Status |
 | --- | --- |
@@ -129,3 +129,47 @@ PR4 UI acceptance and requested publication-state component tests cannot be clai
 The added tests cover only the actual API and command boundary, including old
 historical replay, new republish keys, transport retry, exact stale identity,
 bulk endpoint/body/header, reason validation, safe errors and explicit completion.
+
+
+## Projection blocker resolved on current main
+
+Backend hotfix `d5915d245405f8d74385fadcf1149f9da521a7a5` resolved the
+mandatory blocker above. Partial commit `9d644704085fc95ad8c8b0a27d499130075ab23f`
+was rebased from the actual merge base
+`e67242e1ae1e0f50a8052e4d936c4515d9db6107` to the required main, producing
+`2dc48cd3155425ddf4fed5452db7d903945f4159`. The audit and prepared bindings
+remain intact; the statements above describe the historical blocked state.
+
+PR4 now consumes the current `GET /scan-batches/{batch_id}/checking` fields:
+`papers[].latest_approved_revision_id`, `papers[].active_publication_id`,
+`papers[].active_publication_approved_review_revision_id`, `papers[].review_state`,
+`batch_status`, `active_publication_count`, `paper_count`, `can_finalize`, and
+`blocking_reasons`. `PublicationPaper` explicitly requires both nullable active
+fields. Active/current-approved equality gives published; inequality gives
+previous version plus a direct new-version command. Absent active publication
+with an approved revision gives ready, regardless of a newer unapproved draft.
+No approved revision is never selected for publication.
+
+The earlier eligibility and withdrawal convenience metadata requests are not
+blockers. Pages availability stays authoritative at mutation time; withdrawal
+history is loaded on demand. History includes approved revision UUIDs (the
+publication DTO has no approved review revision number), publication number,
+timestamps, active/superseded/withdrawn state and teacher audit reason. No raw
+snapshot is rendered. All write/history routes above were reinspected on the
+merged backend and remain unchanged. Selected publish and selected withdrawal
+are the official bulk commands used by the workspace, including a one-row
+selected withdrawal. No single-command loops are used.
+
+The screen is reachable from the batch list and PR3 checking workspace by both
+assigned teachers. One main projection is fetched after batch/assignment scope
+validation; no history fan-out or polling is introduced. Every publication
+mutation retains its prepared command on uncertain network/5xx failure and
+exposes an explicit same-command retry; other writes are blocked until resolved.
+A definitive 4xx response never generates a replacement key automatically.
+Projection is refetched after success or failure and selection is cleared. The
+generic request client still contains no automatic retry; focused tests exercise
+both the real fetch boundary and the retained UI command. Commands and academic
+state remain in memory only. Student UI and PR5 remain outside this change.
+
+Current validation and the requested complete report are recorded separately in
+`docs/frontend-paper-pr4-validation.md`; the historical audit is not replaced.

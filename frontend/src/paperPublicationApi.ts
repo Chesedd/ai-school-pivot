@@ -14,9 +14,14 @@ export type PublicationHistory = Publication & {
 export type PublicationEntry = {paper_submission_id: string; approved_review_revision_id: string};
 export type WithdrawalEntry = {paper_submission_id: string; publication_id: string};
 export type Withdrawal = {id: string; publication_id: string; withdrawn_by_user_id: string; reason: string; created_at: string};
-export type PublicationProgress = CheckingProgress & {
+export type PublicationProgress = Omit<CheckingProgress, "papers"> & {
+  papers: PublicationPaper[];
   active_publication_count: number; can_mark_checking_completed: boolean;
   can_finalize: boolean; blocking_reasons: string[];
+};
+export type PublicationPaper = CheckingProgress["papers"][number] & {
+  active_publication_id: string | null;
+  active_publication_approved_review_revision_id: string | null;
 };
 const root = "/api/assessment-core";
 const paper = (id: string) => `${root}/paper-submissions/${encodeURIComponent(id)}/publications`;
