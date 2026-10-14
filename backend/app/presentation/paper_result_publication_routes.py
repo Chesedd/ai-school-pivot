@@ -28,6 +28,7 @@ from app.presentation.auth_dependencies import (
     require_trusted_origin,
 )
 from app.presentation.scan_intake_routes import PrincipalDep, _authorized_batch
+from app.presentation.student_paper_result_schemas import StudentAssignmentPaperResult
 
 router = APIRouter(
     prefix="/api/assessment-core",
@@ -235,6 +236,23 @@ async def student_results(
             ),
         )
     }
+
+
+@router.get(
+    "/student/assignments/{assignment_id}/paper-result",
+    response_model=StudentAssignmentPaperResult,
+)
+async def student_assignment_result(
+    assignment_id: UUID,
+    db=Depends(get_session),
+    student_id: UUID = Depends(_student),
+):
+    return await _action(
+        db,
+        PaperResultPublicationRepository(db).student_assignment_result(
+            assignment_id, student_id
+        ),
+    )
 
 
 @router.get("/student/paper-submissions/{paper_submission_id}/pages/{scan_page_id}")

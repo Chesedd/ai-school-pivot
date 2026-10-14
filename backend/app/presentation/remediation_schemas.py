@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class Strict(BaseModel):
@@ -72,7 +72,7 @@ class RemediationPlanResponse(Strict):
     source_assignment_id: UUID
     source_assignment_participant_id: UUID
     source_submission_id: UUID | None
-    source_check_run_id: UUID
+    source_check_run_id: UUID | None
     source_type: Literal["digital", "paper"] = "digital"
     source_paper_submission_id: UUID | None = None
     source_paper_publication_id: UUID | None = None
@@ -89,6 +89,12 @@ class RemediationPlanResponse(Strict):
     cancelled_at: datetime | None
     finding_ids: list[UUID]
     items: list[RemediationItemResponse]
+
+    @model_validator(mode="after")
+    def digital_check_run_required(self):
+        if self.source_type == "digital" and self.source_check_run_id is None:
+            raise ValueError("digital remediation requires source_check_run_id")
+        return self
 
 
 class RemediationPage(Strict):

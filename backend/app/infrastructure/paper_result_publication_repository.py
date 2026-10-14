@@ -21,6 +21,11 @@ from app.application.paper_result_publication import (
 )
 from app.config import get_settings
 from app.infrastructure.artifact_storage import FilesystemArtifactStorage
+from app.infrastructure.assessment_models import (
+    Assessment,
+    Assignment,
+    AssignmentParticipant,
+)
 from app.infrastructure.authoring_models import InputArtifact
 from app.infrastructure.paper_checking_review_models import (
     PaperCheckReview,
@@ -681,6 +686,60 @@ class PaperResultPublicationRepository:
             for p, order in pages
         ]
         return result
+
+    async def student_assignment_result(self, assignment_id, student_id):
+        # Resolve identity through the participant, never a client-supplied student.
+        owned = (
+            (
+                await self.db.execute(
+                    select(PaperSubmission.id, Assessment.title)
+                    .join(
+                        AssignmentParticipant,
+                        AssignmentParticipant.id
+                        == PaperSubmission.assignment_participant_id,
+                    )
+                    .join(
+                        Assignment, Assignment.id == AssignmentParticipant.assignment_id
+                    )
+                    .join(Assessment, Assessment.id == Assignment.assessment_id)
+                    .join(
+                        PaperResultPublicationState,
+                        PaperResultPublicationState.paper_submission_id
+                        == PaperSubmission.id,
+                    )
+                    .join(
+                        PaperResultPublication,
+                        PaperResultPublication.id
+                        == PaperResultPublicationState.active_publication_id,
+                    )
+                    .where(
+                        Assignment.id == assignment_id,
+                        PaperSubmission.assignment_id == Assignment.id,
+                        AssignmentParticipant.student_id == student_id,
+                        PaperSubmission.student_id == student_id,
+                        PaperResultPublication.paper_submission_id
+                        == PaperSubmission.id,
+                    )
+                    .order_by(
+                        PaperResultPublication.created_at.desc(),
+                        PaperResultPublication.id,
+                    )
+                    .limit(1)
+                )
+            ).one_or_none()
+            if student_id is not None
+            else None
+        )
+        if owned is None:
+            raise PaperPublicationError("paper_result_not_found", 404)
+        paper_id, title = owned
+        result = await self.student_result(paper_id, student_id)
+        # The publication snapshot stays immutable; student navigation is a read model.
+        result.pop("approved_review_revision_id")
+        result["result"] = PublicationSnapshot.model_validate_json(
+            json.dumps(result["result"])
+        ).model_dump(exclude={"approved_review_revision_id"})
+        return {**result, "assignment_id": assignment_id, "assignment_title": title}
 
     async def student_list(self, student_id, offset=0, limit=20):
         papers = (
