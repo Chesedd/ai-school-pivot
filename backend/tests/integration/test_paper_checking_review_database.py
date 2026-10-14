@@ -8,8 +8,6 @@ from decimal import Decimal
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import text
-
 from app.application.paper_checking_review import (
     PaperReviewApproval,
     PaperReviewError,
@@ -19,6 +17,7 @@ from app.application.paper_checking_review import (
 from app.infrastructure.paper_checking_review_repository import (
     PaperCheckingReviewRepository,
 )
+from sqlalchemy import text
 from tests.integration.test_paper_checking_execution_database import (
     FakePaperProvider,
     rejected,
@@ -378,6 +377,7 @@ async def test_finding_full_replacement_changes_only_human_snapshot(execution_da
     )
     added = PaperReviewFinding(
         finding_id=uuid4(),
+        assessment_item_id=review.draft.items[0].assessment_item_id,
         scan_page_id=original.scan_page_id,
         category="method",
         severity="info",
@@ -472,7 +472,6 @@ async def test_migrated_review_schema_and_unique_workspace(execution_database):
     run = await completed(execution_database)
     review = await call(execution_database, run, "start")
     from sqlalchemy.exc import IntegrityError
-
     from tests.integration.test_paper_checking_execution_database import clone
 
     with pytest.raises(IntegrityError):
@@ -637,7 +636,6 @@ async def test_database_grade_constraints_reject_invalid_approved_snapshots(
     execution_database, changes
 ):
     from sqlalchemy.exc import IntegrityError
-
     from tests.integration.test_paper_checking_execution_database import clone
 
     run = await completed(execution_database)

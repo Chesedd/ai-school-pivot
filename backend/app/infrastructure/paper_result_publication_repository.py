@@ -251,7 +251,9 @@ class PaperResultPublicationRepository:
                 else ai.grading_policy_fingerprint,
             ):
                 raise ValueError("policy_provenance")
-            revision = repo._revision_response(row)
+            revision = repo._revision_response(
+                row, await repo._linked_draft(row.snapshot)
+            )
             pages = set(
                 (
                     await self.db.scalars(
@@ -268,7 +270,11 @@ class PaperResultPublicationRepository:
                 if {str(x) for x in pages} != frozen:
                     raise ValueError("page_provenance")
             revision = revision.model_copy(
-                update={"snapshot": canonicalize_draft(revision.snapshot, order)}
+                update={
+                    "snapshot": canonicalize_draft(
+                        revision.snapshot, order, allow_legacy_unassociated=True
+                    )
+                }
             )
             return build_publication_snapshot(revision, policy, pages)
         except (PaperReviewError, ValidationError, ValueError, KeyError, TypeError):

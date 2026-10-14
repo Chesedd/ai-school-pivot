@@ -5,9 +5,6 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-
 from app.application.paper_checking_execution import (
     PaperCheckingExecutionError,
     PaperCheckingExecutionService,
@@ -21,6 +18,8 @@ from app.infrastructure.paper_checking_execution_repository import (
 )
 from app.infrastructure.scan_grouping_repository import SqlAlchemyScanGroupingRepository
 from app.infrastructure.scan_page_pipeline import ScanPagePipeline
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from tests.integration import test_scan_intake_database as scan_intake_tests
 from tests.integration.test_manual_paper_review_database import (
     batch,
@@ -286,8 +285,11 @@ async def test_ten_concurrent_starts_and_execution_cap_three_then_all_publish(co
         await asyncio.wait_for(asyncio.gather(*(action(live, "start") for _ in range(10))), 20)
         async with factory() as db:
             assert await db.scalar(text("SELECT count(*) FROM scan_checking_events WHERE batch_id=:batch AND event_type='batch.checking_started'"), c[2]) == 1
-            assert await db.scalar(text("SELECT count(*) FROM check_runs r JOIN paper_submissions p ON p.id=r.paper_submission_id WHERE p.batch_id=:batch"), c[2]) == 0
-        runs = [await intake(factory).create(request(c[2], label, f"pr13-{label}")) for label in labels]
+            assert await db.scalar(text("SELECT count(*) FROM check_runs r JOIN paper_submissions p ON p.id=r.paper_submission_id WHERE p.batch_id=:batch"), c[2]) == 10
+        from types import SimpleNamespace
+        progress = await action(live, "progress")
+        current = {p["paper_submission_id"]: p["effective_check_run_id"] for p in progress.papers}
+        runs = [SimpleNamespace(id=current[c[2][f"paper_{label}"]]) for label in labels]
         async def execute(index):
             return await svc.execute(c[2][f"paper_{labels[index]}"], runs[index].id)
         tasks = [asyncio.create_task(execute(index)) for index in range(10)]

@@ -59,6 +59,46 @@ class PaperCheckingReviewRepository:
     def __init__(self, db):
         self.db = db
 
+    async def _linked_draft(self, value):
+        """Recover legacy AI links only from exact persisted source FKs.
+
+        Legacy teacher additions remain explicitly unassociated until edited.
+        Reading never modifies immutable revisions or publication snapshots.
+        """
+        draft = _draft(value)
+        missing = [
+            f.source_check_finding_id
+            for f in draft.findings
+            if f.assessment_item_id is None and f.source_check_finding_id
+        ]
+        if not missing:
+            return draft
+        links = dict(
+            (
+                await self.db.execute(
+                    select(CheckFinding.id, CheckResult.assessment_item_id)
+                    .join(CheckResult, CheckResult.id == CheckFinding.check_result_id)
+                    .where(
+                        CheckFinding.id.in_(missing),
+                        CheckResult.check_run_id == draft.check_run_id,
+                    )
+                )
+            ).all()
+        )
+        return draft.model_copy(
+            update={
+                "findings": tuple(
+                    f.model_copy(
+                        update={"assessment_item_id": links[f.source_check_finding_id]}
+                    )
+                    if f.assessment_item_id is None
+                    and f.source_check_finding_id in links
+                    else f
+                    for f in draft.findings
+                )
+            }
+        )
+
     async def _manual_policy(self, paper, review=None):
         query = select(ScanGradingPolicyRevision).where(
             ScanGradingPolicyRevision.batch_id == paper.batch_id,
@@ -280,7 +320,7 @@ class PaperCheckingReviewRepository:
 
     async def _validate(self, draft, paper, run, ai):
         # Revalidate even when a caller used Pydantic's unchecked model_copy.
-        draft = _draft(draft.model_dump(mode="json"))
+        draft = await self._linked_draft(draft.model_dump(mode="json"))
         policy, order = await self._policy(paper, run, ai)
         if run is None:
             if draft.source_kind != "manual" or draft.paper_submission_id != paper.id:
@@ -332,7 +372,10 @@ class PaperCheckingReviewRepository:
         frozen_pages = {UUID(x["scan_page_id"]) for x in run.input_snapshot["pages"]}
         if pages != frozen_pages:
             raise PaperReviewError("paper_review_source_inconsistent", 409)
-        lineage = {finding.id for finding, _ in pairs}
+        result_items = {result.id: result.assessment_item_id for result in results}
+        lineage = {
+            finding.id: result_items[finding.check_result_id] for finding, _ in pairs
+        }
         for finding in draft.findings:
             if finding.scan_page_id not in pages:
                 raise PaperReviewError("paper_review_foreign_page")
@@ -341,6 +384,12 @@ class PaperCheckingReviewRepository:
                 and finding.source_check_finding_id not in lineage
             ):
                 raise PaperReviewError("paper_review_finding_lineage_mismatch")
+            if (
+                finding.source_check_finding_id is not None
+                and finding.assessment_item_id
+                != lineage[finding.source_check_finding_id]
+            ):
+                raise PaperReviewError("paper_review_finding_item_invalid")
         return draft, policy
 
     async def _review(self, paper_id, run_id, *, lock=False):
@@ -511,12 +560,14 @@ class PaperCheckingReviewRepository:
             )
             for x in results
         )
+        result_items = {x.id: x.assessment_item_id for x in results}
         findings = tuple(
             PaperReviewFinding.model_validate_json(
                 json.dumps(
                     {
                         "finding_id": str(f.id),
                         "source_check_finding_id": str(f.id),
+                        "assessment_item_id": str(result_items[f.check_result_id]),
                         "scan_page_id": str(r.scan_page_id),
                         "category": r.provider_category,
                         "severity": {
@@ -650,10 +701,13 @@ class PaperCheckingReviewRepository:
         ).all()
         return {
             "review_id": review.id,
-            "revisions": [self._revision_response(x) for x in rows],
+            "revisions": [
+                self._revision_response(x, await self._linked_draft(x.snapshot))
+                for x in rows
+            ],
         }
 
-    def _revision_response(self, row):
+    def _revision_response(self, row, snapshot=None):
         grade = (
             None
             if row.revision_kind != "approved"
@@ -673,7 +727,7 @@ class PaperCheckingReviewRepository:
             source_kind=row.source_kind,
             revision_number=row.revision_number,
             revision_kind=row.revision_kind,
-            snapshot=_draft(row.snapshot),
+            snapshot=snapshot if snapshot is not None else _draft(row.snapshot),
             actor_user_id=row.actor_user_id,
             grading_policy_revision=row.grading_policy_revision,
             grading_policy_fingerprint=row.grading_policy_fingerprint,
@@ -699,9 +753,11 @@ class PaperCheckingReviewRepository:
             source_kind=row.source_kind,
             state=row.state,
             version=row.version,
-            draft=_draft(row.draft),
+            draft=await self._linked_draft(row.draft),
             latest_approved_revision_id=row.latest_approved_revision_id,
-            latest_approved_revision=self._revision_response(approved)
+            latest_approved_revision=self._revision_response(
+                approved, await self._linked_draft(approved.snapshot)
+            )
             if approved
             else None,
         )

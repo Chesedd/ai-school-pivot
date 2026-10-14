@@ -89,6 +89,8 @@ class PaperReviewItem(ReviewContract):
 
 class PaperReviewFinding(ReviewContract):
     finding_id: UUID
+    # Null is reserved for historical findings whose item was never recorded.
+    assessment_item_id: UUID | None = None
     source_check_finding_id: UUID | None = None
     scan_page_id: UUID
     category: Token
@@ -251,12 +253,21 @@ class PaperReviewResponse(ReviewSource):
 
 
 def canonicalize_draft(
-    draft: PaperReviewDraft, item_order: tuple[UUID, ...]
+    draft: PaperReviewDraft,
+    item_order: tuple[UUID, ...],
+    *,
+    allow_legacy_unassociated=False,
 ) -> PaperReviewDraft:
     """Frozen input position orders items; stable UUID orders semantic findings."""
     positions = {identifier: n for n, identifier in enumerate(item_order)}
     if set(positions) != {item.assessment_item_id for item in draft.items}:
         raise PaperReviewError("paper_review_item_coverage_mismatch")
+    if any(
+        f.assessment_item_id not in positions
+        and not (allow_legacy_unassociated and f.assessment_item_id is None)
+        for f in draft.findings
+    ):
+        raise PaperReviewError("paper_review_finding_item_invalid")
     return draft.model_copy(
         update={
             "items": tuple(

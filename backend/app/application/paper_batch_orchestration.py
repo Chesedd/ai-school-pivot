@@ -1,4 +1,4 @@
-"""Derived batch checking progress; no provider, review or publication writes."""
+"""Durable batch intake and derived progress; provider execution stays separate."""
 
 from collections import Counter
 from dataclasses import dataclass, replace
@@ -52,6 +52,20 @@ class PaperBatchProgress:
     can_reconcile: bool
     can_finalize: bool
     blocking_reasons: tuple[str, ...]
+    papers: tuple = ()
+
+
+def effective_runs(papers, runs):
+    """Canonical attempt numbers are unique per paper; timestamps are irrelevant."""
+    paper_ids = set(papers)
+    latest = {}
+    for run in runs:
+        paper_id, attempt_no, *_ = run
+        if paper_id in paper_ids and (
+            paper_id not in latest or attempt_no > latest[paper_id][1]
+        ):
+            latest[paper_id] = run
+    return latest
 
 
 def derive_progress(
@@ -63,12 +77,7 @@ def derive_progress(
     The database enforces a unique attempt number per paper.
     """
     paper_ids = set(papers)
-    latest = {}
-    for paper_id, attempt_no, status in runs:
-        if paper_id in paper_ids and (
-            paper_id not in latest or attempt_no > latest[paper_id][0]
-        ):
-            latest[paper_id] = (attempt_no, status)
+    latest = {p: (r[1], r[2]) for p, r in effective_runs(paper_ids, runs).items()}
     for paper_id, state in manual_reviews:
         if paper_id in paper_ids:
             latest[paper_id] = (
@@ -128,14 +137,14 @@ class PaperBatchOrchestrationService:
     async def start(self, batch_id, actor_id):
         batch = await self.repository.load(batch_id, lock=True)
         progress = await self.repository.progress(batch)
-        if batch.status == "checking":
-            return progress
-        if batch.status != "ready_for_checking":
+        if batch.status not in {"ready_for_checking", "checking"}:
             raise PaperBatchError("paper_batch_not_ready_for_checking")
         if not progress.paper_count:
             raise PaperBatchError("paper_batch_has_no_papers")
         await self.repository.validate_prerequisites(batch)
-        await self.repository.transition(batch, "checking", actor_id, progress)
+        if batch.status == "ready_for_checking":
+            await self.repository.transition(batch, "checking", actor_id, progress)
+        await self.repository.schedule_initial_runs(batch, actor_id)
         return await self.repository.progress(batch)
 
     async def reconcile(self, batch_id, actor_id):

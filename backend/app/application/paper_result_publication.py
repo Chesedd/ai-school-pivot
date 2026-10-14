@@ -82,6 +82,7 @@ class PublishedItem(ReviewContract):
 
 
 class PublishedFinding(ReviewContract):
+    assessment_item_id: UUID | None = None
     finding_id: UUID
     scan_page_id: UUID
     category: Token

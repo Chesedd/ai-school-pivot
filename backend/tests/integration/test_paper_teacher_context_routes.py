@@ -116,6 +116,10 @@ async def test_co_teacher_cannot_substitute_foreign_objects(context_client):
     override_principal(app, teacher_principal(ids["co_teacher"]))
     for path in paths(ids, foreign=True):
         assert (await client.get(path)).status_code == 404
+    checking = f"{ROOT}/scan-batches/{ids['foreign_batch']}/checking"
+    assert (await client.get(checking)).status_code == 404
+    assert (await client.post(checking + "/start")).status_code == 404
+    assert (await client.post(checking + "/execute")).status_code == 404
     assert (await client.get(f"{ROOT}/scan-pages/{ids['foreign_page']}/content")).status_code == 404
     grouping = (await client.get(f"{ROOT}/scan-batches/{ids['batch']}/grouping")).json()
     response = await client.patch(

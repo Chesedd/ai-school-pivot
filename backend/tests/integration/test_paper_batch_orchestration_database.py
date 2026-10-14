@@ -126,16 +126,16 @@ async def settle(context, paper, status):
     return run
 
 
-async def test_start_is_explicit_idempotent_and_does_not_create_runs(execution_database):
+async def test_start_is_explicit_idempotent_and_schedules_initial_runs(execution_database):
     c = execution_database
     await freeze(c[1], c[2], "a")
     await freeze(c[1], c[2], "b")
     result = await action(c, "start")
-    assert result.batch_status == "checking" and result.not_started == 2
+    assert result.batch_status == "checking" and result.pending == 2
     assert await action(c, "start") == result
     assert await scalar(c, "SELECT row_version FROM assessment_scan_batches WHERE id=:batch") == 2
     assert await scalar(c, "SELECT count(*) FROM scan_checking_events WHERE batch_id=:batch AND event_type='batch.checking_started'") == 1
-    assert await scalar(c, "SELECT count(*) FROM check_runs WHERE paper_submission_id IN (:paper_a,:paper_b)") == 0
+    assert await scalar(c, "SELECT count(*) FROM check_runs WHERE paper_submission_id IN (:paper_a,:paper_b)") == 2
 
 
 @pytest.mark.parametrize("state", ["draft", "grouping_confirmed", "checking_completed", "completed", "processing_failed"])
@@ -394,7 +394,7 @@ async def test_cancelled_batch_cannot_start_or_create_new_run(execution_database
     ("/checking/reconcile", "post"), ("/complete", "post"),
 ])
 @pytest.mark.parametrize("role", ["teacher", "student", "unauthorized"])
-async def test_http_authorization_and_aggregate_only(execution_database, path, method, role):
+async def test_http_authorization_and_teacher_safe_progress(execution_database, path, method, role):
     c = execution_database
     app = FastAPI()
     app.include_router(router)
@@ -416,7 +416,8 @@ async def test_http_authorization_and_aggregate_only(execution_database, path, m
         response = await client.get(f"/api/assessment-core/scan-batches/{c[2]['batch']}/checking")
         assert response.status_code == 200
         assert response.json()["paper_count"] == 2
-        assert not any(x in response.text for x in ("Private A", "Private B", "raw_output", "original.pdf"))
+        assert {p["display_name"] for p in response.json()["papers"]} == {"Private A", "Private B"}
+        assert not any(x in response.text for x in ("raw_output", "original.pdf", "storage_reference", "provider_metadata"))
         identity.update(id=uuid4(), role=role)
         response = await getattr(client, method)(f"/api/assessment-core/scan-batches/{c[2]['batch']}{path}")
         assert response.status_code == (404 if role == "teacher" else 403)

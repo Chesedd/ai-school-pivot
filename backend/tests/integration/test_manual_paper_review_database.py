@@ -434,7 +434,7 @@ async def test_teacher_owned_manual_finding_publishes(execution_database):
     c = execution_database
     await policies(c)
     review = await manual(c)
-    f = finding(scan_page_id=c[2]["page_a"])
+    f = finding(scan_page_id=c[2]["page_a"], assessment_item_id=c[2]["item_a"])
     review = await manual(
         c, "edit", review.draft.model_copy(update={"findings": (f,)}), 1
     )

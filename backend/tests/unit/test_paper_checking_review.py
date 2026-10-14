@@ -4,8 +4,6 @@ from decimal import Decimal, localcontext
 from uuid import uuid4
 
 import pytest
-from pydantic import ValidationError
-
 from app.application.paper_checking_review import (
     PaperReviewApproval,
     PaperReviewDraft,
@@ -23,6 +21,7 @@ from app.application.scan_grading_policy import (
     GradeThreshold,
     calculate_percentage,
 )
+from pydantic import ValidationError
 from tests.unit.test_scan_grading_policy import ITEM_1, ITEM_2, policy
 
 D = Decimal
@@ -58,6 +57,7 @@ def finding(**changes):
     return PaperReviewFinding.model_validate(
         {
             "finding_id": uuid4(),
+            "assessment_item_id": ITEM_1,
             "scan_page_id": uuid4(),
             "category": "method",
             "severity": "warning",

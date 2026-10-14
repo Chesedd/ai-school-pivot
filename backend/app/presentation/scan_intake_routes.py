@@ -151,6 +151,46 @@ async def reconcile_batch_checking(batch_id: UUID, db=Depends(get_session), prin
     return await _batch_checking_action(db, batch_id, principal, "reconcile")
 
 
+@router.post("/scan-batches/{batch_id}/checking/execute")
+async def execute_batch_checking(
+    batch_id: UUID, request: Request, db=Depends(get_session),
+    settings: Settings=Depends(get_settings), principal: Principal=PrincipalDep,
+):
+    """Advance at most one capacity window; never hold a batch transaction for AI."""
+    from app.db.session import async_session_factory
+
+    await _authorized_batch(db, batch_id, principal)
+    progress = await PaperBatchOrchestrationService(
+        PaperBatchOrchestrationRepository(db)
+    ).progress(batch_id)
+    selected = [p for p in progress.papers if p["can_execute"]][
+        :settings.paper_operational_limits.max_parallel_paper_checks_per_batch
+    ]
+    await db.rollback()
+    outcomes = []
+    if selected:
+        execution = PaperCheckingExecutionService(
+            SQLAlchemyPaperCheckingExecutionRepository(
+                async_session_factory, settings.paper_operational_limits
+            ),
+            FilesystemArtifactStorage(settings.artifact_storage_path),
+            _paper_provider(request, settings), settings.paper_operational_limits,
+        )
+        for paper in selected:
+            run_id = paper["effective_check_run_id"]
+            try:
+                result = await execution.execute(paper["paper_submission_id"], run_id)
+                outcomes.append({"check_run_id": run_id, "status": result["status"]})
+            except PaperCheckingExecutionError as exc:
+                outcomes.append({"check_run_id": run_id, "code": exc.code})
+                if exc.code == "paper_check_capacity_unavailable":
+                    break
+    return {
+        "outcomes": outcomes,
+        "progress": await _batch_checking_action(db, batch_id, principal, "progress"),
+    }
+
+
 @router.post("/scan-batches/{batch_id}/complete")
 async def complete_paper_batch(batch_id: UUID, db=Depends(get_session), principal: Principal=PrincipalDep):
     return await _batch_checking_action(db, batch_id, principal, "finalize")
