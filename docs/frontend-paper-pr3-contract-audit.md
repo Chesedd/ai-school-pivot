@@ -1,4 +1,67 @@
-# Frontend PR3 contract audit — implementation blocked
+# Frontend PR3 contract audit — original blockers resolved
+
+## Resolution on 2026-10-14
+
+The original audit below is retained as historical design evidence against
+`3b09b0324b7e0ddf236db58c63ac0a6d1c65796f`. Its descriptions of missing contracts
+and validation status refer to that original inspection, not the current backend.
+All three original blockers were resolved by accepted backend hotfix
+`e7b4cc2034fda380a3d58c5a2757330adfdcc9a0`, now authoritative local `main`.
+The audit-only commit was rebased onto that main as
+`cdb6a8905dc65a60a707c0b392e99cf0462c62e0`; follow-up frontend commits preserve it.
+
+Current contracts re-inspected from source and generated application OpenAPI:
+
+- **Discovery:** GET `/api/assessment-core/scan-batches/{batch_id}/checking`
+  now includes `papers`, one server-selected effective entry per confirmed paper.
+  PR3 consumes `checking_state`, `effective_check_run_id`, `review_id`,
+  `review_state`, `latest_approved_revision_id`, `ai_review_available`,
+  `manual_review_available`, `can_retry`, and `can_execute`. It never chooses a
+  historical run itself. Display name and participant/variant IDs also come from
+  this projection; confirmed grouping supplies page membership/order.
+- **Scheduling:** POST the same checking path + `/start` atomically schedules
+  missing initial runs, preserves existing/manual lineage, and is idempotent.
+  It does not call a provider. POST + `/execute` advances at most the configured
+  backend capacity window, sequentially, returning `outcomes` and fresh
+  `progress`. Outcome failures use the actual `code` field. PR3 invokes one
+  bounded window after start/retry and offers explicit continuation for remaining
+  pending work. There is no autonomous worker. Capacity denial leaves pending
+  work and consumes no retry. POST + `/reconcile` derives lifecycle when
+  `can_reconcile`, without finalization or publication.
+- **Retry:** POST `/paper-submissions/{paper_id}/check-runs` supplies a retained
+  command key, `supersedes_run_id`, and accepted routing/checker/threshold/prompt
+  versions (`checking_routing_contract_v1`, `paper_vision_v1`,
+  `paper_grading_policy.v1`, `1.0.0`). PR3 offers this only for a server-capable
+  `failed_retryable` paper; terminal failures receive no retry CTA even though
+  the current server projection can allow a new lineage for them.
+- **Review:** unchanged POST/GET/PUT AI `/paper-submissions/{paper_id}/check-runs/
+  {run_id}/review` and manual `/paper-submissions/{paper_id}/manual-review`.
+  GET AI `/ai-result` supplies immutable suggestions independently of teacher
+  edits. POST `/approve` is approval only. PUT uses `{expected_version, draft}`;
+  approval uses `expected_version` and optional `grade_override`. Responses
+  carry latest immutable approved revision and server-calculated grade result.
+  Co-teachers share drafts; CAS conflict is `paper_review_version_conflict`.
+- **Canonical findings:** `draft.findings[].assessment_item_id` now links
+  directly to `draft.items[].assessment_item_id`. PR3 uses only this key.
+  Source IDs remain immutable lineage; removal affects the teacher draft.
+  Teacher findings supply a canonical member item and explicit member page/point.
+  Historical unassociated teacher findings remain visible for reassignment or
+  removal; no guessed item association is introduced.
+- **Evidence:** existing GET `/scan-pages/{page_id}/content`, loaded through
+  the shared API client for the selected member page only. Regions use
+  `normalized_upright_v1`, overlaid relative to the upright image surface.
+
+### Remaining finding contract limitation
+
+The hotfix did **not** change `PaperReviewFinding.region` into an optional or
+multi-region field. It requires one member page and exactly one point or box.
+Regionless and multiple regions for a single finding cannot be saved or produced
+through the accepted contract. Those specific requested paths are stopped;
+the frontend neither invents an API nor fabricates geometry. Multiple distinct
+findings/regions per item are supported. Item comments can be regionless, but
+are not represented as findings. This limitation applies to AI and manual review.
+
+## Original audit (retained)
 
 Inspected on 2026-10-14 at required local `main`
 `3b09b0324b7e0ddf236db58c63ac0a6d1c65796f`.

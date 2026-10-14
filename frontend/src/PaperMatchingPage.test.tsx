@@ -21,7 +21,7 @@ let grouping: api.ScanGrouping | undefined;
 let matching: api.ScanMatching | undefined;
 let status: string;
 const navigate = vi.fn();
-const page = (checking = false) => render(<PaperMatchingPage batchId="b" assignmentId="a" base="/classrooms/c/assignments/a/paper" variants={{v1: "А"}} navigate={navigate} checking={checking}/>);
+const page = () => render(<PaperMatchingPage batchId="b" assignmentId="a" base="/classrooms/c/assignments/a/paper" variants={{v1: "А"}} navigate={navigate}/>);
 const ready = async () => {page(); await screen.findByRole("button", {name: "Подтвердить распределение"});};
 const choose = async (pageNumber: number, participant = "s2") => {
   const strip = screen.getByRole("region", {name: "Страницы партии"});
@@ -168,7 +168,7 @@ it("supports keyboard page selection, typed student search and native select ass
 it("filters roster visually without changing academic membership", async () => {
   await ready(); fireEvent.change(screen.getByLabelText("Найти ученика"), {target: {value: "Сидоров"}}); expect(screen.queryByText("2 стр. · Вариант: А")).toBeNull(); expect(grouping!.groups[0].pages).toHaveLength(2); expect(api.assignScanPage).not.toHaveBeenCalled();
 });
-it("confirms once, enters read-only summary and navigates to the checking placeholder", async () => {
+it("confirms once, enters read-only summary and navigates to the checking workspace", async () => {
   await ready(); await choose(3); const confirm = screen.getByRole("button", {name: "Подтвердить распределение"}); fireEvent.click(confirm); fireEvent.click(confirm);
   fireEvent.click(await screen.findByRole("button", {name: "Перейти к проверке"})); expect(api.confirmScanGrouping).toHaveBeenCalledTimes(1); expect(api.confirmScanGrouping).toHaveBeenCalledWith("b", expect.objectContaining({row_version: 2}));
   expect(screen.queryByLabelText("Назначить ученику")).toBeNull(); expect(navigate).toHaveBeenCalledWith("/classrooms/c/assignments/a/paper/b/checking");
@@ -184,10 +184,6 @@ it("confirmation by another teacher switches stale editing to read-only", async 
 it.each(["ready_for_checking", "checking", "checking_completed", "completed"])("deep-links to %s as read-only", async advanced => {
   grouping!.grouping_status = "confirmed"; grouping!.batch_status = status = advanced;
   page(); await screen.findByRole("button", {name: "Перейти к проверке"}); expect(screen.queryByLabelText("Назначить ученику")).toBeNull(); expect(api.initializeScanGrouping).not.toHaveBeenCalled(); expect(api.startScanMatching).not.toHaveBeenCalled();
-});
-it("placeholder only describes checking boundary without execution controls", async () => {
-  grouping!.grouping_status = "confirmed"; grouping!.batch_status = status = "ready_for_checking"; page(true);
-  await screen.findByRole("heading", {name: "Партия готова к проверке"}); expect(screen.queryByRole("button", {name: /Начать проверку/})).toBeNull();
 });
 it.each([401, 403, 500])("clears actionable state on read failure %s and bounds private details", async code => {
   await ready(); vi.mocked(api.readScanGrouping).mockRejectedValue(new ApiError(code, "unknown", "SQL asyncpg /private/path")); fireEvent.click(screen.getByRole("button", {name: "Обновить данные"}));

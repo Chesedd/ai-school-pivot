@@ -14,7 +14,7 @@ export function groupingComplete(g: api.ScanGrouping, pageIds: string[]): boolea
     new Set(g.groups.map(x => x.assignment_participant_id)).size === g.groups.length &&
     assigned.length === pageIds.length && new Set(assigned).size === assigned.length && pageIds.every(id => assigned.includes(id));
 }
-export function PaperMatchingPage(p: {batchId: string; assignmentId: string; base: string; variants: Record<string, string>; navigate: (to: string) => void; checking?: boolean}) {
+export function PaperMatchingPage(p: {batchId: string; assignmentId: string; base: string; variants: Record<string, string>; navigate: (to: string) => void}) {
   const {data, error, notice, busy, refreshing, refresh, mutate} = usePaperMatching(p.batchId, p.assignmentId);
   const [selection, setSelection] = useState("");
   const [target, setTarget] = useState("");
@@ -24,7 +24,7 @@ export function PaperMatchingPage(p: {batchId: string; assignmentId: string; bas
   const back = <a href={intake} onClick={e => {e.preventDefault(); p.navigate(intake);}}>← К файлам партии</a>;
   if (!data) return <>{back}{error ? <p className="alert error" role="alert">{error}</p> : <p role="status">Загрузка сопоставления…</p>}<button className="secondary" disabled={refreshing || busy} onClick={() => void refresh()}>Обновить данные</button></>;
   const g = data.grouping;
-  const editable = !!g && groupingEditable(g) && data.batch.status === "matching_review_required" && !p.checking;
+  const editable = !!g && groupingEditable(g) && data.batch.status === "matching_review_required";
   const blocked = busy || refreshing;
   const pages = [...data.pages].sort((a, b) => {
     const artifacts = data.artifacts;
@@ -61,9 +61,9 @@ export function PaperMatchingPage(p: {batchId: string; assignmentId: string; bas
   const canStart = !data.matching && intakeReady(data) && data.roster.length > 0;
   const assigned = g ? new Set(g.groups.flatMap(x => x.pages.map(page => page.page_id))).size : 0;
   const select = (id: string) => {setSelection(id); setTarget(""); setSearch("");};
-  return <>{back}<header className="matching-header"><div><h2>{p.checking ? "Проверка бумажных работ" : "Сопоставление"}</h2><small>Партия от {new Date(data.batch.created_at).toLocaleString("ru-RU")} · {batchLabels[data.batch.status] || "Состояние уточняется"}</small></div><button className="secondary" disabled={blocked} onClick={() => void refresh()}>Обновить данные</button></header>
+  return <>{back}<header className="matching-header"><div><h2>Сопоставление</h2><small>Партия от {new Date(data.batch.created_at).toLocaleString("ru-RU")} · {batchLabels[data.batch.status] || "Состояние уточняется"}</small></div><button className="secondary" disabled={blocked} onClick={() => void refresh()}>Обновить данные</button></header>
     {notice && <p role="status" className="matching-notice">{notice}</p>}
-    {p.checking ? <section className="solving-status"><h3>{data.batch.status === "ready_for_checking" ? "Партия готова к проверке" : batchLabels[data.batch.status] || "Состояние уточняется"}</h3><p>Этап проверки будет доступен в следующем обновлении.</p><button className="secondary" onClick={() => p.navigate(`${intake}/matching`)}>К распределению страниц</button></section> : <>
+    <>
       {!g && <section className="solving-status" aria-live="polite"><h3>{running ? "Сопоставляем страницы…" : retryable ? "Не удалось сопоставить страницы" : terminal ? "Сопоставление остановлено" : "Сопоставление страниц"}</h3>
         <p>{running ? "Можно вернуться к партии позже. Обработка сохранена." : retryable ? "Можно продолжить сопоставление. Уже обработанные страницы сохранены." : terminal ? "Повторное сопоставление этой партии недоступно." : canStart ? "Сопоставление предложит распределение. Затем проверьте и подтвердите его." : "Сначала завершите обработку файлов. Сопоставление пока недоступно."}</p>
         {(canStart || retryable) && <button disabled={blocked} onClick={() => void mutate(() => api.startScanMatching(p.batchId), true)}>{retryable ? "Продолжить сопоставление" : "Сопоставить страницы"}</button>}
@@ -97,6 +97,6 @@ export function PaperMatchingPage(p: {batchId: string; assignmentId: string; bas
         <footer className="matching-footer"><div><strong>{assigned} из {pages.length} страниц распределено</strong><p role="status">{busy ? "Сохраняем изменения…" : editable ? complete ? "Все страницы распределены. Можно подтвердить." : "Распределите все страницы перед подтверждением." : "Распределение доступно только для просмотра."}</p></div>
           {editable ? <button disabled={blocked || !complete} onClick={() => void mutate(() => api.confirmScanGrouping(p.batchId, g))}>Подтвердить распределение</button> : handoff && <button onClick={() => p.navigate(`${intake}/checking`)}>Перейти к проверке</button>}
         </footer></>}
-    </>}
+    </>
   </>;
 }

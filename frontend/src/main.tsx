@@ -54,7 +54,7 @@ export function App({principal=legacyPrincipal,onLogout}:{principal?:Principal;o
  if(path==="/"||path==="/login")page=<Redirect to={landingFor(principal)} navigate={navigate}/>;
  else if(path==="/no-access")page=<section className="empty-state"><h1>Нет назначенных прав</h1><p>Для аккаунта пока не назначены права доступа.</p></section>;
  else if(capability&&!hasCapability(principal,capability))page=<AccessDenied navigate={navigate} principal={principal}/>;
- else if(paperScan)page=<PaperScanPage key={`${paperScan[1]}-${paperScan[2]}`} classId={decodeURIComponent(paperScan[1])} assignmentId={decodeURIComponent(paperScan[2])} batchId={paperScan[3]?decodeURIComponent(paperScan[3]):undefined} matching={paperScan[4]==="/matching"} checking={paperScan[4]==="/checking"} navigate={navigate}/>;
+ else if(paperScan)page=<PaperScanPage key={`${paperScan[1]}-${paperScan[2]}`} classId={decodeURIComponent(paperScan[1])} assignmentId={decodeURIComponent(paperScan[2])} batchId={paperScan[3]?decodeURIComponent(paperScan[3]):undefined} matching={paperScan[4]==="/matching"} checking={paperScan[4]==="/checking"} navigate={navigate} onDirtyChange={setDirty}/>;
  else if(path==="/image-solving/new")page=<ImageSolvingUploadPage navigate={navigate}/>;
  else if(imageSolving)page=<ImageSolvingSessionPage sessionId={decodeURIComponent(imageSolving[1])} navigate={navigate} canProposeCatalog={hasCapability(principal,"catalog.propose")}/>;
  else if(path==="/student/remediations")page=<StudentRemediationsPage navigate={navigate}/>;

@@ -4,9 +4,11 @@ import {createScanBatch, listScanBatches, type ScanBatch} from "./paperScanApi";
 import {batchLabels, scanErrorMessage} from "./paperScanState";
 import {PaperScanIntake} from "./PaperScanIntake";
 import {PaperMatchingPage} from "./PaperMatchingPage";
+import {PaperCheckingPage} from "./PaperCheckingPage";
+import "./paperReview.css";
 
 const paperPath = (classId: string, assignmentId: string) => `/classrooms/${encodeURIComponent(classId)}/assignments/${encodeURIComponent(assignmentId)}/paper`;
-export function PaperScanPage(p: {classId: string; assignmentId: string; batchId?: string; matching?: boolean; checking?: boolean; navigate: (to: string) => void}) {
+export function PaperScanPage(p: {classId: string; assignmentId: string; batchId?: string; matching?: boolean; checking?: boolean; navigate: (to: string) => void; onDirtyChange?: (dirty: boolean) => void}) {
   const [context, setContext] = useState<{title: string; participantCount: number; variants: Record<string, string>}>();
   const [error, setError] = useState("");
   useEffect(() => {
@@ -27,7 +29,7 @@ export function PaperScanPage(p: {classId: string; assignmentId: string; batchId
     <a className="back" href={`/classrooms/${encodeURIComponent(p.classId)}`} onClick={e => {e.preventDefault(); p.navigate(e.currentTarget.pathname);}}>← К назначениям класса</a>
     {error ? <p role="alert" className="alert error">{error}</p> : !context ? <p role="status">Загрузка работы…</p> : <>
       <h1>{context.title}</h1><p className="scan-context">Бумажные работы</p>
-      {p.batchId ? p.matching || p.checking ? <PaperMatchingPage key={`${p.batchId}-${!!p.checking}`} batchId={p.batchId} assignmentId={p.assignmentId} base={base} variants={context.variants} checking={p.checking} navigate={p.navigate}/> : <PaperScanIntake key={p.batchId} batchId={p.batchId} assignmentId={p.assignmentId} participantCount={context.participantCount} base={base} navigate={p.navigate}/> :
+      {p.batchId ? p.checking ? <PaperCheckingPage key={p.batchId} batchId={p.batchId} assignmentId={p.assignmentId} base={base} navigate={p.navigate} onDirtyChange={p.onDirtyChange}/> : p.matching ? <PaperMatchingPage key={p.batchId} batchId={p.batchId} assignmentId={p.assignmentId} base={base} variants={context.variants} navigate={p.navigate}/> : <PaperScanIntake key={p.batchId} batchId={p.batchId} assignmentId={p.assignmentId} participantCount={context.participantCount} base={base} navigate={p.navigate}/> :
         <ScanBatchList key={p.assignmentId} assignmentId={p.assignmentId} base={base} navigate={p.navigate}/>}
     </>}
   </div>;
