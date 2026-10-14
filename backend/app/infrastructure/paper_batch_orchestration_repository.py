@@ -18,6 +18,7 @@ from app.infrastructure.assessment_models import Student
 from app.infrastructure.checking_models import CheckRun
 from app.infrastructure.paper_checking_review_models import PaperCheckReview
 from app.infrastructure.paper_result_publication_models import (
+    PaperResultPublication,
     PaperResultPublicationState,
 )
 from app.infrastructure.scan_checking_models import (
@@ -55,7 +56,7 @@ class PaperBatchOrchestrationRepository:
                     PaperSubmission.id,
                     CheckRun.attempt_no,
                     CheckRun.status,
-                    PaperResultPublicationState.active_publication_id,
+                    PaperResultPublication.id,
                     PaperCheckReview.state,
                     CheckRun.id,
                     PaperSubmission.assignment_participant_id,
@@ -66,6 +67,7 @@ class PaperBatchOrchestrationRepository:
                     manual.state,
                     manual.id,
                     manual.latest_approved_revision_id,
+                    PaperResultPublication.approved_review_revision_id,
                 )
                 .select_from(AssessmentScanBatch)
                 .outerjoin(
@@ -77,6 +79,17 @@ class PaperBatchOrchestrationRepository:
                     PaperResultPublicationState,
                     PaperResultPublicationState.paper_submission_id
                     == PaperSubmission.id,
+                )
+                .outerjoin(
+                    PaperResultPublication,
+                    (
+                        PaperResultPublication.id
+                        == PaperResultPublicationState.active_publication_id
+                    )
+                    & (
+                        PaperResultPublication.paper_submission_id
+                        == PaperSubmission.id
+                    ),
                 )
                 .outerjoin(
                     PaperCheckReview,
@@ -148,6 +161,8 @@ class PaperBatchOrchestrationRepository:
                     "review_id": review_id,
                     "review_state": review_state,
                     "latest_approved_revision_id": approved,
+                    "active_publication_id": r[4],
+                    "active_publication_approved_review_revision_id": r[15],
                     "can_retry": can_new
                     and not r[12]
                     and status in {"failed_retryable", "failed_terminal"},
