@@ -1,3 +1,8 @@
+> **Final acceptance update (2026-10-15): PASSED.** The incomplete-run status
+> below is retained as historical evidence. The appended final acceptance section
+> supersedes its pending browser items. No product changes were needed in this
+> continuation; the accepted 77/650/typecheck/build evidence remains applicable.
+
 # Frontend PR5 implementation and acceptance status
 
 Date: 2026-10-15 (Europe/Moscow). Required main:
@@ -146,3 +151,123 @@ Remaining acceptance before designating a final PR5 candidate: dismiss the stuck
 native browser confirmation; recheck the shared application submit dialog and
 teacher responsive refinement; finish real browser stale draft, old-source manual
 completion, AI-source flow, multi-page switching and negative authorization.
+
+## Final acceptance continuation — 2026-10-15 (Europe/Moscow)
+
+**Outcome: PR5 acceptance PASSED; no remaining PR5 acceptance blocker.** This is
+acceptance of the requested PR5 scope, not the separate final full-flow audit.
+Nothing was pushed or merged; that audit was not started.
+
+Branch: `codex/paper-student-result-remediation-ui`. Previous implementation
+candidate: `1a38003ffc952f462a208bd7d4687d30783fb659`. Final candidate is the
+commit carrying this report update, whose exact SHA is reported in the completion
+message. Historical `7c56228bf6e1bb9db69310cac57e2af64fca253f` and implementation
+history remain intact; no rebase or squash was performed.
+
+### Native dialog root cause and resolution
+
+The blocked action was the student's **Сдать отработку** button in
+`frontend/src/StudentRemediationsPage.tsx`, shared by digital and paper plans.
+Its previous `submit()` called the browser global `confirm()` with the exact text
+`Сдать отработку?\nПосле отправки ответы нельзя будет изменить.` The dialog type
+was **window.confirm**, not alert or beforeunload. This call is present in
+`git show 23964ff2f2a151ab3b2ac59be460785ac234707e:frontend/src/StudentRemediationsPage.tsx`:
+it predated PR5. The earlier browser report records the corresponding stuck native
+modal and failed recovery; this continuation did not claim to diagnose browser
+internals beyond that evidence.
+
+The previous implementation candidate had already replaced that shared native
+confirmation with the existing `StatusActions.Dialog` and had tested the flow.
+This continuation made **no further product/frontend source changes** and did
+not refactor old confirmations elsewhere. It used a fresh isolated Playwright
+Chromium session through installed Microsoft Edge, avoiding the old in-app
+browser session's modal state. No expected native dialog occurs in the current
+submit flow. The harness records/dismisses unexpected native dialogs and fails
+acceptance if any occur; it never globally accepts dialogs. None occurred.
+
+The application confirmation was exercised for both manual and AI plans:
+initial focus on Cancel; Shift+Tab/Tab wrapping; Escape cancellation; focus
+restored to Submit; keyboard reopening and explicit confirmation. Dirty answers
+kept Submit disabled. Only explicit confirmation sent the real submit request.
+The safety semantics and backend guards remained active.
+
+### Final browser/PostgreSQL outcomes
+
+The existing disposable `ai-school-pg-test` rollback fixture was reused. Real
+routes, object authorization, stale-source guards and authored deterministic
+checking remained active. Only the existing session-to-principal fixture override
+and deterministic paper provider were used. The fixture's existing checker helper
+pumped the real deterministic remediation checker after browser submission; no
+HTTP submit substituted for the browser submission and no backend guard was mocked.
+
+| Scenario | Final outcome and evidence |
+| --- | --- |
+| A — student result | PASS. Previously proven normal assignment navigation, manual 10/20 (50%), server grade, five canonical items/findings, page and region evidence retained. Final AI result also opened through assignment list/detail: 5/10, server grade, five items/findings; selected finding switched to page 2 and highlighted its region, then page 1 reopened. |
+| B — withdrawal | PASS, earlier real browser refetch/reload and real page HTTP 404 evidence retained. No result/history/withdrawal reason exposed. The continuation also withdrew the manual source through the official route for the dependent stale/replacement scenario. |
+| C — republish | PASS, earlier replacement-only browser rendering retained. The dependent final fixture used a newly approved manual revision and published replacement B through official routes. |
+| D — teacher remediation | PASS. Earlier normal co-teacher navigation and student discovery retained. Final co-teacher publication card → Additional tasks → eligibility and API signals → manual candidates → explicit draft → explicit Assign passed for manual and AI sources. Student assignment result CTA → remediation list → assigned title passed for both. |
+| E — stale draft | PASS in the browser. A second draft sourced from manual A remained open while A was withdrawn and B published. Clicking Assign returned real HTTP 409 `remediation_source_publication_stale`; bounded message appeared and Assign disabled. GET confirmed status still draft and source still A. A newly created draft bound to B. No automatic rebound. |
+| F — assigned survives replacement | PASS. The assigned manual A plan remained discoverable/openable after B became active; start, answer save/reload, explicit dialog submit, deterministic check and checked-state reload passed. Teacher plan retained publication A. The complete current paper-result DTO before/after execution compared equal. |
+| G — manual nullable CheckRun | PASS. Real draft DTO had null `source_check_run_id`; eligibility, builder, draft, assignment, discovery, start, answers, browser submission, checking, results and reload completed without a null/UUID crash. |
+| AI-source flow | PASS. Real plan had non-null CheckRun; browser creation, assignment, discovery, start, save/reload, explicit submit, check, result and checked reload passed through the same execution screen. |
+| H — authorization | PASS. Student A substituted B's real paper result/page and plan execution/start/answer IDs: all five requests returned 404. Unrelated and revoked teachers each received 404 for real create/assign attempts. Browser substituted plan routes showed bounded denial for student A and both denied teachers. Earlier foreign-assignment/page/task substitutions remain recorded. |
+| Existing student execution | PASS. Existing aggregate execution, start, answer PUT and submit APIs used; authored answer checked 1/1, feedback rendered, checked state persisted after reload for both plans. No paper-specific execution engine added. |
+
+### Responsive, privacy and performance acceptance
+
+- **1440 and 760:** PASS. Final published student result on both pages, selected
+  region, teacher manual/AI/fresh-source builders, stale teacher detail, student
+  submit dialogs, completed plans and denied routes were captured. Twenty-eight
+  layout measurements recorded document scroll width equal to client width:
+  1440/1440 and 760/760 in this headless browser. Published result hierarchy,
+  score/grade, items/comments, viewer and remediation action remained readable;
+  small-screen content stacked and controls remained reachable without cropping
+  or overlap. Screenshots were visually inspected, including both widths of
+  the result, teacher builder, narrow stale state and submit dialog.
+- **UUID leakage:** PASS. Visible body text on the captured normal teacher/student
+  PR5 states was checked for raw UUIDs; none were rendered. Internal identifiers
+  remained in API parameters/state/routes only.
+- **Performance:** PASS. Student result request traces contain no publication
+  history, raw review/AI or per-finding requests. Initially only the selected
+  page's URL was requested; selecting a finding loaded its page on demand.
+  Development `StrictMode` produced bounded duplicate initial GETs for the same
+  selected page (two requests, one distinct page), not eager loading of all pages
+  or request-per-finding behavior. The harness assertion was corrected to count
+  distinct page URLs. Remediation used aggregate execution DTO reads carrying
+  tasks; no task-by-task fetch fan-out appeared. Existing revalidation after
+  mutation/reload remained bounded to the relevant scope.
+
+### Validation and evidence trail
+
+No product code changed after candidate `1a38003`; therefore the requested
+harness-only validation policy applies. Focused/full/typecheck/build were **not
+rerun**: the existing **77 focused / 650 full / typecheck PASS / build PASS**
+evidence remains valid, including the already-tested application dialog. The
+existing >500 kB build advisory is unchanged.
+
+Affected browser acceptance completed in the untracked evidence harness:
+`local-backups/frontend-pr5-acceptance/final-browser.py` and
+`final-browser-remaining.py`. The first run completed both source executions and
+stale-source checks, then stopped at an overly strict development duplicate-GET
+assertion. The continuation corrected that harness assertion and locator/DTO
+assumptions, completed page selection and negative authorization, and recorded
+`REMAINING BROWSER PASS`, `status: PASS`, and no browser JavaScript/native-dialog
+errors. These were harness corrections, not product failures. Previously proven
+execution paths were not rerun to finish the remaining page/auth checks.
+
+Evidence: `final-browser/results.json`, `traffic.json`, `traffic-extra.json`,
+28 responsive PNGs, existing request log and original suite/build logs. Earlier
+incomplete-run report text, HTTP evidence and screenshots remain above/on disk;
+failed harness snapshots are diagnostic artifacts, not final outcome evidence.
+
+- `git diff --check`: PASS.
+- `git diff 23964ff2f2a151ab3b2ac59be460785ac234707e..HEAD -- backend`: empty.
+- From `backend`, `..\.venv\Scripts\alembic.exe heads`: single
+  `20261013_01 (head)`.
+- Only tracked change in this continuation:
+  `docs/frontend-paper-pr5-validation.md`; no frontend/backend source changes.
+- Tracked tree clean after the report commit; pre-existing unrelated untracked
+  `-U`, `.test.env`, `backend/pr11-units.log`, `backups/`,
+  `frontend/pr3-acceptance.html`, and `local-backups/` preserved and not committed.
+- Remaining PR5 acceptance blockers: **none**. Push, merge and final audit remain
+  outside this request and were not performed.
