@@ -2,11 +2,13 @@
 # FastAPI dependency declarations intentionally use call expressions in defaults.
 # ruff: noqa: B008
 
+import json
 from dataclasses import asdict
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
-from pydantic import ValidationError
+from pydantic import BeforeValidator, ValidationError
 from sqlalchemy import select
 from starlette.datastructures import UploadFile
 
@@ -641,8 +643,17 @@ def _policy_response(row):
         "fingerprint":row.policy_fingerprint,"policy":row.policy_json,"created_at":row.created_at}
 
 
+def _grading_policy_http(value):
+    # FastAPI parses JSON to Python first. Restore JSON-mode semantics for the
+    # strict domain contract without relaxing its Decimal/UUID/tuple validation.
+    if isinstance(value, dict):
+        return ScanGradingPolicy.model_validate_json(json.dumps(value))
+    return value
+
+
 @router.post("/scan-batches/{batch_id}/grading-policies/{variant_id}")
-async def freeze_grading_policy(batch_id:UUID,variant_id:UUID,payload:ScanGradingPolicy,
+async def freeze_grading_policy(batch_id:UUID,variant_id:UUID,
+    payload:Annotated[ScanGradingPolicy, BeforeValidator(_grading_policy_http)],
     db=Depends(get_session),principal:Principal=PrincipalDep):
     await _authorized_batch(db,batch_id,principal)
     try:
