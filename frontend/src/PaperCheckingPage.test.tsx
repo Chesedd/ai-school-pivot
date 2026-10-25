@@ -1,3 +1,4 @@
+import {useEffect} from "react";
 import {afterEach, beforeEach, expect, it, vi} from "vitest";
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from "@testing-library/react";
 import {ApiError} from "./api";
@@ -7,6 +8,8 @@ import {PaperCheckingPage} from "./PaperCheckingPage";
 import {effectivePaper, progressFixture, reviewFixture, reviewFinding} from "./paperReviewTestFixtures";
 import {batchFixture, pageFixture} from "./paperScanTestFixtures";
 import {groupingFixture, groupingPage} from "./paperMatchingTestFixtures";
+const grading = vi.hoisted(() => ({ready: true}));
+vi.mock("./PaperGradingSetup", () => ({PaperGradingSetup: ({onReady}: {onReady: (value: boolean) => void}) => {useEffect(() => onReady(grading.ready), [onReady]); return null;}}));
 vi.mock("./paperScanApi"); vi.mock("./paperReviewApi");
 let progress: api.CheckingProgress;
 let review: api.PaperReview;
@@ -15,7 +18,7 @@ const page = () => render(<PaperCheckingPage batchId="b" assignmentId="a" base="
 const ai = (persisted = true) => {progress = progressFixture({batch_status: "checking_completed", not_started: 0, completed_with_review_required: 1, papers: [effectivePaper({checking_state: "completed_with_review_required", effective_check_run_id: "run1", ai_review_available: true, manual_review_available: false, review_id: persisted ? "review1" : null, review_state: persisted ? "reviewing" : null})]});};
 const editor = async () => {ai(); page(); await screen.findByLabelText("Итоговый комментарий");};
 beforeEach(() => {
-  progress = progressFixture(); review = reviewFixture();
+  grading.ready = true; progress = progressFixture(); review = reviewFixture();
   vi.mocked(scan.getScanBatch).mockResolvedValue(batchFixture({status: "ready_for_checking"}));
   vi.mocked(scan.readScanGrouping).mockResolvedValue(groupingFixture({grouping_status: "confirmed", groups: [{assignment_participant_id: "s1", display_name: "Иванов Иван", student_id: "private", assigned_variant_id: "v1", pages: [groupingPage("p1", 0), groupingPage("p2", 1)]}]}));
   vi.mocked(scan.listScanPages).mockResolvedValue({items: [pageFixture({id: "p1"}), pageFixture({id: "p2"})]});
@@ -33,7 +36,7 @@ afterEach(() => {cleanup(); vi.resetAllMocks(); vi.restoreAllMocks(); vi.useReal
 it("ready workspace offers high-level start and suppresses duplicate clicks", async () => {
   let done!: (p: api.CheckingProgress) => void;
   vi.mocked(api.startChecking).mockImplementation(() => new Promise(resolve => {done = resolve;}));
-  page(); const start = await screen.findByRole("button", {name: "Начать проверку"}); fireEvent.click(start); fireEvent.click(start);
+  page(); const start = await screen.findByRole("button", {name: "Начать проверку"}); await waitFor(() => expect(start.hasAttribute("disabled")).toBe(false)); fireEvent.click(start); fireEvent.click(start);
   expect(api.startChecking).toHaveBeenCalledTimes(1);
   await act(async () => done(progress)); await waitFor(() => expect(api.executeChecking).toHaveBeenCalledTimes(1));
 });
@@ -187,4 +190,14 @@ it("transient progress failure preserves unsaved review while authorization deni
   await screen.findByRole("alert"); expect(screen.getByLabelText("Итоговый комментарий")).toHaveProperty("value", "Сохранить мои решения");
   vi.mocked(api.readChecking).mockRejectedValueOnce(new ApiError(403, "forbidden", "")); fireEvent.click(screen.getByRole("button", {name: "Обновить данные"}));
   await waitFor(() => expect(screen.queryByLabelText("Итоговый комментарий")).toBeNull());
+});
+
+it("blocks checking and manual review until the policy setup reports ready", async () => {
+  grading.ready = false; page(); const start = await screen.findByRole("button", {name: "Начать проверку"});
+  expect(start.hasAttribute("disabled")).toBe(true); fireEvent.click(start);
+  expect(api.startChecking).not.toHaveBeenCalled(); expect(screen.queryByRole("button", {name: "Проверить вручную"})).toBeNull();
+});
+it("keeps an existing review mounted while evaluation setup is temporarily busy", async () => {
+  grading.ready = false; ai(); page(); await screen.findByLabelText("Итоговый комментарий");
+  expect(api.readReview).toHaveBeenCalled();
 });

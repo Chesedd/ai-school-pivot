@@ -4,10 +4,12 @@ import {batchLabels} from "./paperScanState";
 import {canRetryPaper, paperLabel} from "./paperReviewState";
 import {usePaperChecking} from "./usePaperChecking";
 import {ScanPageViewer} from "./ScanPageViewer";
+import {PaperGradingSetup} from "./PaperGradingSetup";
 import {PaperReviewPanel} from "./PaperReviewPanel";
 
 export function PaperCheckingPage(p: {batchId: string; assignmentId: string; base: string; navigate: (to: string) => void; onDirtyChange?: (dirty: boolean) => void}) {
   const {data, error, notice, busy, refresh, mutate} = usePaperChecking(p.batchId, p.assignmentId);
+  const [gradingReady, setGradingReady] = useState(false);
   const [selection, setSelection] = useState(() => new URLSearchParams(location.search).get("paper") || "");
   const [pageSelection, setPageSelection] = useState("");
   const [itemSelection, setItemSelection] = useState("");
@@ -53,8 +55,9 @@ export function PaperCheckingPage(p: {batchId: string; assignmentId: string; bas
   };
   return <>
     <header className="matching-header"><div><h2>Проверка работ</h2><small>Партия от {new Date(data.batch.created_at).toLocaleString("ru-RU")} · {batchLabels[progress.batch_status] || "Состояние уточняется"}</small></div><button className="secondary" disabled={busy} onClick={() => void refresh()}>Обновить данные</button></header>
+    <PaperGradingSetup key={p.batchId} batch={data.batch} variantIds={progress.papers.map(x => x.assigned_variant_id)} status={progress.batch_status} onReady={setGradingReady} onSaved={refresh}/>
     <div className="checking-summary"><p>Проверено: {progress.completed + progress.completed_with_review_required + progress.manual_approved} из {progress.paper_count} · В очереди: {progress.pending} · Проверяются: {progress.running} · Подтверждены: {progress.papers.filter(x => x.review_state === "approved").length}</p>
-      <div className="button-row"><button className="secondary" onClick={() => p.navigate(`${p.base}/${encodeURIComponent(p.batchId)}/publications`)}>Публикация результатов</button>{["ready_for_checking", "checking"].includes(progress.batch_status) && progress.not_started > 0 && <button disabled={busy} onClick={() => void mutate(async () => {await api.startChecking(p.batchId); await refresh(); await execute();})}>{busy ? "Проверяем…" : "Начать проверку"}</button>}
+      <div className="button-row"><button className="secondary" onClick={() => p.navigate(`${p.base}/${encodeURIComponent(p.batchId)}/publications`)}>Публикация результатов</button>{["ready_for_checking", "checking"].includes(progress.batch_status) && progress.not_started > 0 && <button disabled={busy || !gradingReady} onClick={() => void mutate(async () => {await api.startChecking(p.batchId); await refresh(); await execute();})}>{busy ? "Проверяем…" : "Начать проверку"}</button>}
         {progress.papers.some(x => x.can_execute) && <button disabled={busy} onClick={() => void mutate(execute)}>{busy ? "Проверяем…" : "Продолжить проверку"}</button>}
         <button className="secondary" onClick={() => p.navigate(`${p.base}/${encodeURIComponent(p.batchId)}/matching`)}>К распределению страниц</button>
       </div><small>Проверка выполняется группами. Очередь сохранена на сервере; её можно продолжить после возвращения.</small>
@@ -84,8 +87,8 @@ export function PaperCheckingPage(p: {batchId: string; assignmentId: string; bas
           }}/></label>)}</fieldset>}
         </> : <p>Страницы работы недоступны.</p>}
       </section>
-      {selected ? <PaperReviewPanel key={`${selected.paper_submission_id}-${selected.effective_check_run_id || "manual"}`} paper={selected} pageIds={pages.map(x => x.id)} pageId={page?.id || ""} selectedItem={itemSelection} selectedFinding={findingSelection} point={point}
-        onSelectItem={setItemSelection} onFinding={onFinding} onEvidence={setFindings} onPickPoint={beginPick} onDirtyChange={onDirtyChange} refreshProgress={refresh}/> : <section><p>В партии пока нет подтверждённых работ.</p></section>}
+      {selected && (gradingReady || selected.review_id) ? <PaperReviewPanel key={`${selected.paper_submission_id}-${selected.effective_check_run_id || "manual"}`} paper={selected} pageIds={pages.map(x => x.id)} pageId={page?.id || ""} selectedItem={itemSelection} selectedFinding={findingSelection} point={point}
+        onSelectItem={setItemSelection} onFinding={onFinding} onEvidence={setFindings} onPickPoint={beginPick} onDirtyChange={onDirtyChange} refreshProgress={refresh}/> : <section><p>{selected ? "Перед проверкой настройте оценивание выше." : "В партии пока нет подтверждённых работ."}</p></section>}
     </div>
   </>;
 }

@@ -39,7 +39,7 @@ const messages: Record<string, string> = {
   paper_batch_cancelled: "Партия отменена. Новые проверки недоступны.",
   paper_batch_has_no_papers: "В партии нет подтверждённых работ.",
   paper_checking_input_missing: "Для проверки не хватает данных работы. Обратитесь к администратору.",
-  paper_grading_policy_incomplete: "Правила оценки работы не готовы. Обратитесь к администратору.",
+  paper_grading_policy_incomplete: "Перед проверкой настройте оценивание на странице проверки работ.",
   paper_check_capacity_unavailable: "Работы ожидают свободного места в очереди. Повторная попытка не потрачена.",
   paper_check_run_not_executable: "Эта попытка уже не может выполняться. Данные обновлены.",
   paper_check_in_progress: "Работа уже проверяется. Данные обновлены.",

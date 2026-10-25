@@ -556,3 +556,278 @@ All **1,322 unit tests passed**. Integration totals: **989 passed, 4 skipped, 2 
 | 44 | Tracked status | Final delivery verifies clean tracked tree after explicit three-file audit commit. |
 | 45 | Untracked preservation | All six original untracked entries preserved; audit evidence added only under existing untracked local-backups/. |
 | 46 | Final verdict | SCANNED-PAPER WORKFLOW PRODUCTION-READINESS NOT ACCEPTED. No merge; no push. |
+
+
+---
+
+## 18. B1 resolution and final acceptance — 2026-10-25
+
+**SCANNED-PAPER WORKFLOW PRODUCTION-READINESS ACCEPTED.**
+
+Implementation and principal validation were captured on 2026-10-15; the
+interrupted follow-up was resumed and finalized on 2026-10-25, Europe/Moscow.
+
+This is a follow-up to audit commit
+`efc3c72cedd93b063bff18aaa171acf90d12827b`, on the same
+`codex/paper-full-flow-audit` branch. Sections 1–17 and their NOT ACCEPTED
+verdict above are the original audit history, preserved unchanged. This section
+records the subsequent authorized product fix and supersedes that verdict.
+The candidate commit hash is recorded in delivery; a commit cannot embed its
+own hash. No merge or push was performed.
+
+### Root cause and exact contract
+
+B1 was a missing frontend transition, not a missing persistence model. The
+teacher could confirm grouping, but neither provision frozen policies nor
+recover from `paper_grading_policy_incomplete`. The prior audit used explicit
+POSTs to copy an existing batch's policy for each represented variant, replacing
+its original instruction. That fixture/API workaround is **not used** to
+provision policies for either new acceptance batch in this resolution.
+
+The actual contract is batch/variant scoped, rather than assignment-wide:
+
+- `GET /api/assessment-core/scan-batches/{batch_id}/grading-policies` returns
+  immutable revision rows under `items`, including `id`, `assessment_variant_id`,
+  `revision`, schema/compiler/prompt versions, fingerprint, `policy`, and creation
+  time. The frontend selects the highest revision for each variant.
+- `POST /api/assessment-core/scan-batches/{batch_id}/grading-policies/{variant_id}`
+  accepts `ScanGradingPolicy` and returns the frozen row with HTTP 200. There is
+  no PUT/PATCH policy update. The same POST supports a subsequent immutable
+  revision before checking starts.
+- `PaperGradingPolicyRepository.freeze` locks the batch, requires
+  `ready_for_checking`, a represented assessment variant, exact item IDs/maxima,
+  the batch's exact original instruction, and compiler/prompt versions `1.0.0`.
+  Equivalent content replays the current revision. Different content appends a
+  revision with a supersedes pointer; a CheckRun or a non-ready batch locks writes.
+- Required DTO data: `schema_version=paper_grading_policy.v1`,
+  `original_teacher_instruction`, nonempty `assessment_items` (item ID, positive
+  `max_score`, `rubric_source`, rubric text/optional reference, partial-credit
+  policy, optional special rules), positive `total_max_score`, optional general
+  rules, grade scale (`basis=points|percent`, descending thresholds with unique
+  labels and a zero floor), optional additional context, compiler/prompt versions.
+  The total must equal the canonical item maxima. No grading default is invented.
+- Batch checking start requires policies for all represented variants; manual
+  review also requires its frozen policy. Missing data previously returned 409
+  `paper_grading_policy_incomplete`. Policies cannot be created before a batch
+  exists or before grouping is confirmed. Thus the correct production sequence
+  is fresh batch → upload/extraction/matching/grouping → evaluation setup →
+  automatic checking or manual review → publication. The prompt's literal
+  pre-batch save order is incompatible with the existing API and was not imposed.
+
+H1's strict JSON-mode HTTP adapter and all four PostgreSQL regressions remain
+unchanged in `efc3c72`. No backend source, backend tests, migrations, grade
+calculation, provenance rules, permission model, or publication behavior was
+changed in this follow-up.
+
+### Teacher UI and bounded behavior
+
+`PaperCheckingPage` now places **Оценивание** immediately before checking and
+review actions. A missing policy explains the prerequisite and exposes
+**Настроить оценивание** per represented variant. Start is disabled and a new
+manual review cannot open until every required policy is present. Existing
+reviews stay mounted while evaluation setup is busy, preserving unsaved edits.
+Existing policies show maximum score and the grade scale without recreation;
+**Изменить оценивание** uses the supported revision POST while the batch is ready.
+After checking begins, the summary remains read-only.
+
+The inline form uses existing labels, fieldsets, inputs, textareas, buttons and
+status/error primitives, with a small scoped responsive style. It collects rubric
+text and partial-credit criteria for each canonical item, scale basis, minimum
+thresholds and grade labels. Item maxima and total are read-only server data;
+instruction, schema and supported compiler/prompt versions are supplied by the
+adapter. New rubrics explicitly use `teacher_override`. Optional existing rules,
+references and context are preserved when editing. Frozen UUID ordering is
+restored to assessment task order before presenting criteria. There is no JSON
+editor, local academic storage, template library, or policy administration page.
+
+Required/length/range constraints use native controls. Explicit descending order,
+zero coverage and unique labels receive bounded client validation. Decimal
+strings are sent without converting canonical maxima to floating point. The
+server is authoritative. Structured error codes map locked state, item coverage,
+instruction/version mismatch, foreign/unrepresented variant and authorization;
+Pydantic field paths map to teacher-facing criteria/scale hints without parsing
+or displaying backend messages. Save disables the form and announces its state;
+errors use an alert associated with the form.
+
+Save refetches policies and checking progress without manual refresh. Reload
+reconstructs from backend GETs. A preflight refetch recognizes another teacher's
+new revision and shows the authoritative summary. This is not invented CAS:
+the backend has no policy expected-version token. Simultaneous requests after
+both preflights retain the existing serialized immutable-revision semantics;
+equivalent payloads replay, differing payloads append ordered revisions, and
+there is one authoritative latest revision per batch/variant. Checking freezes
+that identity. No contradictory pair of active pointers is introduced.
+
+### Fresh browser proof and authorization
+
+Evidence: `local-backups/full-flow-audit-20261015/resolution/` (preserved untracked).
+`server.py` uses real PostgreSQL, current production routes/services/storage and
+production login/session resolution; **no Principal override** is installed in
+this resolution server. Synthetic accounts/academic assignments are fixture
+setup, and deterministic matching/checking providers are doubles. This establishes
+application workflow/security behavior, not live-model quality. Legacy fixture
+batch policy rows belong to a different batch and are never read/copied to
+construct a new policy. Both new batches explicitly read back an empty policy
+list before setup. No fixture policy write occurs after the relevant assignment
+exists. All four successful policy POSTs originate from the structured UI.
+
+Final-source `browser-final-source.log` ends PASS:
+
+1. Assigned co-teacher logs in through **Вход**, opens the fresh assignment's paper
+   route, creates a batch, uploads a real two-page PDF, extracts, matches, and
+   explicitly confirms grouping. Missing-policy UX blocks checking/manual start.
+2. Opens the form; first criteria field receives focus. Invalid equal thresholds
+   produce visible validation, no HTTP write and no policy row. Correcting the
+   threshold permits a successful structured save. Both variants are configured.
+3. Two real logged-in teachers open the first missing-policy form. A saves; B's
+   stale save refetches A's authoritative row and does not create a second revision.
+4. Reload restores both policies. Checking executes, both papers are reviewed and
+   approved, selected publication succeeds, and the student logs in through the
+   normal login form. Published score is **5.00 / 10.00**, calculated/final grade
+   **5**, preserved after student reload. AI supplies draft evidence; backend
+   deterministic policy code computes the authoritative grade.
+5. Original teacher creates another fresh batch with no policies and repeats
+   intake/grouping, configuring both policies through the UI. Both papers receive
+   legal manual review/edit/approval and publication. Student sees the manual
+   summary and deterministic grade **5**. Manual CheckRun and AI revision remain
+   null. The original student publication JSON is identical after
+   later policy provisioning and manual publication.
+6. Real production-session GET/POST probes on an existing batch/variant deny
+   unrelated teacher and revoked teacher with **404**, and student with **403**.
+   Teacher and assigned co-teacher each successfully provision through UI. No
+   backend permission expansion was needed. Student DTO contains no policy model.
+7. Desktop 1440 and width 760 screenshots/DOM checks pass for form, summary and
+   student results. Visual inspection confirmed readable full-width mobile fields,
+   visible validation, reachable save/cancel and no horizontal overflow. Keyboard
+   Enter submits saves; focus-on-open, cancel focus restoration, labels, native
+   validation, form error association and busy/status feedback are covered by
+   focused tests and browser sanity. Exhaustive accessibility is not claimed.
+
+The earlier browser attempts corrected only harness assumptions: numeric display
+`10.00` rather than `10`, and waiting for real login response/cookie before
+negative probes. They are preserved, not counted as successful final runs. No
+product change was made to accommodate those assertions.
+
+Final capture: **1983 responses / 349 API responses / 0 HTTP 500s**,
+including browser assets and explicitly recorded read-only/negative probes in
+`browser-traffic.json`. No successful policy write is a fixture/API setup call.
+The entire resolution server log also includes superseded harness attempts and
+unrelated requests from existing frontend tests; it is not conflated with the
+final scenario's capture.
+
+The additional `ux-validation.log` ends PASS: every form control has a label,
+keyboard Save triggers bounded validation beside the actions, Cancel restores
+focus, and invalid input leaves no policy row. This check uses the final form
+layout. A separate attempted edit of an already-reviewed manual batch confirmed
+that batch progression correctly removes editing; it is not a form failure.
+
+Resumed browser verification on 2026-10-25 also passes the actual revision edit
+path: real teacher login → fresh batch/intake/grouping → UI-created policies →
+**Изменить оценивание** for both variants → changed grade labels → UI saves →
+backend revisions **[1, 1, 2, 2]** → reload reconstructs both new summaries.
+`edit-resume-verified.log` and `edit-resume.json` record PASS and zero HTTP 500s.
+The earlier attempt was interrupted after its first edit; another harness selector
+was corrected to use the textarea's accessible textbox name for prefilled content.
+No product change or new policy write semantics were needed. The original
+full-flow fixture mapping and complete results/traffic are additionally preserved
+under `completed-before-resume/`, because the disposable server was restarted
+for this check. Its initially stopped test PostgreSQL container was started only
+for the resumed verification and restored to stopped after completion.
+
+### Final validation and severity gate
+
+| Gate | Final result |
+|---|---|
+| New focused evaluation form tests | **13 passed**; missing/existing state, focus/cancel, valid payload, save/refetch, reload, client/server validation, denial, read-only state, concurrency, revision edit/preservation, task order. |
+| Relevant frontend set | **202 passed / 7 files**, `focused-final-source.log`; includes checking entry gating and retaining existing review during setup. |
+| Full frontend | **665 passed / 54 files**, `frontend-final-source.log`, `--maxWorkers=1`; zero failures/skips. |
+| Typecheck | `npx tsc -b --pretty false`, exit 0; `typecheck-final-source.log`. |
+| Production build | PASS; JS **608.45 kB / 163.02 kB gzip**, CSS 40.95 kB; `build-final-source.log`. Existing >500 kB advisory remains accepted; JS increase approximately 1.8%. |
+| Affected PostgreSQL | **109 passed**, `resolution-backend.xml` in the parent evidence directory: policy HTTP, checking intake, review contract, manual review. Includes the preserved four valid/invalid JSON/OpenAPI tests. |
+| Broad backend evidence retained | **2311 passed / 4 skipped / 2 baseline failures** on the earlier audit; no redundant broad rerun for frontend-only changes. |
+| Migration gates | Earlier **4 passed** retained; no schema/backend change warrants rerunning destructive migration gates. |
+| Alembic | Single head **20261013_01** verified again; no migration added/edited. |
+| Diff and history | `git diff --check` passes; follow-up retains `efc3c72`, same audit branch, no merge/push; original untracked entries preserved. |
+
+One final-source frontend attempt under concurrent browser/test load had
+**664 passed / 1 timeout** in unchanged
+`TeacherRemediationBuilderPage.test.tsx > TeacherRemediationBuilderPage C8 > supports suggested/manual lookup, add, reorder, remove, and the 20-item limit`
+(5000 ms). Its log is preserved as `frontend-final-timeout.log`; it is superseded
+by the complete one-worker pass without changing unrelated code or test limits.
+Earlier complete two-worker runs also passed; this is disclosed as runner-load
+sensitivity rather than hidden as a product fix.
+
+Baseline failures remain exactly the two documented in the broad baseline addendum:
+`tests.integration.test_execution_target_generalization_database.test_schema_metadata_remains_explicit_and_at_expected_head`
+expects obsolete `20260911_01` instead of `20261013_01`;
+`tests.integration.test_migrations.test_user_structured_names_migration_preserves_legacy_rows`
+expects IntegrityError while PostgreSQL/asyncpg returns DBAPIError wrapping
+StringDataRightTruncationError for a 101-character last name. Both reproduced on
+unmodified `bfb4a52ebfb895a04ccca2b936eba90290c9c5d1`. Reproduction evidence is
+retained rather than modifying unrelated product code. The database correctly
+rejects invalid input; neither failure masks scanned-paper correctness/security.
+
+| Severity | Open | Reassessment |
+|---|---:|---|
+| BLOCKER | **0** | B1 resolved by actual teacher UI and fresh automatic/manual browser proof. |
+| HIGH | **0** | H1 remains fixed; valid JSON passes; no valid-path 500. |
+| MEDIUM | **4** | M1 bounded linear writes; M2 histories; M3 incomplete OpenAPI; M4 remaining complete anonymous/session-switch verification scope. Real login itself now freshly passes. |
+| LOW | **3** | L1 scoped opaque-ID minimization; L2 representative UX/accessibility/30-paper intake coverage; L3 inherited baseline assertions. |
+
+Accepted debt is unchanged except B1 is now resolved: the Vite advisory, bounded
+writes/history/schema/direct-SQL hardening and explicit coverage limitations.
+No automatic grading override, retroactive recomputation, publication mutation,
+provenance/idempotency change, privacy leak or permission broadening was added.
+
+### Requested 48-field resolution ledger
+
+| # | Field | Final record |
+|---|---|---|
+| 1 | Branch | `codex/paper-full-flow-audit` |
+| 2 | Previous audit SHA | `efc3c72cedd93b063bff18aaa171acf90d12827b` |
+| 3 | Candidate SHA | Follow-up commit identity in final delivery; parent is previous audit SHA. |
+| 4 | Exact changed files | This report; `frontend/src/PaperCheckingPage.tsx`; `frontend/src/PaperCheckingPage.test.tsx`; `frontend/src/PaperGradingSetup.tsx`; `frontend/src/PaperGradingSetup.test.tsx`; `frontend/src/paperGradingApi.ts`; `frontend/src/paperScanState.ts`; `frontend/src/paperReview.css`. |
+| 5 | Root cause | Batch/variant grading prerequisite existed only as backend freeze API. |
+| 6 | Existing contract | GET list; POST freeze/revise; exact ScanGradingPolicy DTO; immutable latest revision per represented batch variant, locked by checking. |
+| 7 | UI entry | Checking page, directly after confirmed grouping and before checking/manual review. |
+| 8 | Missing-policy UX | Explicit evaluation prerequisite, per-variant setup button, blocked start/new manual review. |
+| 9 | Existing-policy UX | Concise max/scale summary; no recreation; supported revision edit before checking; read-only afterward. |
+| 10 | Form fields | Per-item rubric/partial credit, scale basis, descending minima and labels; authoritative maxima/instruction; optional existing data preserved. |
+| 11 | Validation | Native bounds plus explicit threshold constraints; structured server code/field mapping; invalid data never partially saved. |
+| 12 | Save/refetch | Official POST, authoritative policy GET and checking refresh; no manual reload required. |
+| 13 | Reload | Both policy rows reconstruct from backend; browser proves continuation. No local academic storage. |
+| 14 | Concurrency | Stale B preflight refetches A; backend serialized immutable revisions/replay remain authoritative; no CAS invented. |
+| 15 | Authorization | Teacher/co-teacher allowed; unrelated/revoked teacher 404; student 403 on GET/POST with real sessions. |
+| 16 | Co-teacher | Provisioned both policies and completed automatic path through UI. |
+| 17 | Determinism | Backend calculates totals/percentage/grade from frozen policy; student sees 5.00/10.00, grade 5. |
+| 18 | Immutable publications | Original student publication unchanged after subsequent UI policies/manual publication; no frontend historic recomputation. |
+| 19 | JSON regression | Four existing PostgreSQL HTTP/OpenAPI tests pass unchanged. |
+| 20 | Fresh UI provisioning | PASS; initially empty rows; all four successful POSTs originate in browser forms. |
+| 21 | Happy path | PASS real login, batch/PDF/extraction/matching/grouping/setup/check/review/approve/publish/student reload. |
+| 22 | Manual path | PASS separate fresh batch, UI policies, legal manual review, deterministic grade, publication/student result; null AI/CheckRun. |
+| 23 | Invalid policy | PASS equal thresholds rejected visibly without write/row; corrected UI save succeeds. |
+| 24 | Captured traffic | 1983 responses, 349 API responses, **0 HTTP 500**. |
+| 25 | Focused frontend | 13 policy form tests; relevant set **202 passed**. |
+| 26 | Full frontend | **665 passed / 54 files**. |
+| 27 | Typecheck | PASS. |
+| 28 | Production build | PASS, existing advisory retained. |
+| 29 | Affected backend | **109 passed**. |
+| 30 | Broad evidence | Retained **2311 passed / 4 skipped / 2 baseline failures**. |
+| 31 | Baseline failures | Exact two nodes/errors above; reproduced on original base, unrelated and non-masking. |
+| 32 | Migration gates | Prior **4 passed** retained; no schema change. |
+| 33 | Alembic | **20261013_01**, single head. |
+| 34 | Student privacy | PASS; policy administration model absent from student result; existing allowlist and access checks unchanged. |
+| 35 | Desktop UX | 1440 screenshot and DOM width checks, visually inspected. |
+| 36 | 760 UX | Single-column setup, readable controls and reachable actions, no horizontal overflow; visually inspected. |
+| 37 | Accessibility | Labels, first-field focus, keyboard save, cancel focus restore, error association, visible text/status/busy state. Representative sanity. |
+| 38 | BLOCKER | **0**. |
+| 39 | HIGH | **0**. |
+| 40 | MEDIUM | **4**. |
+| 41 | LOW | **3**. |
+| 42 | Accepted debt | Existing advisory and M1–M4/L1–L3 plus previously documented bounded hardening/coverage; B1 resolved. |
+| 43 | Product code | YES, narrow evaluation setup and checking prerequisite UX. |
+| 44 | Backend changes | NONE in follow-up; previous strict JSON HTTP fix retained. |
+| 45 | Frontend changes | Setup component/API adapter, checking gate, task-order restoration, responsive styles, bounded error message and focused tests. |
+| 46 | Tracked status | Follow-up commit and final clean tracked-tree verification recorded in delivery. |
+| 47 | Untracked preservation | `-U`, `.test.env`, `backend/pr11-units.log`, `backups/`, `frontend/pr3-acceptance.html`, `local-backups/` all preserved. New evidence stays under local-backups. |
+| 48 | FINAL verdict | **SCANNED-PAPER WORKFLOW PRODUCTION-READINESS ACCEPTED**. No merge. No push. |

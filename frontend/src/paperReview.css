@@ -42,3 +42,12 @@
   .checking-viewer .matching-image-frame {--review-frame-height:clamp(24rem,65vh,45rem)}
   .review-actions {position:static}
 }
+
+.grading-setup {overflow-wrap:anywhere}
+.grading-form {grid-template-columns:minmax(0,2fr) minmax(0,1fr); align-items:start}
+.grading-form>h4,.grading-form>p,.grading-form>.button-row {grid-column:1/-1; margin:0}
+.grading-form fieldset {min-width:0; display:grid; gap:1rem; border:1px solid var(--border); border-radius:var(--radius)}
+.grading-form label {margin:.65rem 0}
+.grading-form input,.grading-form select,.grading-form textarea {width:100%; min-width:0; box-sizing:border-box}
+.grading-form .button-row {flex-wrap:wrap}
+@media(max-width:800px) {.grading-form {grid-template-columns:minmax(0,1fr)}}
